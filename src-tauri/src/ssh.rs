@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use ssh2::Session;
+use ssh2::{Session, Sftp};
 use tauri::State;
 use tokio::sync::{mpsc, oneshot};
 
@@ -50,12 +50,33 @@ pub struct ConnectResult {
     pub home: String,
 }
 
+/// One file or folder in a directory listing.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEntry {
+    pub name: String,
+    /// Absolute path on the server.
+    pub path: String,
+    pub size: u64,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    /// Last-modified time as a Unix timestamp (seconds), if known.
+    pub modified: Option<u64>,
+    /// Unix permission string, e.g. "drwxr-xr-x".
+    pub permissions: String,
+}
+
 /// A unit of work for the SSH worker thread.
 pub enum Req {
     /// Resolve a path to its absolute form (used to discover the home dir).
     Canonicalize {
         path: String,
         resp: oneshot::Sender<Result<String, String>>,
+    },
+    /// List the contents of a directory.
+    ListDir {
+        path: String,
+        resp: oneshot::Sender<Result<Vec<FileEntry>, String>>,
     },
     /// Close the connection and stop the worker.
     Disconnect,
@@ -142,6 +163,68 @@ fn establish_session(params: ConnectParams) -> Result<Session, String> {
     Ok(session)
 }
 
+/// Join a Unix-style directory path with a child name, avoiding double slashes.
+fn join_unix(dir: &str, name: &str) -> String {
+    if dir.ends_with('/') {
+        format!("{dir}{name}")
+    } else {
+        format!("{dir}/{name}")
+    }
+}
+
+/// Render Unix permission bits as a string like "drwxr-xr-x".
+fn format_permissions(perm: u32) -> String {
+    let file_type = match perm & 0o170000 {
+        0o040000 => 'd',
+        0o120000 => 'l',
+        0o010000 => 'p',
+        0o140000 => 's',
+        0o020000 => 'c',
+        0o060000 => 'b',
+        _ => '-',
+    };
+    let mut s = String::with_capacity(10);
+    s.push(file_type);
+    for shift in [6u32, 3, 0] {
+        let bits = (perm >> shift) & 0o7;
+        s.push(if bits & 0o4 != 0 { 'r' } else { '-' });
+        s.push(if bits & 0o2 != 0 { 'w' } else { '-' });
+        s.push(if bits & 0o1 != 0 { 'x' } else { '-' });
+    }
+    s
+}
+
+/// Read a directory into a list of [`FileEntry`], skipping "." and "..".
+fn read_dir_entries(sftp: &Sftp, path: &str) -> Result<Vec<FileEntry>, String> {
+    let raw = sftp
+        .readdir(Path::new(path))
+        .map_err(|_| error::sftp_error("폴더를 여는"))?;
+
+    let mut entries = Vec::with_capacity(raw.len());
+    for (child, stat) in raw {
+        // Use only the final path component as the display name; build the full
+        // path ourselves so we don't depend on how readdir formats it.
+        let name = match child.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
+            None => continue,
+        };
+        if name == "." || name == ".." {
+            continue;
+        }
+        let perm = stat.perm.unwrap_or(0);
+        entries.push(FileEntry {
+            path: join_unix(path, &name),
+            name,
+            size: stat.size.unwrap_or(0),
+            is_dir: stat.is_dir(),
+            is_symlink: (perm & 0o170000) == 0o120000,
+            modified: stat.mtime,
+            permissions: format_permissions(perm),
+        });
+    }
+    Ok(entries)
+}
+
 /// The worker thread body: owns the session + SFTP handle for its whole life.
 fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>) {
     // Open the SFTP subsystem once and reuse it for every request.
@@ -152,6 +235,9 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>) {
             while let Some(req) = rx.blocking_recv() {
                 match req {
                     Req::Canonicalize { resp, .. } => {
+                        let _ = resp.send(Err(error::sftp_error("파일 작업을 준비하는")));
+                    }
+                    Req::ListDir { resp, .. } => {
                         let _ = resp.send(Err(error::sftp_error("파일 작업을 준비하는")));
                     }
                     Req::Disconnect => break,
@@ -169,6 +255,9 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>) {
                     .map(|p| p.to_string_lossy().into_owned())
                     .map_err(|_| error::sftp_error("경로를 확인하는"));
                 let _ = resp.send(result);
+            }
+            Req::ListDir { path, resp } => {
+                let _ = resp.send(read_dir_entries(&sftp, &path));
             }
             Req::Disconnect => break,
         }
@@ -210,6 +299,20 @@ pub async fn connect(
         .map_err(|_| error::disconnected_error())??;
 
     Ok(ConnectResult { home })
+}
+
+/// List the contents of a directory on the server.
+#[tauri::command]
+pub async fn list_dir(
+    state: State<'_, SessionManager>,
+    path: String,
+) -> Result<Vec<FileEntry>, String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::ListDir {
+        path,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
 }
 
 /// Close the current connection, if any.

@@ -8,7 +8,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionManager::new())
-        .invoke_handler(tauri::generate_handler![ssh::connect, ssh::disconnect])
+        .invoke_handler(tauri::generate_handler![
+            ssh::connect,
+            ssh::list_dir,
+            ssh::disconnect
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
