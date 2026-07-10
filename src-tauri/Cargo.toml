@@ -17,3 +17,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Blocking SSH/SFTP client. On Windows/MSVC this builds against the WinCNG
+# crypto backend, so no OpenSSL/Perl toolchain is required.
+ssh2 = "0.9"
+# Async channels used to hand work to the blocking SSH worker thread.
+tokio = { version = "1", features = ["sync"] }
