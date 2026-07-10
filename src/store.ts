@@ -15,6 +15,9 @@ export interface Transfer {
 /** Which top-level screen is shown. */
 export type Screen = "connect" | "files";
 
+/** File-listing layout: compact list, detailed table, or large icons. */
+export type ViewMode = "list" | "details" | "grid";
+
 /** Details about the live connection, shown in the file manager header. */
 export interface ConnectionInfo {
   host: string;
@@ -47,6 +50,8 @@ interface AppState {
   filesError: string | null;
   /** Whether dot-files are shown in the listing. */
   showHidden: boolean;
+  /** Current file-listing layout. */
+  viewMode: ViewMode;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: ConnectionInfo) => void;
@@ -58,6 +63,8 @@ interface AppState {
   loadDir: (path: string) => Promise<void>;
   /** Toggle visibility of dot-files. */
   toggleHidden: () => void;
+  /** Change the file-listing layout. */
+  setViewMode: (mode: ViewMode) => void;
 
   // --- Transfers ---
   transfers: Transfer[];
@@ -77,6 +84,7 @@ export const useAppStore = create<AppState>((set) => ({
   filesLoading: false,
   filesError: null,
   showHidden: false,
+  viewMode: "details",
 
   enterFiles: (connection) =>
     set({
@@ -122,6 +130,7 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
+  setViewMode: (mode) => set({ viewMode: mode }),
 
   transfers: [],
   startTransfer: (t) =>

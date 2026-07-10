@@ -12,12 +12,12 @@ import {
   TransferProgress,
   upload,
 } from "../api";
-import { useAppStore } from "../store";
-import { formatDate, formatSize } from "../lib/format";
+import { useAppStore, ViewMode } from "../store";
 import { baseName, breadcrumbs, joinPath, parentPath } from "../lib/path";
 import { ConfirmDialog, PromptDialog } from "../components/Modal";
 import ContextMenu, { MenuItem } from "../components/ContextMenu";
 import TransfersPanel from "../components/TransfersPanel";
+import FileView from "../components/FileView";
 
 export default function FilesScreen() {
   const connection = useAppStore((s) => s.connection);
@@ -26,8 +26,10 @@ export default function FilesScreen() {
   const loading = useAppStore((s) => s.filesLoading);
   const error = useAppStore((s) => s.filesError);
   const showHidden = useAppStore((s) => s.showHidden);
+  const viewMode = useAppStore((s) => s.viewMode);
   const loadDir = useAppStore((s) => s.loadDir);
   const toggleHidden = useAppStore((s) => s.toggleHidden);
+  const setViewMode = useAppStore((s) => s.setViewMode);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
   const startTransfer = useAppStore((s) => s.startTransfer);
   const updateTransfer = useAppStore((s) => s.updateTransfer);
@@ -296,6 +298,8 @@ export default function FilesScreen() {
           />
           숨김파일
         </label>
+
+        <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -312,50 +316,12 @@ export default function FilesScreen() {
               : "표시할 파일이 없어요. (숨김파일이 숨겨져 있어요)"}
           </CenterMessage>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-ink-800/95 text-xs text-slate-400 backdrop-blur">
-              <tr className="border-b border-ink-700/60">
-                <th className="px-4 py-2 text-left font-medium">이름</th>
-                <th className="w-28 px-4 py-2 text-right font-medium">크기</th>
-                <th className="w-40 px-4 py-2 text-left font-medium">수정일</th>
-                <th className="w-32 px-4 py-2 text-left font-medium">권한</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleEntries.map((entry) => (
-                <tr
-                  key={entry.path}
-                  onDoubleClick={() => openEntry(entry.path, entry.isDir)}
-                  onContextMenu={(e) => openMenu(e, entry)}
-                  className={`border-b border-ink-800/60 hover:bg-ink-800/60 ${
-                    entry.isDir ? "cursor-pointer" : ""
-                  }`}
-                >
-                  <td className="px-4 py-1.5">
-                    <div className="flex items-center gap-2">
-                      <FileIcon isDir={entry.isDir} isSymlink={entry.isSymlink} />
-                      <span
-                        className={`truncate ${
-                          entry.isDir ? "text-slate-100" : "text-slate-300"
-                        }`}
-                      >
-                        {entry.name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-1.5 text-right tabular-nums text-slate-400">
-                    {formatSize(entry.size, entry.isDir)}
-                  </td>
-                  <td className="px-4 py-1.5 text-slate-400">
-                    {formatDate(entry.modified)}
-                  </td>
-                  <td className="px-4 py-1.5 font-mono text-xs text-slate-500">
-                    {entry.permissions}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <FileView
+            entries={visibleEntries}
+            viewMode={viewMode}
+            onOpen={(entry) => openEntry(entry.path, entry.isDir)}
+            onContextMenu={openMenu}
+          />
         )}
       </div>
 
@@ -453,32 +419,81 @@ function ToolButton({
   );
 }
 
-function FileIcon({ isDir, isSymlink }: { isDir: boolean; isSymlink: boolean }) {
-  if (isDir) {
-    return (
-      <svg
-        className="h-4 w-4 shrink-0 text-sky-400"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-      >
-        <path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z" />
-      </svg>
-    );
-  }
+/** Segmented control to switch between list / details / grid layouts. */
+function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode;
+  onChange: (mode: ViewMode) => void;
+}) {
+  const options: { mode: ViewMode; label: string; icon: React.ReactNode }[] = [
+    {
+      mode: "list",
+      label: "목록",
+      icon: (
+        <>
+          <line x1="8" y1="6" x2="21" y2="6" />
+          <line x1="8" y1="12" x2="21" y2="12" />
+          <line x1="8" y1="18" x2="21" y2="18" />
+          <line x1="3" y1="6" x2="3.01" y2="6" />
+          <line x1="3" y1="12" x2="3.01" y2="12" />
+          <line x1="3" y1="18" x2="3.01" y2="18" />
+        </>
+      ),
+    },
+    {
+      mode: "details",
+      label: "자세히",
+      icon: (
+        <>
+          <rect x="3" y="4" width="18" height="16" rx="1" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+          <line x1="9" y1="4" x2="9" y2="20" />
+        </>
+      ),
+    },
+    {
+      mode: "grid",
+      label: "큰 아이콘",
+      icon: (
+        <>
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </>
+      ),
+    },
+  ];
+
   return (
-    <svg
-      className={`h-4 w-4 shrink-0 ${
-        isSymlink ? "text-teal-400" : "text-slate-500"
-      }`}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6" />
-    </svg>
+    <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-ink-900 p-0.5">
+      {options.map((opt) => (
+        <button
+          key={opt.mode}
+          onClick={() => onChange(opt.mode)}
+          title={opt.label}
+          aria-label={opt.label}
+          className={`rounded-md p-1.5 ${
+            value === opt.mode
+              ? "bg-ink-700 text-white"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <svg
+            className="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            {opt.icon}
+          </svg>
+        </button>
+      ))}
+    </div>
   );
 }
