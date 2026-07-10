@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   deletePath,
@@ -9,10 +10,11 @@ import {
   mkdir,
   rename,
   TransferProgress,
+  upload,
 } from "../api";
 import { useAppStore } from "../store";
 import { formatDate, formatSize } from "../lib/format";
-import { breadcrumbs, joinPath, parentPath } from "../lib/path";
+import { baseName, breadcrumbs, joinPath, parentPath } from "../lib/path";
 import { ConfirmDialog, PromptDialog } from "../components/Modal";
 import ContextMenu, { MenuItem } from "../components/ContextMenu";
 import TransfersPanel from "../components/TransfersPanel";
@@ -46,6 +48,7 @@ export default function FilesScreen() {
     onConfirm: (value: string) => void;
   } | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Load the starting directory on entry.
   useEffect(() => {
@@ -69,6 +72,45 @@ export default function FilesScreen() {
     const t = setTimeout(() => setOpError(null), 5000);
     return () => clearTimeout(t);
   }, [opError]);
+
+  // OS file drag-and-drop uploads into the current directory.
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      const p = event.payload;
+      if (p.type === "enter" || p.type === "over") setIsDragging(true);
+      else if (p.type === "leave") setIsDragging(false);
+      else if (p.type === "drop") {
+        setIsDragging(false);
+        void handleDrop(p.paths);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Upload each dropped local file into the current directory. */
+  async function handleDrop(paths: string[]) {
+    // Read the path fresh so the once-registered listener isn't stale.
+    const dir = useAppStore.getState().currentPath;
+    for (const local of paths) {
+      const name = baseName(local);
+      const id = crypto.randomUUID();
+      startTransfer({ id, name, kind: "upload", total: 0 });
+      try {
+        await upload(id, local, joinPath(dir, name));
+        finishTransfer(id);
+      } catch (err) {
+        finishTransfer(
+          id,
+          typeof err === "string" ? err : "업로드에 실패했어요."
+        );
+      }
+    }
+    // Refresh if we're still in the directory we uploaded into.
+    if (useAppStore.getState().currentPath === dir) await loadDir(dir);
+  }
 
   const crumbs = useMemo(() => breadcrumbs(currentPath), [currentPath]);
   const visibleEntries = useMemo(
@@ -305,6 +347,19 @@ export default function FilesScreen() {
           </table>
         )}
       </div>
+
+      {isDragging && (
+        <div className="pointer-events-none fixed inset-0 z-20 flex items-center justify-center bg-sky-950/60 backdrop-blur-sm">
+          <div className="rounded-2xl border-2 border-dashed border-sky-400 px-10 py-8 text-center">
+            <div className="text-lg font-medium text-sky-200">
+              여기에 놓으면 업로드돼요
+            </div>
+            <div className="mt-1 text-sm text-sky-300/80">
+              현재 폴더에 파일이 올라갑니다
+            </div>
+          </div>
+        </div>
+      )}
 
       {opError && (
         <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-red-500/40 bg-red-950/90 px-4 py-2.5 text-sm text-red-200 shadow-xl">

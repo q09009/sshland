@@ -12,6 +12,7 @@ pub fn run() {
             ssh::connect,
             ssh::list_dir,
             ssh::download,
+            ssh::upload,
             ssh::rename,
             ssh::mkdir,
             ssh::delete,

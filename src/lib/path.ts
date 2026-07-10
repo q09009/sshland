@@ -9,6 +9,12 @@ export function parentPath(p: string): string {
   return trimmed.slice(0, idx);
 }
 
+/** The final component of a path, handling both / and \ separators. */
+export function baseName(p: string): string {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : p;
+}
+
 /** Join a directory path with a child name (Unix-style). */
 export function joinPath(dir: string, name: string): string {
   return dir.endsWith("/") ? `${dir}${name}` : `${dir}/${name}`;

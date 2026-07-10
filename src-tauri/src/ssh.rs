@@ -96,6 +96,13 @@ pub enum Req {
         local_path: String,
         resp: oneshot::Sender<Result<(), String>>,
     },
+    /// Upload a local file to a remote path, emitting progress events.
+    Upload {
+        id: String,
+        local_path: String,
+        remote_path: String,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
     /// Rename/move a remote entry.
     Rename {
         from: String,
@@ -130,6 +137,10 @@ fn reply_err(req: Req, msg: String) -> bool {
             true
         }
         Req::Download { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::Upload { resp, .. } => {
             let _ = resp.send(Err(msg));
             true
         }
@@ -331,6 +342,52 @@ fn download_file(
     Ok(())
 }
 
+/// Stream a local file up to the server, emitting throttled progress events.
+fn upload_file(
+    sftp: &Sftp,
+    app: &AppHandle,
+    id: &str,
+    local: &str,
+    remote: &str,
+) -> Result<(), String> {
+    let meta = std::fs::metadata(local)
+        .map_err(|_| "업로드할 파일을 열 수 없어요.".to_string())?;
+    if meta.is_dir() {
+        return Err("폴더는 업로드할 수 없어요. 파일만 올릴 수 있어요.".to_string());
+    }
+    let total = meta.len();
+
+    let mut local_file =
+        File::open(local).map_err(|_| "업로드할 파일을 열 수 없어요.".to_string())?;
+    let mut remote_file = sftp
+        .create(Path::new(remote))
+        .map_err(|_| error::sftp_error("파일을 업로드하는"))?;
+
+    let mut buf = [0u8; 32 * 1024];
+    let mut transferred = 0u64;
+    let mut last_emit = Instant::now();
+
+    loop {
+        let n = local_file
+            .read(&mut buf)
+            .map_err(|_| "업로드할 파일을 읽는 중 문제가 발생했어요.".to_string())?;
+        if n == 0 {
+            break;
+        }
+        remote_file
+            .write_all(&buf[..n])
+            .map_err(|_| error::sftp_error("파일을 업로드하는"))?;
+        transferred += n as u64;
+
+        if last_emit.elapsed() >= Duration::from_millis(100) {
+            emit_progress(app, id, transferred, total);
+            last_emit = Instant::now();
+        }
+    }
+    emit_progress(app, id, transferred, total);
+    Ok(())
+}
+
 fn emit_progress(app: &AppHandle, id: &str, transferred: u64, total: u64) {
     let _ = app.emit(
         "transfer-progress",
@@ -403,6 +460,14 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>, app: AppH
                 resp,
             } => {
                 let _ = resp.send(download_file(&sftp, &app, &id, &remote_path, &local_path));
+            }
+            Req::Upload {
+                id,
+                local_path,
+                remote_path,
+                resp,
+            } => {
+                let _ = resp.send(upload_file(&sftp, &app, &id, &local_path, &remote_path));
             }
             Req::Rename { from, to, resp } => {
                 let result = sftp
@@ -497,6 +562,24 @@ pub async fn download(
         id,
         remote_path,
         local_path,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Upload a local file to a directory on the server.
+#[tauri::command]
+pub async fn upload(
+    state: State<'_, SessionManager>,
+    id: String,
+    local_path: String,
+    remote_path: String,
+) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::Upload {
+        id,
+        local_path,
+        remote_path,
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?
