@@ -34,6 +34,8 @@ interface AppState {
   entries: FileEntry[];
   filesLoading: boolean;
   filesError: string | null;
+  /** Whether dot-files are shown in the listing. */
+  showHidden: boolean;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: ConnectionInfo) => void;
@@ -43,6 +45,8 @@ interface AppState {
   clearNotice: () => void;
   /** Load (or reload) a directory and make it the current one. */
   loadDir: (path: string) => Promise<void>;
+  /** Toggle visibility of dot-files. */
+  toggleHidden: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -54,6 +58,7 @@ export const useAppStore = create<AppState>((set) => ({
   entries: [],
   filesLoading: false,
   filesError: null,
+  showHidden: false,
 
   enterFiles: (connection) =>
     set({
@@ -97,4 +102,6 @@ export const useAppStore = create<AppState>((set) => ({
       );
     }
   },
+
+  toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
 }));

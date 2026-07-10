@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { disconnect } from "../api";
 import { useAppStore } from "../store";
 import { formatDate, formatSize } from "../lib/format";
+import { breadcrumbs, parentPath } from "../lib/path";
 
 export default function FilesScreen() {
   const connection = useAppStore((s) => s.connection);
@@ -9,7 +10,9 @@ export default function FilesScreen() {
   const entries = useAppStore((s) => s.entries);
   const loading = useAppStore((s) => s.filesLoading);
   const error = useAppStore((s) => s.filesError);
+  const showHidden = useAppStore((s) => s.showHidden);
   const loadDir = useAppStore((s) => s.loadDir);
+  const toggleHidden = useAppStore((s) => s.toggleHidden);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
 
   // Load the starting directory on entry.
@@ -17,6 +20,12 @@ export default function FilesScreen() {
     if (connection) loadDir(connection.home);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const crumbs = useMemo(() => breadcrumbs(currentPath), [currentPath]);
+  const visibleEntries = useMemo(
+    () => (showHidden ? entries : entries.filter((e) => !e.name.startsWith("."))),
+    [entries, showHidden]
+  );
 
   async function handleDisconnect() {
     try {
@@ -26,15 +35,18 @@ export default function FilesScreen() {
     }
   }
 
+  function openEntry(path: string, isDir: boolean) {
+    if (isDir) loadDir(path);
+  }
+
+  const atRoot = currentPath === "/";
+
   return (
     <div className="flex h-full flex-col bg-ink-900 text-slate-100">
       <header className="flex items-center justify-between gap-3 border-b border-ink-700/60 bg-ink-800 px-4 py-2.5">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">
-            {connection?.username}@{connection?.host}
-          </p>
-          <p className="truncate text-xs text-slate-400">{currentPath}</p>
-        </div>
+        <p className="truncate text-sm font-medium">
+          {connection?.username}@{connection?.host}
+        </p>
         <button
           onClick={handleDisconnect}
           className="shrink-0 rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-slate-300 hover:border-red-500/50 hover:text-red-300"
@@ -43,6 +55,55 @@ export default function FilesScreen() {
         </button>
       </header>
 
+      {/* Toolbar: navigation buttons + breadcrumb + hidden toggle */}
+      <div className="flex items-center gap-2 border-b border-ink-700/60 bg-ink-800/60 px-3 py-2">
+        <ToolButton
+          label="상위 폴더"
+          disabled={atRoot}
+          onClick={() => loadDir(parentPath(currentPath))}
+        >
+          <path d="M12 19V6M5 12l7-7 7 7" />
+        </ToolButton>
+        <ToolButton
+          label="홈"
+          onClick={() => connection && loadDir(connection.home)}
+        >
+          <path d="M3 11l9-8 9 8M5 10v10h14V10" />
+        </ToolButton>
+        <ToolButton label="새로고침" onClick={() => loadDir(currentPath)}>
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+          <path d="M21 3v5h-5" />
+        </ToolButton>
+
+        <nav className="mx-1 flex min-w-0 flex-1 items-center overflow-x-auto whitespace-nowrap text-sm">
+          {crumbs.map((crumb, i) => (
+            <span key={crumb.path} className="flex items-center">
+              {i > 0 && <span className="mx-0.5 text-slate-600">/</span>}
+              <button
+                onClick={() => loadDir(crumb.path)}
+                className={`rounded px-1.5 py-0.5 hover:bg-ink-700 ${
+                  i === crumbs.length - 1
+                    ? "font-medium text-slate-100"
+                    : "text-slate-400"
+                }`}
+              >
+                {crumb.name === "/" ? "루트" : crumb.name}
+              </button>
+            </span>
+          ))}
+        </nav>
+
+        <label className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:text-slate-200">
+          <input
+            type="checkbox"
+            checked={showHidden}
+            onChange={toggleHidden}
+            className="accent-sky-600"
+          />
+          숨김파일
+        </label>
+      </div>
+
       <div className="min-h-0 flex-1 overflow-auto">
         {loading ? (
           <CenterMessage>불러오는 중…</CenterMessage>
@@ -50,8 +111,12 @@ export default function FilesScreen() {
           <CenterMessage>
             <span className="text-red-300">{error}</span>
           </CenterMessage>
-        ) : entries.length === 0 ? (
-          <CenterMessage>이 폴더는 비어 있어요.</CenterMessage>
+        ) : visibleEntries.length === 0 ? (
+          <CenterMessage>
+            {entries.length === 0
+              ? "이 폴더는 비어 있어요."
+              : "표시할 파일이 없어요. (숨김파일이 숨겨져 있어요)"}
+          </CenterMessage>
         ) : (
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-ink-800/95 text-xs text-slate-400 backdrop-blur">
@@ -63,10 +128,13 @@ export default function FilesScreen() {
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {visibleEntries.map((entry) => (
                 <tr
                   key={entry.path}
-                  className="border-b border-ink-800/60 hover:bg-ink-800/60"
+                  onDoubleClick={() => openEntry(entry.path, entry.isDir)}
+                  className={`border-b border-ink-800/60 hover:bg-ink-800/60 ${
+                    entry.isDir ? "cursor-pointer" : ""
+                  }`}
                 >
                   <td className="px-4 py-1.5">
                     <div className="flex items-center gap-2">
@@ -107,6 +175,40 @@ function CenterMessage({ children }: { children: React.ReactNode }) {
     <div className="flex h-full items-center justify-center text-sm text-slate-500">
       {children}
     </div>
+  );
+}
+
+function ToolButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:bg-ink-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+    >
+      <svg
+        className="h-4 w-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {children}
+      </svg>
+    </button>
   );
 }
 
