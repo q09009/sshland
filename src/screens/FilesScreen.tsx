@@ -66,6 +66,17 @@ export default function FilesScreen() {
     };
   }, [updateTransfer]);
 
+  // Return to the connect screen if the backend reports the link dropped.
+  useEffect(() => {
+    const unlisten = listen("connection-lost", () => {
+      void disconnect().catch(() => {});
+      returnToConnect("서버와의 연결이 끊어졌어요. 다시 접속해주세요.");
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [returnToConnect]);
+
   // Auto-clear the operation error banner.
   useEffect(() => {
     if (!opError) return;

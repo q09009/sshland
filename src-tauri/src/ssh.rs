@@ -236,7 +236,39 @@ fn establish_session(params: ConnectParams) -> Result<Session, String> {
     if !session.authenticated() {
         return Err(error::auth_error());
     }
+
+    // Enable keepalives so we can probe whether the link is still alive.
+    session.set_keepalive(true, 30);
     Ok(session)
+}
+
+/// Send a request's result to its caller, detecting a dropped connection.
+///
+/// On error we probe the link with a cheap SFTP round-trip (`realpath`). If
+/// that fails too, the connection is gone, so we notify the frontend and signal
+/// the worker to stop. Returns `true` when the worker should break its loop.
+fn send_and_check<T>(
+    sftp: &Sftp,
+    app: &AppHandle,
+    result: Result<T, String>,
+    resp: oneshot::Sender<Result<T, String>>,
+) -> bool {
+    match result {
+        Ok(value) => {
+            let _ = resp.send(Ok(value));
+            false
+        }
+        Err(msg) => {
+            if sftp.realpath(Path::new(".")).is_err() {
+                let _ = app.emit("connection-lost", ());
+                let _ = resp.send(Err(error::disconnected_error()));
+                true
+            } else {
+                let _ = resp.send(Err(msg));
+                false
+            }
+        }
+    }
 }
 
 /// Join a Unix-style directory path with a child name, avoiding double slashes.
@@ -442,16 +474,19 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>, app: AppH
     };
 
     while let Some(req) = rx.blocking_recv() {
-        match req {
+        // Each arm computes a result, then hands it to `send_and_check`, which
+        // replies to the caller and reports whether the link has dropped.
+        let dropped = match req {
             Req::Canonicalize { path, resp } => {
                 let result = sftp
                     .realpath(Path::new(&path))
                     .map(|p| p.to_string_lossy().into_owned())
                     .map_err(|_| error::sftp_error("경로를 확인하는"));
-                let _ = resp.send(result);
+                send_and_check(&sftp, &app, result, resp)
             }
             Req::ListDir { path, resp } => {
-                let _ = resp.send(read_dir_entries(&sftp, &path));
+                let result = read_dir_entries(&sftp, &path);
+                send_and_check(&sftp, &app, result, resp)
             }
             Req::Download {
                 id,
@@ -459,7 +494,8 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>, app: AppH
                 local_path,
                 resp,
             } => {
-                let _ = resp.send(download_file(&sftp, &app, &id, &remote_path, &local_path));
+                let result = download_file(&sftp, &app, &id, &remote_path, &local_path);
+                send_and_check(&sftp, &app, result, resp)
             }
             Req::Upload {
                 id,
@@ -467,19 +503,20 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>, app: AppH
                 remote_path,
                 resp,
             } => {
-                let _ = resp.send(upload_file(&sftp, &app, &id, &local_path, &remote_path));
+                let result = upload_file(&sftp, &app, &id, &local_path, &remote_path);
+                send_and_check(&sftp, &app, result, resp)
             }
             Req::Rename { from, to, resp } => {
                 let result = sftp
                     .rename(Path::new(&from), Path::new(&to), None)
                     .map_err(|_| error::sftp_error("이름을 바꾸는"));
-                let _ = resp.send(result);
+                send_and_check(&sftp, &app, result, resp)
             }
             Req::Mkdir { path, resp } => {
                 let result = sftp
                     .mkdir(Path::new(&path), 0o755)
                     .map_err(|_| error::sftp_error("폴더를 만드는"));
-                let _ = resp.send(result);
+                send_and_check(&sftp, &app, result, resp)
             }
             Req::Delete {
                 path,
@@ -492,9 +529,12 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>, app: AppH
                     sftp.unlink(Path::new(&path))
                         .map_err(|_| error::sftp_error("파일을 삭제하는"))
                 };
-                let _ = resp.send(result);
+                send_and_check(&sftp, &app, result, resp)
             }
             Req::Disconnect => break,
+        };
+        if dropped {
+            break;
         }
     }
 
