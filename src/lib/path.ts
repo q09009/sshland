@@ -9,6 +9,11 @@ export function parentPath(p: string): string {
   return trimmed.slice(0, idx);
 }
 
+/** Join a directory path with a child name (Unix-style). */
+export function joinPath(dir: string, name: string): string {
+  return dir.endsWith("/") ? `${dir}${name}` : `${dir}/${name}`;
+}
+
 export interface Crumb {
   name: string;
   path: string;

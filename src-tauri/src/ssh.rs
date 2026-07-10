@@ -6,15 +6,16 @@
 //! blocking network work off the UI thread and sidesteps `ssh2`'s borrow/`Send`
 //! constraints (the `Session` and `Sftp` handles never leave the worker).
 
-use std::io;
+use std::fs::File;
+use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use ssh2::{Session, Sftp};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error;
@@ -66,6 +67,16 @@ pub struct FileEntry {
     pub permissions: String,
 }
 
+/// Progress update for an in-flight file transfer, streamed to the frontend
+/// as a `transfer-progress` event.
+#[derive(Serialize, Clone)]
+struct TransferProgress {
+    /// Frontend-supplied id identifying this transfer.
+    id: String,
+    transferred: u64,
+    total: u64,
+}
+
 /// A unit of work for the SSH worker thread.
 pub enum Req {
     /// Resolve a path to its absolute form (used to discover the home dir).
@@ -78,8 +89,64 @@ pub enum Req {
         path: String,
         resp: oneshot::Sender<Result<Vec<FileEntry>, String>>,
     },
+    /// Download a remote file to a local path, emitting progress events.
+    Download {
+        id: String,
+        remote_path: String,
+        local_path: String,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
+    /// Rename/move a remote entry.
+    Rename {
+        from: String,
+        to: String,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
+    /// Create a new directory.
+    Mkdir {
+        path: String,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
+    /// Delete a file, or a directory (recursively).
+    Delete {
+        path: String,
+        is_dir: bool,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
     /// Close the connection and stop the worker.
     Disconnect,
+}
+
+/// Reply to a request with an error. Returns `false` for `Disconnect` (a
+/// signal that the worker should stop).
+fn reply_err(req: Req, msg: String) -> bool {
+    match req {
+        Req::Canonicalize { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::ListDir { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::Download { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::Rename { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::Mkdir { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::Delete { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::Disconnect => false,
+    }
 }
 
 /// Shared state: the sender half of the channel to the current worker, if any.
@@ -123,8 +190,6 @@ fn tcp_connect(host: &str, port: u16) -> Result<TcpStream, String> {
 }
 
 /// Perform the blocking TCP + SSH handshake + authentication.
-///
-/// Runs on a blocking thread; returns the authenticated session on success.
 fn establish_session(params: ConnectParams) -> Result<Session, String> {
     let stream = tcp_connect(&params.host, params.port)?;
 
@@ -202,8 +267,6 @@ fn read_dir_entries(sftp: &Sftp, path: &str) -> Result<Vec<FileEntry>, String> {
 
     let mut entries = Vec::with_capacity(raw.len());
     for (child, stat) in raw {
-        // Use only the final path component as the display name; build the full
-        // path ourselves so we don't depend on how readdir formats it.
         let name = match child.file_name() {
             Some(n) => n.to_string_lossy().into_owned(),
             None => continue,
@@ -225,22 +288,96 @@ fn read_dir_entries(sftp: &Sftp, path: &str) -> Result<Vec<FileEntry>, String> {
     Ok(entries)
 }
 
+/// Stream a remote file to disk, emitting throttled progress events.
+fn download_file(
+    sftp: &Sftp,
+    app: &AppHandle,
+    id: &str,
+    remote: &str,
+    local: &str,
+) -> Result<(), String> {
+    let mut remote_file = sftp
+        .open(Path::new(remote))
+        .map_err(|_| error::sftp_error("파일을 다운로드하는"))?;
+    let total = remote_file.stat().ok().and_then(|s| s.size).unwrap_or(0);
+
+    let mut local_file =
+        File::create(local).map_err(|_| "파일을 저장할 수 없어요. 저장 위치를 확인해주세요.".to_string())?;
+
+    let mut buf = [0u8; 32 * 1024];
+    let mut transferred = 0u64;
+    let mut last_emit = Instant::now();
+
+    loop {
+        let n = remote_file
+            .read(&mut buf)
+            .map_err(|_| error::sftp_error("파일을 다운로드하는"))?;
+        if n == 0 {
+            break;
+        }
+        local_file
+            .write_all(&buf[..n])
+            .map_err(|_| "파일을 저장하는 중 문제가 발생했어요.".to_string())?;
+        transferred += n as u64;
+
+        // Throttle progress events to ~10/sec.
+        if last_emit.elapsed() >= Duration::from_millis(100) {
+            emit_progress(app, id, transferred, total);
+            last_emit = Instant::now();
+        }
+    }
+    // Final 100% update.
+    emit_progress(app, id, transferred, total);
+    Ok(())
+}
+
+fn emit_progress(app: &AppHandle, id: &str, transferred: u64, total: u64) {
+    let _ = app.emit(
+        "transfer-progress",
+        TransferProgress {
+            id: id.to_string(),
+            transferred,
+            total,
+        },
+    );
+}
+
+/// Recursively delete a directory and everything inside it.
+fn remove_recursive(sftp: &Sftp, path: &str) -> Result<(), String> {
+    let raw = sftp
+        .readdir(Path::new(path))
+        .map_err(|_| error::sftp_error("폴더를 삭제하는"))?;
+    for (child, stat) in raw {
+        let name = match child.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
+            None => continue,
+        };
+        if name == "." || name == ".." {
+            continue;
+        }
+        let child_path = join_unix(path, &name);
+        // lstat-based is_dir: symlinks report false, so they're just unlinked.
+        if stat.is_dir() {
+            remove_recursive(sftp, &child_path)?;
+        } else {
+            sftp.unlink(Path::new(&child_path))
+                .map_err(|_| error::sftp_error("파일을 삭제하는"))?;
+        }
+    }
+    sftp.rmdir(Path::new(path))
+        .map_err(|_| error::sftp_error("폴더를 삭제하는"))
+}
+
 /// The worker thread body: owns the session + SFTP handle for its whole life.
-fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>) {
+fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>, app: AppHandle) {
     // Open the SFTP subsystem once and reuse it for every request.
     let sftp = match session.sftp() {
         Ok(sftp) => sftp,
         Err(_) => {
             // Couldn't start SFTP: fail every queued request so callers unblock.
             while let Some(req) = rx.blocking_recv() {
-                match req {
-                    Req::Canonicalize { resp, .. } => {
-                        let _ = resp.send(Err(error::sftp_error("파일 작업을 준비하는")));
-                    }
-                    Req::ListDir { resp, .. } => {
-                        let _ = resp.send(Err(error::sftp_error("파일 작업을 준비하는")));
-                    }
-                    Req::Disconnect => break,
+                if !reply_err(req, error::sftp_error("파일 작업을 준비하는")) {
+                    break;
                 }
             }
             return;
@@ -259,6 +396,39 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>) {
             Req::ListDir { path, resp } => {
                 let _ = resp.send(read_dir_entries(&sftp, &path));
             }
+            Req::Download {
+                id,
+                remote_path,
+                local_path,
+                resp,
+            } => {
+                let _ = resp.send(download_file(&sftp, &app, &id, &remote_path, &local_path));
+            }
+            Req::Rename { from, to, resp } => {
+                let result = sftp
+                    .rename(Path::new(&from), Path::new(&to), None)
+                    .map_err(|_| error::sftp_error("이름을 바꾸는"));
+                let _ = resp.send(result);
+            }
+            Req::Mkdir { path, resp } => {
+                let result = sftp
+                    .mkdir(Path::new(&path), 0o755)
+                    .map_err(|_| error::sftp_error("폴더를 만드는"));
+                let _ = resp.send(result);
+            }
+            Req::Delete {
+                path,
+                is_dir,
+                resp,
+            } => {
+                let result = if is_dir {
+                    remove_recursive(&sftp, &path)
+                } else {
+                    sftp.unlink(Path::new(&path))
+                        .map_err(|_| error::sftp_error("파일을 삭제하는"))
+                };
+                let _ = resp.send(result);
+            }
             Req::Disconnect => break,
         }
     }
@@ -271,6 +441,7 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>) {
 #[tauri::command]
 pub async fn connect(
     state: State<'_, SessionManager>,
+    app: AppHandle,
     params: ConnectParams,
 ) -> Result<ConnectResult, String> {
     // Drop any previous session first.
@@ -285,7 +456,7 @@ pub async fn connect(
 
     // Hand the session to a dedicated worker thread.
     let (tx, rx) = mpsc::unbounded_channel();
-    std::thread::spawn(move || worker_loop(session, rx));
+    std::thread::spawn(move || worker_loop(session, rx, app));
     *state.tx.lock().unwrap() = Some(tx);
 
     // Resolve the home directory as a first real SFTP round-trip.
@@ -294,9 +465,7 @@ pub async fn connect(
         path: ".".to_string(),
         resp: resp_tx,
     })?;
-    let home = resp_rx
-        .await
-        .map_err(|_| error::disconnected_error())??;
+    let home = resp_rx.await.map_err(|_| error::disconnected_error())??;
 
     Ok(ConnectResult { home })
 }
@@ -310,6 +479,67 @@ pub async fn list_dir(
     let (resp_tx, resp_rx) = oneshot::channel();
     state.send(Req::ListDir {
         path,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Download a remote file to a chosen local path.
+#[tauri::command]
+pub async fn download(
+    state: State<'_, SessionManager>,
+    id: String,
+    remote_path: String,
+    local_path: String,
+) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::Download {
+        id,
+        remote_path,
+        local_path,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Rename (or move) a remote entry.
+#[tauri::command]
+pub async fn rename(
+    state: State<'_, SessionManager>,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::Rename {
+        from,
+        to,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Create a new directory.
+#[tauri::command]
+pub async fn mkdir(state: State<'_, SessionManager>, path: String) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::Mkdir {
+        path,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Delete a file, or a directory and everything inside it.
+#[tauri::command]
+pub async fn delete(
+    state: State<'_, SessionManager>,
+    path: String,
+    is_dir: bool,
+) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::Delete {
+        path,
+        is_dir,
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?

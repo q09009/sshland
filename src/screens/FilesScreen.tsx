@@ -1,8 +1,21 @@
-import { useEffect, useMemo } from "react";
-import { disconnect } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
+import {
+  deletePath,
+  disconnect,
+  download,
+  FileEntry,
+  mkdir,
+  rename,
+  TransferProgress,
+} from "../api";
 import { useAppStore } from "../store";
 import { formatDate, formatSize } from "../lib/format";
-import { breadcrumbs, parentPath } from "../lib/path";
+import { breadcrumbs, joinPath, parentPath } from "../lib/path";
+import { ConfirmDialog, PromptDialog } from "../components/Modal";
+import ContextMenu, { MenuItem } from "../components/ContextMenu";
+import TransfersPanel from "../components/TransfersPanel";
 
 export default function FilesScreen() {
   const connection = useAppStore((s) => s.connection);
@@ -14,12 +27,48 @@ export default function FilesScreen() {
   const loadDir = useAppStore((s) => s.loadDir);
   const toggleHidden = useAppStore((s) => s.toggleHidden);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
+  const startTransfer = useAppStore((s) => s.startTransfer);
+  const updateTransfer = useAppStore((s) => s.updateTransfer);
+  const finishTransfer = useAppStore((s) => s.finishTransfer);
+
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(
+    null
+  );
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    message: React.ReactNode;
+    onConfirm: () => void;
+  } | null>(null);
+  const [prompt, setPrompt] = useState<{
+    title: string;
+    initialValue?: string;
+    placeholder?: string;
+    onConfirm: (value: string) => void;
+  } | null>(null);
+  const [opError, setOpError] = useState<string | null>(null);
 
   // Load the starting directory on entry.
   useEffect(() => {
     if (connection) loadDir(connection.home);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Stream transfer progress from the backend into the store.
+  useEffect(() => {
+    const unlisten = listen<TransferProgress>("transfer-progress", (e) => {
+      updateTransfer(e.payload.id, e.payload.transferred, e.payload.total);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [updateTransfer]);
+
+  // Auto-clear the operation error banner.
+  useEffect(() => {
+    if (!opError) return;
+    const t = setTimeout(() => setOpError(null), 5000);
+    return () => clearTimeout(t);
+  }, [opError]);
 
   const crumbs = useMemo(() => breadcrumbs(currentPath), [currentPath]);
   const visibleEntries = useMemo(
@@ -39,6 +88,91 @@ export default function FilesScreen() {
     if (isDir) loadDir(path);
   }
 
+  /** Run a mutating operation, then refresh the listing. */
+  async function runOp(fn: () => Promise<void>) {
+    try {
+      await fn();
+      await loadDir(currentPath);
+    } catch (err) {
+      setOpError(typeof err === "string" ? err : "작업에 실패했어요.");
+    }
+  }
+
+  async function doDownload(entry: FileEntry) {
+    const local = await save({ defaultPath: entry.name });
+    if (!local) return;
+    const id = crypto.randomUUID();
+    startTransfer({ id, name: entry.name, kind: "download", total: entry.size });
+    try {
+      await download(id, entry.path, local);
+      finishTransfer(id);
+    } catch (err) {
+      finishTransfer(
+        id,
+        typeof err === "string" ? err : "다운로드에 실패했어요."
+      );
+    }
+  }
+
+  function doRename(entry: FileEntry) {
+    setPrompt({
+      title: "이름 변경",
+      initialValue: entry.name,
+      onConfirm: (newName) => {
+        setPrompt(null);
+        if (newName === entry.name) return;
+        runOp(() => rename(entry.path, joinPath(currentPath, newName)));
+      },
+    });
+  }
+
+  function doDelete(entry: FileEntry) {
+    setConfirm({
+      title: entry.isDir ? "폴더를 삭제할까요?" : "파일을 삭제할까요?",
+      message: (
+        <>
+          <span className="font-medium text-slate-100">{entry.name}</span>
+          {entry.isDir
+            ? " 폴더와 그 안의 모든 파일이 삭제돼요."
+            : " 파일이 삭제돼요."}
+          <br />이 작업은 되돌릴 수 없어요.
+        </>
+      ),
+      onConfirm: () => {
+        setConfirm(null);
+        runOp(() => deletePath(entry.path, entry.isDir));
+      },
+    });
+  }
+
+  function doNewFolder() {
+    setPrompt({
+      title: "새 폴더 만들기",
+      placeholder: "폴더 이름",
+      onConfirm: (name) => {
+        setPrompt(null);
+        runOp(() => mkdir(joinPath(currentPath, name)));
+      },
+    });
+  }
+
+  function openMenu(e: React.MouseEvent, entry: FileEntry) {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, entry });
+  }
+
+  const menuItems: MenuItem[] = useMemo(() => {
+    if (!menu) return [];
+    const entry = menu.entry;
+    const items: MenuItem[] = [];
+    if (!entry.isDir)
+      items.push({ label: "다운로드", onClick: () => doDownload(entry) });
+    items.push({ label: "이름 변경", onClick: () => doRename(entry) });
+    items.push({ label: "삭제", danger: true, onClick: () => doDelete(entry) });
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menu]);
+
   const atRoot = currentPath === "/";
 
   return (
@@ -55,7 +189,7 @@ export default function FilesScreen() {
         </button>
       </header>
 
-      {/* Toolbar: navigation buttons + breadcrumb + hidden toggle */}
+      {/* Toolbar */}
       <div className="flex items-center gap-2 border-b border-ink-700/60 bg-ink-800/60 px-3 py-2">
         <ToolButton
           label="상위 폴더"
@@ -92,6 +226,13 @@ export default function FilesScreen() {
             </span>
           ))}
         </nav>
+
+        <button
+          onClick={doNewFolder}
+          className="shrink-0 rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-slate-300 hover:border-sky-600 hover:text-white"
+        >
+          + 새 폴더
+        </button>
 
         <label className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:text-slate-200">
           <input
@@ -132,16 +273,14 @@ export default function FilesScreen() {
                 <tr
                   key={entry.path}
                   onDoubleClick={() => openEntry(entry.path, entry.isDir)}
+                  onContextMenu={(e) => openMenu(e, entry)}
                   className={`border-b border-ink-800/60 hover:bg-ink-800/60 ${
                     entry.isDir ? "cursor-pointer" : ""
                   }`}
                 >
                   <td className="px-4 py-1.5">
                     <div className="flex items-center gap-2">
-                      <FileIcon
-                        isDir={entry.isDir}
-                        isSymlink={entry.isSymlink}
-                      />
+                      <FileIcon isDir={entry.isDir} isSymlink={entry.isSymlink} />
                       <span
                         className={`truncate ${
                           entry.isDir ? "text-slate-100" : "text-slate-300"
@@ -166,6 +305,42 @@ export default function FilesScreen() {
           </table>
         )}
       </div>
+
+      {opError && (
+        <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-red-500/40 bg-red-950/90 px-4 py-2.5 text-sm text-red-200 shadow-xl">
+          {opError}
+        </div>
+      )}
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.title}
+          message={confirm.message}
+          confirmLabel="삭제"
+          danger
+          onConfirm={confirm.onConfirm}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+      {prompt && (
+        <PromptDialog
+          title={prompt.title}
+          initialValue={prompt.initialValue}
+          placeholder={prompt.placeholder}
+          onConfirm={prompt.onConfirm}
+          onCancel={() => setPrompt(null)}
+        />
+      )}
+
+      <TransfersPanel />
     </div>
   );
 }
@@ -212,13 +387,7 @@ function ToolButton({
   );
 }
 
-function FileIcon({
-  isDir,
-  isSymlink,
-}: {
-  isDir: boolean;
-  isSymlink: boolean;
-}) {
+function FileIcon({ isDir, isSymlink }: { isDir: boolean; isSymlink: boolean }) {
   if (isDir) {
     return (
       <svg

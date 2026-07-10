@@ -1,6 +1,17 @@
 import { create } from "zustand";
 import { FileEntry, listDir } from "./api";
 
+/** A file transfer shown in the transfers panel. */
+export interface Transfer {
+  id: string;
+  name: string;
+  kind: "download" | "upload";
+  transferred: number;
+  total: number;
+  status: "active" | "done" | "error";
+  error?: string;
+}
+
 /** Which top-level screen is shown. */
 export type Screen = "connect" | "files";
 
@@ -47,6 +58,13 @@ interface AppState {
   loadDir: (path: string) => Promise<void>;
   /** Toggle visibility of dot-files. */
   toggleHidden: () => void;
+
+  // --- Transfers ---
+  transfers: Transfer[];
+  startTransfer: (t: Omit<Transfer, "transferred" | "status">) => void;
+  updateTransfer: (id: string, transferred: number, total: number) => void;
+  finishTransfer: (id: string, error?: string) => void;
+  dismissTransfer: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -104,4 +122,36 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
+
+  transfers: [],
+  startTransfer: (t) =>
+    set((s) => ({
+      transfers: [
+        ...s.transfers,
+        { ...t, transferred: 0, status: "active" as const },
+      ],
+    })),
+  updateTransfer: (id, transferred, total) =>
+    set((s) => ({
+      transfers: s.transfers.map((t) =>
+        t.id === id && t.status === "active"
+          ? { ...t, transferred, total: total || t.total }
+          : t
+      ),
+    })),
+  finishTransfer: (id, error) =>
+    set((s) => ({
+      transfers: s.transfers.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              status: error ? ("error" as const) : ("done" as const),
+              error,
+              transferred: error ? t.transferred : t.total,
+            }
+          : t
+      ),
+    })),
+  dismissTransfer: (id) =>
+    set((s) => ({ transfers: s.transfers.filter((t) => t.id !== id) })),
 }));

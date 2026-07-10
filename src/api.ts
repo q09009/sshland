@@ -41,6 +41,37 @@ export function listDir(path: string): Promise<FileEntry[]> {
   return invoke<FileEntry[]>("list_dir", { path });
 }
 
+/** Download a remote file to a local path (emits `transfer-progress`). */
+export function download(
+  id: string,
+  remotePath: string,
+  localPath: string
+): Promise<void> {
+  return invoke<void>("download", { id, remotePath, localPath });
+}
+
+/** Rename or move a remote entry. */
+export function rename(from: string, to: string): Promise<void> {
+  return invoke<void>("rename", { from, to });
+}
+
+/** Create a new directory. */
+export function mkdir(path: string): Promise<void> {
+  return invoke<void>("mkdir", { path });
+}
+
+/** Delete a file, or a directory and its contents. */
+export function deletePath(path: string, isDir: boolean): Promise<void> {
+  return invoke<void>("delete", { path, isDir });
+}
+
+/** Progress event payload emitted during a transfer. */
+export interface TransferProgress {
+  id: string;
+  transferred: number;
+  total: number;
+}
+
 /** Close the active connection (no-op if already disconnected). */
 export function disconnect(): Promise<void> {
   return invoke<void>("disconnect");
