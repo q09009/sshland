@@ -22,3 +22,5 @@ serde_json = "1"
 ssh2 = "0.9"
 # Async channels used to hand work to the blocking SSH worker thread.
 tokio = { version = "1", features = ["sync"] }
+# Native file-picker dialog (choosing a private key, and download targets).
+tauri-plugin-dialog = "2"
