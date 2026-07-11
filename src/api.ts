@@ -81,6 +81,40 @@ export interface TransferProgress {
   total: number;
 }
 
+/** Open a new PTY shell on the connection. `id` is a frontend-generated id. */
+export function openTerminal(
+  id: string,
+  cols: number,
+  rows: number
+): Promise<void> {
+  return invoke<void>("open_terminal", { id, cols, rows });
+}
+
+/** Send input bytes (keystrokes) to a terminal. */
+export function writeTerminal(id: string, data: number[]): Promise<void> {
+  return invoke<void>("write_terminal", { id, data });
+}
+
+/** Notify a terminal that its window size changed. */
+export function resizeTerminal(
+  id: string,
+  cols: number,
+  rows: number
+): Promise<void> {
+  return invoke<void>("resize_terminal", { id, cols, rows });
+}
+
+/** Close a terminal channel (SSH connection stays open). */
+export function closeTerminal(id: string): Promise<void> {
+  return invoke<void>("close_terminal", { id });
+}
+
+/** Payload of a `terminal-output` event. */
+export interface TerminalOutput {
+  id: string;
+  data: number[];
+}
+
 /** Close the active connection (no-op if already disconnected). */
 export function disconnect(): Promise<void> {
   return invoke<void>("disconnect");
