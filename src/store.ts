@@ -10,6 +10,7 @@ import {
   removeLeaf,
   splitLeaf,
   SplitDirection,
+  updateRatio,
 } from "./lib/panes";
 
 /** A file transfer shown in the transfers panel. */
@@ -75,6 +76,8 @@ interface AppState {
   moveFocus: (direction: Direction) => void;
   /** Close a pane; its sibling takes over the space. Last pane can't close. */
   closePane: (id: string) => void;
+  /** Set the ratio (0..1) of a split node while dragging its divider. */
+  setRatio: (splitId: string, ratio: number) => void;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: ConnectionInfo) => void;
@@ -154,6 +157,8 @@ export const useAppStore = create<AppState>((set) => ({
       }
       return { paneTree, focusedPaneId };
     }),
+  setRatio: (splitId, ratio) =>
+    set((s) => ({ paneTree: updateRatio(s.paneTree, splitId, ratio) })),
 
   currentPath: "",
   entries: [],

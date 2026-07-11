@@ -83,6 +83,23 @@ export function firstLeafId(node: PaneNode): string {
   return node.type === "leaf" ? node.id : firstLeafId(node.children[0]);
 }
 
+/** Set the ratio of the split `splitId`, returning a new tree. */
+export function updateRatio(
+  node: PaneNode,
+  splitId: string,
+  ratio: number
+): PaneNode {
+  if (node.type === "leaf") return node;
+  if (node.id === splitId) return { ...node, ratio };
+  return {
+    ...node,
+    children: [
+      updateRatio(node.children[0], splitId, ratio),
+      updateRatio(node.children[1], splitId, ratio),
+    ],
+  };
+}
+
 // --- Geometry for directional focus movement ---
 
 export interface Rect {
