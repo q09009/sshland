@@ -63,6 +63,26 @@ export function splitLeaf(
   };
 }
 
+/**
+ * Remove the leaf `targetId`. Its parent split is replaced by the remaining
+ * sibling. Removing the root leaf (last pane) is a no-op.
+ */
+export function removeLeaf(node: PaneNode, targetId: string): PaneNode {
+  if (node.type === "leaf") return node;
+  const [a, b] = node.children;
+  if (a.type === "leaf" && a.id === targetId) return b;
+  if (b.type === "leaf" && b.id === targetId) return a;
+  return {
+    ...node,
+    children: [removeLeaf(a, targetId), removeLeaf(b, targetId)],
+  };
+}
+
+/** The id of the first (top-left-most) leaf in a tree. */
+export function firstLeafId(node: PaneNode): string {
+  return node.type === "leaf" ? node.id : firstLeafId(node.children[0]);
+}
+
 // --- Geometry for directional focus movement ---
 
 export interface Rect {

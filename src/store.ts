@@ -4,8 +4,10 @@ import {
   collectRects,
   Direction,
   findNeighbor,
+  firstLeafId,
   makeLeaf,
   PaneNode,
+  removeLeaf,
   splitLeaf,
   SplitDirection,
 } from "./lib/panes";
@@ -71,6 +73,8 @@ interface AppState {
   splitFocused: (direction: SplitDirection) => void;
   /** Move focus to the nearest pane in a direction. */
   moveFocus: (direction: Direction) => void;
+  /** Close a pane; its sibling takes over the space. Last pane can't close. */
+  closePane: (id: string) => void;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: ConnectionInfo) => void;
@@ -120,6 +124,35 @@ export const useAppStore = create<AppState>((set) => ({
         direction
       );
       return next ? { focusedPaneId: next } : {};
+    }),
+  closePane: (id) =>
+    set((s) => {
+      const oldRects = collectRects(s.paneTree);
+      // Never close the last remaining pane.
+      if (Object.keys(oldRects).length <= 1 || !oldRects[id]) return {};
+
+      const paneTree = removeLeaf(s.paneTree, id);
+      const newRects = collectRects(paneTree);
+      let focusedPaneId = s.focusedPaneId;
+      if (!newRects[focusedPaneId]) {
+        // Focus the pane nearest the one we just closed.
+        const c = oldRects[id];
+        const ccx = c.x + c.w / 2;
+        const ccy = c.y + c.h / 2;
+        let best = firstLeafId(paneTree);
+        let bestDist = Infinity;
+        for (const [lid, r] of Object.entries(newRects)) {
+          const dx = r.x + r.w / 2 - ccx;
+          const dy = r.y + r.h / 2 - ccy;
+          const dist = dx * dx + dy * dy;
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = lid;
+          }
+        }
+        focusedPaneId = best;
+      }
+      return { paneTree, focusedPaneId };
     }),
 
   currentPath: "",
