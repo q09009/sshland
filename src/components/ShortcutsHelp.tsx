@@ -12,7 +12,7 @@ export default function ShortcutsHelp() {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="fixed bottom-3 right-3 z-30">
+    <div className="fixed bottom-3 right-3 z-30 flex flex-col items-end">
       {open && (
         <div className="mb-2 w-64 rounded-xl border border-ink-700 bg-ink-800 p-3 shadow-2xl">
           <div className="mb-2 text-xs font-medium text-slate-400">

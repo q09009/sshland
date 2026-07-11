@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { connect } from "../api";
 import { useAppStore } from "../store";
+import { useSettings } from "../lib/settings";
 
 type AuthKind = "password" | "key";
 
@@ -9,6 +10,9 @@ export default function ConnectScreen() {
   const enterFiles = useAppStore((s) => s.enterFiles);
   const notice = useAppStore((s) => s.connectNotice);
   const clearNotice = useAppStore((s) => s.clearNotice);
+  const settingsLoaded = useSettings((s) => s.loaded);
+  const lastConnection = useSettings((s) => s.settings.lastConnection);
+  const saveSetting = useSettings((s) => s.set);
 
   const [host, setHost] = useState("");
   const [port, setPort] = useState("22");
@@ -28,6 +32,19 @@ export default function ConnectScreen() {
       clearNotice();
     }
   }, [notice, clearNotice]);
+
+  // Pre-fill the form from the last successful connection (secrets excluded)
+  // once settings finish loading. Only once, so it never clobbers user typing.
+  const prefilledRef = useRef(false);
+  useEffect(() => {
+    if (!settingsLoaded || prefilledRef.current || !lastConnection) return;
+    prefilledRef.current = true;
+    setHost(lastConnection.host);
+    setPort(String(lastConnection.port));
+    setUsername(lastConnection.username);
+    setAuthKind(lastConnection.authKind);
+    setKeyPath(lastConnection.keyPath);
+  }, [settingsLoaded, lastConnection]);
 
   async function pickKeyFile() {
     const selected = await open({
@@ -74,6 +91,14 @@ export default function ConnectScreen() {
                 path: keyPath,
                 passphrase: passphrase || undefined,
               },
+      });
+      // Remember this connection for next time — never the password/passphrase.
+      saveSetting("lastConnection", {
+        host: host.trim(),
+        port: Number(port),
+        username: username.trim(),
+        authKind,
+        keyPath: authKind === "key" ? keyPath : "",
       });
       enterFiles({ host: host.trim(), username: username.trim(), home: result.home });
     } catch (err) {
