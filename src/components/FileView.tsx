@@ -5,7 +5,9 @@ import { formatDate, formatSize } from "../lib/format";
 interface Props {
   entries: FileEntry[];
   viewMode: ViewMode;
+  selectedPath: string | null;
   onOpen: (entry: FileEntry) => void;
+  onSelect: (entry: FileEntry) => void;
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
 }
 
@@ -21,8 +23,21 @@ export default function FileView(props: Props) {
   }
 }
 
+/** Common row event handlers: single-click selects, double-click opens. */
+function rowHandlers(entry: FileEntry, p: Props) {
+  return {
+    onClick: () => p.onSelect(entry),
+    onDoubleClick: () => p.onOpen(entry),
+    onContextMenu: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      p.onContextMenu(e, entry);
+    },
+  };
+}
+
 /** Windows-style "Details": a table with size, date, and permissions. */
-function DetailsView({ entries, onOpen, onContextMenu }: Props) {
+function DetailsView(props: Props) {
+  const { entries, selectedPath } = props;
   return (
     <table className="w-full text-sm">
       <thead className="sticky top-0 bg-ink-800/95 text-xs text-slate-400 backdrop-blur">
@@ -37,11 +52,12 @@ function DetailsView({ entries, onOpen, onContextMenu }: Props) {
         {entries.map((entry) => (
           <tr
             key={entry.path}
-            onDoubleClick={() => onOpen(entry)}
-            onContextMenu={(e) => onContextMenu(e, entry)}
-            className={`border-b border-ink-800/60 hover:bg-ink-800/60 ${
-              entry.isDir ? "cursor-pointer" : ""
-            }`}
+            {...rowHandlers(entry, props)}
+            className={`border-b border-ink-800/60 ${
+              entry.path === selectedPath
+                ? "bg-sky-500/20"
+                : "hover:bg-ink-800/60"
+            } ${entry.isDir ? "cursor-pointer" : ""}`}
           >
             <td className="px-4 py-1.5">
               <div className="flex items-center gap-2">
@@ -72,17 +88,17 @@ function DetailsView({ entries, onOpen, onContextMenu }: Props) {
 }
 
 /** Compact "List": small icon + name in a few wrapping columns. */
-function ListView({ entries, onOpen, onContextMenu }: Props) {
+function ListView(props: Props) {
+  const { entries, selectedPath } = props;
   return (
     <div className="grid grid-cols-2 gap-x-4 p-2 sm:grid-cols-3 lg:grid-cols-4">
       {entries.map((entry) => (
         <div
           key={entry.path}
-          onDoubleClick={() => onOpen(entry)}
-          onContextMenu={(e) => onContextMenu(e, entry)}
-          className={`flex items-center gap-2 rounded px-2 py-1.5 hover:bg-ink-800/60 ${
-            entry.isDir ? "cursor-pointer" : ""
-          }`}
+          {...rowHandlers(entry, props)}
+          className={`flex items-center gap-2 rounded px-2 py-1.5 ${
+            entry.path === selectedPath ? "bg-sky-500/20" : "hover:bg-ink-800/60"
+          } ${entry.isDir ? "cursor-pointer" : ""}`}
         >
           <FileIcon entry={entry} className="h-4 w-4" />
           <span
@@ -99,18 +115,18 @@ function ListView({ entries, onOpen, onContextMenu }: Props) {
 }
 
 /** Large icons: tiles with a big icon, name, and size for files. */
-function GridView({ entries, onOpen, onContextMenu }: Props) {
+function GridView(props: Props) {
+  const { entries, selectedPath } = props;
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-1 p-3">
       {entries.map((entry) => (
         <div
           key={entry.path}
-          onDoubleClick={() => onOpen(entry)}
-          onContextMenu={(e) => onContextMenu(e, entry)}
+          {...rowHandlers(entry, props)}
           title={entry.name}
-          className={`flex flex-col items-center gap-1.5 rounded-lg px-2 py-3 text-center hover:bg-ink-800/60 ${
-            entry.isDir ? "cursor-pointer" : ""
-          }`}
+          className={`flex flex-col items-center gap-1.5 rounded-lg px-2 py-3 text-center ${
+            entry.path === selectedPath ? "bg-sky-500/20" : "hover:bg-ink-800/60"
+          } ${entry.isDir ? "cursor-pointer" : ""}`}
         >
           <FileIcon entry={entry} className="h-12 w-12" />
           <span className="line-clamp-2 w-full break-words text-xs leading-tight text-slate-200">

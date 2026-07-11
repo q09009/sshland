@@ -51,6 +51,10 @@ interface AppState {
   // Note: per-directory file-manager state (path, entries, view mode, …) lives
   // locally in each FilesScreen so multiple file-manager panes are independent.
 
+  /** A copied file/folder, shared across panes for paste. */
+  clipboard: { name: string; path: string; isDir: boolean } | null;
+  setClipboard: (item: { name: string; path: string; isDir: boolean }) => void;
+
   // --- Tiling pane tree ---
   paneTree: PaneNode;
   focusedPaneId: string;
@@ -164,6 +168,9 @@ export const useAppStore = create<AppState>((set) => ({
     }),
 
   clearNotice: () => set({ connectNotice: null }),
+
+  clipboard: null,
+  setClipboard: (item) => set({ clipboard: item }),
 
   transfers: [],
   startTransfer: (t) =>

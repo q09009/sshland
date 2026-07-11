@@ -136,6 +136,12 @@ pub enum Req {
         is_dir: bool,
         resp: oneshot::Sender<Result<(), String>>,
     },
+    /// Copy a file or directory to a new path (server-side `cp -r`).
+    Copy {
+        src: String,
+        dst: String,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
     /// Open a new PTY shell channel on the existing connection.
     OpenTerminal {
         id: String,
@@ -182,6 +188,10 @@ fn reply_err(req: Req, msg: String) -> bool {
             true
         }
         Req::Delete { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::Copy { resp, .. } => {
             let _ = resp.send(Err(msg));
             true
         }
@@ -492,6 +502,35 @@ fn remove_recursive(sftp: &Sftp, path: &str) -> Result<(), String> {
         .map_err(|_| error::sftp_error("폴더를 삭제하는"))
 }
 
+/// Quote a string as a single shell argument (safe for arbitrary paths).
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Copy a file or directory on the server using `cp -r` over an exec channel.
+/// The copy happens entirely server-side (no data round-trips through us).
+fn exec_copy(session: &Session, src: &str, dst: &str) -> Result<(), String> {
+    let mut channel = session
+        .channel_session()
+        .map_err(|_| error::sftp_error("복사하는"))?;
+    let cmd = format!("cp -r -- {} {}", shell_quote(src), shell_quote(dst));
+    channel
+        .exec(&cmd)
+        .map_err(|_| error::sftp_error("복사하는"))?;
+
+    // Drain stdout/stderr so the remote command can finish.
+    let mut out = String::new();
+    let _ = channel.read_to_string(&mut out);
+    let mut err = String::new();
+    let _ = channel.stderr().read_to_string(&mut err);
+    let _ = channel.wait_close();
+
+    match channel.exit_status() {
+        Ok(0) => Ok(()),
+        _ => Err("복사하지 못했어요. 권한이 있는지, 같은 이름이 이미 있는지 확인해주세요.".to_string()),
+    }
+}
+
 /// Open a new PTY shell channel on the existing session.
 fn open_shell(session: &Session, cols: u16, rows: u16) -> Result<Channel, String> {
     let mut channel = session
@@ -571,6 +610,10 @@ fn handle_req(
                 sftp.unlink(Path::new(&path))
                     .map_err(|_| error::sftp_error("파일을 삭제하는"))
             };
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::Copy { src, dst, resp } => {
+            let result = exec_copy(session, &src, &dst);
             send_and_check(sftp, app, result, resp)
         }
         Req::OpenTerminal {
@@ -901,6 +944,22 @@ pub async fn close_terminal(
     id: String,
 ) -> Result<(), String> {
     state.send(Req::CloseTerminal { id })
+}
+
+/// Copy a file or directory to a new path on the server.
+#[tauri::command]
+pub async fn copy(
+    state: State<'_, SessionManager>,
+    src: String,
+    dst: String,
+) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::Copy {
+        src,
+        dst,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
 }
 
 /// Close the current connection, if any.

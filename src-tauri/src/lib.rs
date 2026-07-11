@@ -16,6 +16,7 @@ pub fn run() {
             ssh::rename,
             ssh::mkdir,
             ssh::delete,
+            ssh::copy,
             ssh::open_terminal,
             ssh::write_terminal,
             ssh::resize_terminal,

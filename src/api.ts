@@ -74,6 +74,11 @@ export function deletePath(path: string, isDir: boolean): Promise<void> {
   return invoke<void>("delete", { path, isDir });
 }
 
+/** Copy a file or directory to a new path on the server. */
+export function copyPath(src: string, dst: string): Promise<void> {
+  return invoke<void>("copy", { src, dst });
+}
+
 /** Progress event payload emitted during a transfer. */
 export interface TransferProgress {
   id: string;

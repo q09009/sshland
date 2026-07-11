@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
+  copyPath,
   deletePath,
   disconnect,
   download,
@@ -16,6 +17,7 @@ import { baseName, breadcrumbs, joinPath, parentPath } from "../lib/path";
 import { sortEntries } from "../lib/files";
 import { ConfirmDialog, PromptDialog } from "../components/Modal";
 import ContextMenu, { MenuItem } from "../components/ContextMenu";
+import Menu, { DropItem } from "../components/Menu";
 import FileView from "../components/FileView";
 
 /**
@@ -27,6 +29,8 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   const returnToConnect = useAppStore((s) => s.returnToConnect);
   const startTransfer = useAppStore((s) => s.startTransfer);
   const finishTransfer = useAppStore((s) => s.finishTransfer);
+  const clipboard = useAppStore((s) => s.clipboard);
+  const setClipboard = useAppStore((s) => s.setClipboard);
   const focused = useAppStore((s) => s.focusedPaneId === paneId);
 
   const [currentPath, setCurrentPath] = useState(connection?.home ?? "/");
@@ -35,10 +39,14 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("details");
+  const [selected, setSelected] = useState<FileEntry | null>(null);
 
-  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(
-    null
-  );
+  // Context menu: `entry` is null for an empty-area (background) menu.
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    entry: FileEntry | null;
+  } | null>(null);
   const [confirm, setConfirm] = useState<{
     title: string;
     message: React.ReactNode;
@@ -67,6 +75,7 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   const loadDir = useCallback(async (path: string) => {
     const reqId = ++reqIdRef.current;
     setCurrentPath(path);
+    setSelected(null);
     setLoading(true);
     setError(null);
     try {
@@ -221,41 +230,116 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
     });
   }
 
+  function doCopy(entry: FileEntry) {
+    setClipboard({ name: entry.name, path: entry.path, isDir: entry.isDir });
+  }
+
+  /** Paste the clipboard item into the current directory (avoids name clashes). */
+  function doPaste() {
+    if (!clipboard) return;
+    const taken = new Set(entries.map((e) => e.name));
+    let name = clipboard.name;
+    if (taken.has(name)) {
+      let n = name + " 사본";
+      let i = 2;
+      while (taken.has(n)) n = `${name} 사본 ${i++}`;
+      name = n;
+    }
+    runOp(() => copyPath(clipboard.path, joinPath(currentPath, name)));
+  }
+
+  // Right-click a file/folder.
   function openMenu(e: React.MouseEvent, entry: FileEntry) {
     e.preventDefault();
+    setSelected(entry);
     setMenu({ x: e.clientX, y: e.clientY, entry });
+  }
+
+  // Right-click empty space.
+  function openEmptyMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, entry: null });
   }
 
   const menuItems: MenuItem[] = useMemo(() => {
     if (!menu) return [];
+    if (!menu.entry) {
+      // Background menu.
+      const items: MenuItem[] = [{ label: "새 폴더", onClick: doNewFolder }];
+      if (clipboard)
+        items.push({ label: `붙여넣기 (${clipboard.name})`, onClick: doPaste });
+      return items;
+    }
     const entry = menu.entry;
-    const items: MenuItem[] = [];
+    const items: MenuItem[] = [{ label: "복사", onClick: () => doCopy(entry) }];
     if (!entry.isDir)
       items.push({ label: "다운로드", onClick: () => doDownload(entry) });
     items.push({ label: "이름 변경", onClick: () => doRename(entry) });
     items.push({ label: "삭제", danger: true, onClick: () => doDelete(entry) });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu]);
+  }, [menu, clipboard]);
+
+  // Menu-bar dropdown contents.
+  const fileMenu: DropItem[] = [
+    { label: "새 폴더", onClick: doNewFolder },
+    {
+      label: "다운로드",
+      onClick: () => selected && doDownload(selected),
+      disabled: !selected || selected.isDir,
+    },
+    { label: "새로고침", onClick: () => loadDir(currentPath) },
+    { type: "separator" },
+    { label: "접속 끊기", onClick: handleDisconnect },
+  ];
+  const editMenu: DropItem[] = [
+    {
+      label: "복사",
+      onClick: () => selected && doCopy(selected),
+      disabled: !selected,
+    },
+    {
+      label: clipboard ? `붙여넣기 (${clipboard.name})` : "붙여넣기",
+      onClick: doPaste,
+      disabled: !clipboard,
+    },
+    { type: "separator" },
+    {
+      label: "이름 변경",
+      onClick: () => selected && doRename(selected),
+      disabled: !selected,
+    },
+    {
+      label: "삭제",
+      danger: true,
+      onClick: () => selected && doDelete(selected),
+      disabled: !selected,
+    },
+  ];
+  const viewMenu: DropItem[] = [
+    { type: "check", label: "목록", checked: viewMode === "list", onClick: () => setViewMode("list") },
+    { type: "check", label: "자세히", checked: viewMode === "details", onClick: () => setViewMode("details") },
+    { type: "check", label: "큰 아이콘", checked: viewMode === "grid", onClick: () => setViewMode("grid") },
+    { type: "separator" },
+    { type: "check", label: "숨김파일 표시", checked: showHidden, onClick: () => setShowHidden((v) => !v) },
+  ];
 
   const atRoot = currentPath === "/";
 
   return (
     <div className="flex h-full flex-col bg-ink-900 text-slate-100">
-      <header className="flex items-center justify-between gap-3 border-b border-ink-700/60 bg-ink-800 px-4 py-2">
-        <p className="truncate text-sm font-medium">
+      {/* Menu bar */}
+      <div className="flex items-center gap-1 border-b border-ink-700/60 bg-ink-800 px-2 py-1">
+        <Menu label="파일" items={fileMenu} />
+        <Menu label="편집" items={editMenu} />
+        <Menu label="보기" items={viewMenu} />
+        <span className="ml-auto truncate pl-2 text-xs text-slate-500">
           {connection?.username}@{connection?.host}
-        </p>
-        <button
-          onClick={handleDisconnect}
-          className="shrink-0 rounded-lg border border-ink-700 px-3 py-1 text-sm text-slate-300 hover:border-red-500/50 hover:text-red-300"
-        >
-          접속 끊기
-        </button>
-      </header>
+        </span>
+      </div>
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b border-ink-700/60 bg-ink-800/60 px-3 py-2">
+      {/* Navigation row: up / home / refresh + breadcrumb */}
+      <div className="flex items-center gap-1 border-b border-ink-700/60 bg-ink-800/60 px-2 py-1">
         <ToolButton
           label="상위 폴더"
           disabled={atRoot}
@@ -274,7 +358,7 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
           <path d="M21 3v5h-5" />
         </ToolButton>
 
-        <nav className="mx-1 flex min-w-0 flex-1 items-center overflow-x-auto whitespace-nowrap text-sm">
+        <nav className="flex min-w-0 flex-1 items-center overflow-x-auto whitespace-nowrap text-sm">
           {crumbs.map((crumb, i) => (
             <span key={crumb.path} className="flex items-center">
               {i > 0 && <span className="mx-0.5 text-slate-600">/</span>}
@@ -291,28 +375,12 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
             </span>
           ))}
         </nav>
-
-        <button
-          onClick={doNewFolder}
-          className="shrink-0 rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-slate-300 hover:border-sky-600 hover:text-white"
-        >
-          + 새 폴더
-        </button>
-
-        <label className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:text-slate-200">
-          <input
-            type="checkbox"
-            checked={showHidden}
-            onChange={() => setShowHidden((v) => !v)}
-            className="accent-sky-600"
-          />
-          숨김파일
-        </label>
-
-        <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div
+        className="min-h-0 flex-1 overflow-auto"
+        onContextMenu={openEmptyMenu}
+      >
         {loading ? (
           <CenterMessage>불러오는 중…</CenterMessage>
         ) : error ? (
@@ -329,7 +397,9 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
           <FileView
             entries={visibleEntries}
             viewMode={viewMode}
+            selectedPath={selected?.path ?? null}
             onOpen={openEntry}
+            onSelect={setSelected}
             onContextMenu={openMenu}
           />
         )}
@@ -427,81 +497,3 @@ function ToolButton({
   );
 }
 
-/** Segmented control to switch between list / details / grid layouts. */
-function ViewToggle({
-  value,
-  onChange,
-}: {
-  value: ViewMode;
-  onChange: (mode: ViewMode) => void;
-}) {
-  const options: { mode: ViewMode; label: string; icon: React.ReactNode }[] = [
-    {
-      mode: "list",
-      label: "목록",
-      icon: (
-        <>
-          <line x1="8" y1="6" x2="21" y2="6" />
-          <line x1="8" y1="12" x2="21" y2="12" />
-          <line x1="8" y1="18" x2="21" y2="18" />
-          <line x1="3" y1="6" x2="3.01" y2="6" />
-          <line x1="3" y1="12" x2="3.01" y2="12" />
-          <line x1="3" y1="18" x2="3.01" y2="18" />
-        </>
-      ),
-    },
-    {
-      mode: "details",
-      label: "자세히",
-      icon: (
-        <>
-          <rect x="3" y="4" width="18" height="16" rx="1" />
-          <line x1="3" y1="10" x2="21" y2="10" />
-          <line x1="9" y1="4" x2="9" y2="20" />
-        </>
-      ),
-    },
-    {
-      mode: "grid",
-      label: "큰 아이콘",
-      icon: (
-        <>
-          <rect x="3" y="3" width="7" height="7" rx="1" />
-          <rect x="14" y="3" width="7" height="7" rx="1" />
-          <rect x="3" y="14" width="7" height="7" rx="1" />
-          <rect x="14" y="14" width="7" height="7" rx="1" />
-        </>
-      ),
-    },
-  ];
-
-  return (
-    <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-ink-900 p-0.5">
-      {options.map((opt) => (
-        <button
-          key={opt.mode}
-          onClick={() => onChange(opt.mode)}
-          title={opt.label}
-          aria-label={opt.label}
-          className={`rounded-md p-1.5 ${
-            value === opt.mode
-              ? "bg-ink-700 text-white"
-              : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <svg
-            className="h-4 w-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            {opt.icon}
-          </svg>
-        </button>
-      ))}
-    </div>
-  );
-}
