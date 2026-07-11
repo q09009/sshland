@@ -16,10 +16,10 @@ interface Section {
 }
 
 const SECTIONS: Section[] = [
+  { id: "command-log", label: "명령어 로그", render: () => <CommandLogSection /> },
   { id: "general", label: "일반", render: () => <GeneralSection /> },
   { id: "about", label: "정보", render: () => <AboutSection /> },
-  // Future: { id: "command-log", label: "명령어 로그", ... },
-  //         { id: "shortcuts", label: "단축키", ... },
+  // Future: { id: "shortcuts", label: "단축키", ... },
   //         { id: "theme", label: "테마", ... }
 ];
 
@@ -94,6 +94,25 @@ export default function SettingsPanel() {
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h2 className="mb-4 text-lg font-semibold text-slate-100">{children}</h2>
+  );
+}
+
+function CommandLogSection() {
+  const enabled = useSettings((s) => s.settings.commandLogEnabled);
+  const set = useSettings((s) => s.set);
+  return (
+    <div>
+      <SectionTitle>명령어 로그</SectionTitle>
+      <SettingRow
+        label="파일 조작 시 명령어 로그 표시"
+        description="파일 조작을 실제 터미널 명령어(scp/rm/mv 등)로 화면 아래 바에 보여줍니다."
+      >
+        <Toggle
+          checked={enabled}
+          onChange={(v) => set("commandLogEnabled", v)}
+        />
+      </SettingRow>
+    </div>
   );
 }
 

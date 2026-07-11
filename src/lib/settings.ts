@@ -21,6 +21,8 @@ export interface LastConnection {
  * a control in the settings panel — no backend change needed.
  */
 export interface AppSettings {
+  /** Show the bottom command-log bar (file ops as CLI commands). */
+  commandLogEnabled: boolean;
   /** Show seconds (HH:MM:SS) in the status-bar clock. */
   clockShowSeconds: boolean;
   /** Last successful connection, for pre-filling the connect form. */
@@ -28,6 +30,7 @@ export interface AppSettings {
 }
 
 const DEFAULTS: AppSettings = {
+  commandLogEnabled: true,
   clockShowSeconds: false,
   lastConnection: null,
 };

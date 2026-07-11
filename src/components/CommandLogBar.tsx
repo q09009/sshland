@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "../store";
+import { useSettings } from "../lib/settings";
 import { formatClock } from "../lib/format";
 
 /**
@@ -9,6 +10,7 @@ import { formatClock } from "../lib/format";
  * Session-only — history resets on restart. The on/off setting comes later.
  */
 export default function CommandLogBar() {
+  const enabled = useSettings((s) => s.settings.commandLogEnabled);
   const log = useAppStore((s) => s.commandLog);
   const [open, setOpen] = useState(false);
   const latest = log[0] ?? null;
@@ -28,6 +30,9 @@ export default function CommandLogBar() {
   useEffect(() => {
     if (!canOpen) setOpen(false);
   }, [canOpen]);
+
+  // Advanced-user opt-out: the whole bar disappears when disabled.
+  if (!enabled) return null;
 
   return (
     <div className="relative shrink-0">
