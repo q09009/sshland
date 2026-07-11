@@ -15,6 +15,7 @@ import {
 import { useAppStore, ViewMode } from "../store";
 import { baseName, breadcrumbs, joinPath, parentPath } from "../lib/path";
 import { sortEntries } from "../lib/files";
+import { FileOperation, operationToCommandString } from "../lib/commandLog";
 import { ConfirmDialog, PromptDialog } from "../components/Modal";
 import ContextMenu, { MenuItem } from "../components/ContextMenu";
 import Menu, { DropItem } from "../components/Menu";
@@ -35,6 +36,7 @@ export default function FilesScreen() {
   const setClipboard = useAppStore((s) => s.setClipboard);
   const setDragItem = useAppStore((s) => s.setDragItem);
   const bumpFs = useAppStore((s) => s.bumpFs);
+  const logCommand = useAppStore((s) => s.logCommand);
   const fsVersion = useAppStore((s) => s.fsVersion);
 
   const [currentPath, setCurrentPath] = useState(connection?.home ?? "/");
@@ -189,6 +191,7 @@ export default function FilesScreen() {
       try {
         await upload(id, local, joinPath(dir, name));
         finishTransfer(id);
+        logOp({ type: "upload", localPath: local, remoteDir: dir });
       } catch (err) {
         finishTransfer(
           id,
@@ -267,7 +270,9 @@ export default function FilesScreen() {
       return;
     }
     try {
-      await rename(src, joinPath(destDir, entry.name));
+      const to = joinPath(destDir, entry.name);
+      await rename(src, to);
+      logOp({ type: "move", from: src, to });
       bumpFs();
     } catch (err) {
       setOpError(typeof err === "string" ? err : "옮기지 못했어요.");
@@ -292,10 +297,22 @@ export default function FilesScreen() {
     if (entry.isDir) loadDir(entry.path);
   }
 
-  /** Run a mutating operation, then refresh all panes. */
-  async function runOp(fn: () => Promise<void>) {
+  /** Record a completed file operation as a CLI command in the log bar. */
+  function logOp(op: FileOperation) {
+    if (!connection) return;
+    logCommand(
+      operationToCommandString(op, {
+        user: connection.username,
+        host: connection.host,
+      })
+    );
+  }
+
+  /** Run a mutating operation, log its command on success, then refresh panes. */
+  async function runOp(fn: () => Promise<void>, op?: FileOperation) {
     try {
       await fn();
+      if (op) logOp(op);
       bumpFs();
     } catch (err) {
       setOpError(typeof err === "string" ? err : "작업에 실패했어요.");
@@ -310,6 +327,7 @@ export default function FilesScreen() {
     try {
       await download(id, entry.path, local);
       finishTransfer(id);
+      logOp({ type: "download", remotePath: entry.path });
     } catch (err) {
       finishTransfer(
         id,
@@ -325,7 +343,12 @@ export default function FilesScreen() {
       onConfirm: (newName) => {
         setPrompt(null);
         if (newName === entry.name) return;
-        runOp(() => rename(entry.path, joinPath(currentPath, newName)));
+        const to = joinPath(currentPath, newName);
+        runOp(() => rename(entry.path, to), {
+          type: "move",
+          from: entry.path,
+          to,
+        });
       },
     });
   }
@@ -344,7 +367,11 @@ export default function FilesScreen() {
       ),
       onConfirm: () => {
         setConfirm(null);
-        runOp(() => deletePath(entry.path, entry.isDir));
+        runOp(() => deletePath(entry.path, entry.isDir), {
+          type: "delete",
+          path: entry.path,
+          isDir: entry.isDir,
+        });
       },
     });
   }
@@ -355,7 +382,8 @@ export default function FilesScreen() {
       placeholder: "폴더 이름",
       onConfirm: (name) => {
         setPrompt(null);
-        runOp(() => mkdir(joinPath(currentPath, name)));
+        const path = joinPath(currentPath, name);
+        runOp(() => mkdir(path), { type: "mkdir", path });
       },
     });
   }
@@ -375,7 +403,12 @@ export default function FilesScreen() {
       while (taken.has(n)) n = `${name} 사본 ${i++}`;
       name = n;
     }
-    runOp(() => copyPath(clipboard.path, joinPath(currentPath, name)));
+    const to = joinPath(currentPath, name);
+    runOp(() => copyPath(clipboard.path, to), {
+      type: "copy",
+      from: clipboard.path,
+      to,
+    });
   }
 
   // Right-click a file/folder.
