@@ -164,6 +164,71 @@ export function collectRects(
   return out;
 }
 
+export interface LeafLayout {
+  node: LeafNode;
+  rect: Rect;
+}
+export interface DividerLayout {
+  splitId: string;
+  direction: SplitDirection;
+  /** The split's own rectangle, used to map a cursor position to a ratio. */
+  parentRect: Rect;
+  /** Position of the divider line (zero thickness along the split axis). */
+  x: number;
+  y: number;
+}
+
+/**
+ * Flatten the tree into absolutely-positioned leaves and split dividers, so the
+ * React tree stays flat (leaves keyed by id) and panes survive restructuring.
+ */
+export function collectLayout(
+  node: PaneNode,
+  rect: Rect = { x: 0, y: 0, w: 1, h: 1 },
+  leaves: LeafLayout[] = [],
+  dividers: DividerLayout[] = []
+): { leaves: LeafLayout[]; dividers: DividerLayout[] } {
+  if (node.type === "leaf") {
+    leaves.push({ node, rect });
+    return { leaves, dividers };
+  }
+  const { x, y, w, h } = rect;
+  if (node.direction === "horizontal") {
+    const splitX = x + w * node.ratio;
+    collectLayout(node.children[0], { x, y, w: w * node.ratio, h }, leaves, dividers);
+    collectLayout(
+      node.children[1],
+      { x: splitX, y, w: w * (1 - node.ratio), h },
+      leaves,
+      dividers
+    );
+    dividers.push({
+      splitId: node.id,
+      direction: "horizontal",
+      parentRect: rect,
+      x: splitX,
+      y,
+    });
+  } else {
+    const splitY = y + h * node.ratio;
+    collectLayout(node.children[0], { x, y, w, h: h * node.ratio }, leaves, dividers);
+    collectLayout(
+      node.children[1],
+      { x, y: splitY, w, h: h * (1 - node.ratio) },
+      leaves,
+      dividers
+    );
+    dividers.push({
+      splitId: node.id,
+      direction: "vertical",
+      parentRect: rect,
+      x,
+      y: splitY,
+    });
+  }
+  return { leaves, dividers };
+}
+
 function overlaps(a0: number, al: number, b0: number, bl: number): boolean {
   return a0 < b0 + bl && b0 < a0 + al;
 }

@@ -1,37 +1,69 @@
-import { useRef, useState } from "react";
-import { LeafNode, leafCount, PaneNode, SplitNode } from "../lib/panes";
+import { useMemo, useState } from "react";
+import {
+  collectLayout,
+  DividerLayout,
+  LeafNode,
+  leafCount,
+  PaneNode,
+  Rect,
+} from "../lib/panes";
 import { useAppStore } from "../store";
 import FilesScreen from "../screens/FilesScreen";
 import TerminalPane from "./TerminalPane";
 
-/** Recursively renders a pane tree into nested flex splits. */
+/**
+ * Renders the pane tree as a FLAT list of absolutely-positioned leaves plus
+ * draggable dividers. Keeping leaves as flat, id-keyed children (instead of
+ * nested splits) means a leaf's React component — and its live PTY — survives
+ * when the tree is restructured (e.g. a sibling pane is closed).
+ */
 export default function PaneView({ node }: { node: PaneNode }) {
-  return node.type === "leaf" ? (
-    <Leaf node={node} />
-  ) : (
-    <Split node={node} />
+  const { leaves, dividers } = useMemo(() => collectLayout(node), [node]);
+
+  return (
+    <div className="relative h-full w-full">
+      {leaves.map(({ node: leaf, rect }) => (
+        <div key={leaf.id} className="absolute" style={pctStyle(rect)}>
+          <Leaf node={leaf} />
+        </div>
+      ))}
+      {dividers.map((d) => (
+        <Divider key={d.splitId} layout={d} />
+      ))}
+    </div>
   );
 }
 
-function Split({ node }: { node: SplitNode }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+function pctStyle(rect: Rect) {
+  return {
+    left: `${rect.x * 100}%`,
+    top: `${rect.y * 100}%`,
+    width: `${rect.w * 100}%`,
+    height: `${rect.h * 100}%`,
+  };
+}
+
+function Divider({ layout }: { layout: DividerLayout }) {
   const setRatio = useAppStore((s) => s.setRatio);
   const [dragging, setDragging] = useState(false);
-  const horizontal = node.direction === "horizontal";
+  const horizontal = layout.direction === "horizontal";
 
-  const onDividerDown = (e: React.MouseEvent) => {
+  const onDown = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const container = containerRef.current;
+    const container = (e.currentTarget as HTMLElement).parentElement;
     if (!container) return;
     setDragging(true);
+    const parent = layout.parentRect;
 
     const onMove = (ev: MouseEvent) => {
       const rect = container.getBoundingClientRect();
+      const fx = (ev.clientX - rect.left) / rect.width;
+      const fy = (ev.clientY - rect.top) / rect.height;
       const raw = horizontal
-        ? (ev.clientX - rect.left) / rect.width
-        : (ev.clientY - rect.top) / rect.height;
-      setRatio(node.id, Math.min(0.9, Math.max(0.1, raw)));
+        ? (fx - parent.x) / parent.w
+        : (fy - parent.y) / parent.h;
+      setRatio(layout.splitId, Math.min(0.9, Math.max(0.1, raw)));
     };
     const onUp = () => {
       setDragging(false);
@@ -42,43 +74,38 @@ function Split({ node }: { node: SplitNode }) {
     window.addEventListener("mouseup", onUp);
   };
 
+  const style = horizontal
+    ? {
+        left: `${layout.x * 100}%`,
+        top: `${layout.parentRect.y * 100}%`,
+        height: `${layout.parentRect.h * 100}%`,
+        width: 6,
+        transform: "translateX(-50%)",
+      }
+    : {
+        top: `${layout.y * 100}%`,
+        left: `${layout.parentRect.x * 100}%`,
+        width: `${layout.parentRect.w * 100}%`,
+        height: 6,
+        transform: "translateY(-50%)",
+      };
+
   return (
-    <div
-      ref={containerRef}
-      className={`flex h-full w-full ${horizontal ? "flex-row" : "flex-col"}`}
-    >
+    <>
       <div
-        className="min-h-0 min-w-0 overflow-hidden"
-        style={{ flexGrow: node.ratio, flexShrink: 1, flexBasis: 0 }}
-      >
-        <PaneView node={node.children[0]} />
-      </div>
-
-      <div
-        onMouseDown={onDividerDown}
-        className={`group shrink-0 bg-ink-700 transition-colors hover:bg-sky-500 ${
-          horizontal
-            ? "w-1 cursor-col-resize"
-            : "h-1 cursor-row-resize"
-        } ${dragging ? "bg-sky-500" : ""}`}
+        onMouseDown={onDown}
+        style={style}
+        className={`absolute z-10 ${
+          horizontal ? "cursor-col-resize" : "cursor-row-resize"
+        } ${dragging ? "bg-sky-500" : "bg-ink-700 hover:bg-sky-500"}`}
       />
-
-      <div
-        className="min-h-0 min-w-0 overflow-hidden"
-        style={{ flexGrow: 1 - node.ratio, flexShrink: 1, flexBasis: 0 }}
-      >
-        <PaneView node={node.children[1]} />
-      </div>
-
-      {/* While dragging, an overlay captures the mouse so panes (terminals)
-          underneath don't swallow the move events. */}
       {dragging && (
         <div
-          className="fixed inset-0 z-50"
+          className="fixed inset-0 z-40"
           style={{ cursor: horizontal ? "col-resize" : "row-resize" }}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -119,7 +146,9 @@ function PaneHeader({ node }: { node: LeafNode }) {
       </span>
       <span className="flex items-center gap-0.5">
         <button
-          onClick={() => setPaneContent(node.id, isFm ? "terminal" : "file-manager")}
+          onClick={() =>
+            setPaneContent(node.id, isFm ? "terminal" : "file-manager")
+          }
           title={isFm ? "터미널로 전환" : "파일관리자로 전환"}
           className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
         >
