@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { FileEntry, listDir } from "./api";
+import { makeLeaf, newId, PaneNode } from "./lib/panes";
 
 /** A file transfer shown in the transfers panel. */
 export interface Transfer {
@@ -53,6 +54,12 @@ interface AppState {
   /** Current file-listing layout. */
   viewMode: ViewMode;
 
+  // --- Tiling pane tree ---
+  paneTree: PaneNode;
+  focusedPaneId: string;
+  /** Mark a pane as focused. */
+  setFocus: (id: string) => void;
+
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: ConnectionInfo) => void;
   /** Return to the connect screen, optionally with a notice to display. */
@@ -74,10 +81,17 @@ interface AppState {
   dismissTransfer: (id: string) => void;
 }
 
+// Placeholder tree until a connection seeds a real one.
+const initialLeaf = makeLeaf("file-manager");
+
 export const useAppStore = create<AppState>((set) => ({
   screen: "connect",
   connection: null,
   connectNotice: null,
+
+  paneTree: initialLeaf,
+  focusedPaneId: initialLeaf.id,
+  setFocus: (id) => set({ focusedPaneId: id }),
 
   currentPath: "",
   entries: [],
@@ -86,7 +100,18 @@ export const useAppStore = create<AppState>((set) => ({
   showHidden: false,
   viewMode: "details",
 
-  enterFiles: (connection) =>
+  enterFiles: (connection) => {
+    // TEMP(tiling step 3): seed a file-manager | terminal split so the
+    // recursive renderer is exercised. Step 4 makes this a single leaf.
+    const fm = makeLeaf("file-manager");
+    const term = makeLeaf("terminal");
+    const tree: PaneNode = {
+      type: "split",
+      id: newId("split"),
+      direction: "horizontal",
+      ratio: 0.5,
+      children: [fm, term],
+    };
     set({
       screen: "files",
       connection,
@@ -94,7 +119,10 @@ export const useAppStore = create<AppState>((set) => ({
       currentPath: connection.home,
       entries: [],
       filesError: null,
-    }),
+      paneTree: tree,
+      focusedPaneId: fm.id,
+    });
+  },
 
   returnToConnect: (notice) =>
     set({
