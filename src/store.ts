@@ -37,6 +37,17 @@ export interface UploadBatch {
   done: number;
 }
 
+/** One entry in the command-log bar (a file op rendered as a CLI command). */
+export interface CommandLogEntry {
+  id: string;
+  command: string;
+  /** Local timestamp (ms) when it was logged. */
+  at: number;
+}
+
+/** How many recent commands to keep (session-only, shown in the history popup). */
+const COMMAND_LOG_MAX = 20;
+
 /** Which top-level screen is shown. */
 export type Screen = "connect" | "files";
 
@@ -80,6 +91,13 @@ interface AppState {
   settingsOpen: boolean;
   openSettings: () => void;
   closeSettings: () => void;
+
+  /**
+   * Recent file-manager operations shown as CLI commands, newest first.
+   * Session-only (not persisted); reset on app restart.
+   */
+  commandLog: CommandLogEntry[];
+  logCommand: (command: string) => void;
   /**
    * A message to show on the connect screen after being kicked back there
    * (e.g. the connection dropped). Cleared once shown.
@@ -154,6 +172,15 @@ export const useAppStore = create<AppState>((set) => ({
   settingsOpen: false,
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
+
+  commandLog: [],
+  logCommand: (command) =>
+    set((s) => ({
+      commandLog: [
+        { id: crypto.randomUUID(), command, at: Date.now() },
+        ...s.commandLog,
+      ].slice(0, COMMAND_LOG_MAX),
+    })),
 
   paneTree: initialLeaf,
   focusedPaneId: initialLeaf.id,
