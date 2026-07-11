@@ -16,6 +16,10 @@ pub fn run() {
             ssh::rename,
             ssh::mkdir,
             ssh::delete,
+            ssh::open_terminal,
+            ssh::write_terminal,
+            ssh::resize_terminal,
+            ssh::close_terminal,
             ssh::disconnect
         ])
         .run(tauri::generate_context!())

@@ -6,19 +6,26 @@
 //! blocking network work off the UI thread and sidesteps `ssh2`'s borrow/`Send`
 //! constraints (the `Session` and `Sftp` handles never leave the worker).
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
+use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use ssh2::{Session, Sftp};
+use ssh2::{Channel, Session, Sftp};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::error;
+
+/// How often the worker polls terminal channels for output while any are open.
+const TERMINAL_POLL: Duration = Duration::from_millis(15);
+/// Read buffer size for terminal output.
+const TERM_BUF: usize = 32 * 1024;
 
 /// How the user proves their identity to the server.
 ///
@@ -77,6 +84,15 @@ struct TransferProgress {
     total: u64,
 }
 
+/// A chunk of terminal output, streamed as a `terminal-output` event.
+#[derive(Serialize, Clone)]
+struct TerminalOutput {
+    /// Terminal (pane) id this output belongs to.
+    id: String,
+    /// Raw bytes from the shell; the frontend feeds these straight to xterm.js.
+    data: Vec<u8>,
+}
+
 /// A unit of work for the SSH worker thread.
 pub enum Req {
     /// Resolve a path to its absolute form (used to discover the home dir).
@@ -120,6 +136,19 @@ pub enum Req {
         is_dir: bool,
         resp: oneshot::Sender<Result<(), String>>,
     },
+    /// Open a new PTY shell channel on the existing connection.
+    OpenTerminal {
+        id: String,
+        cols: u16,
+        rows: u16,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
+    /// Send keystrokes/input to a terminal's shell (fire-and-forget).
+    WriteTerminal { id: String, data: Vec<u8> },
+    /// Tell the shell its window was resized (fire-and-forget).
+    ResizeTerminal { id: String, cols: u16, rows: u16 },
+    /// Close a terminal's channel, leaving the SSH connection intact.
+    CloseTerminal { id: String },
     /// Close the connection and stop the worker.
     Disconnect,
 }
@@ -156,13 +185,19 @@ fn reply_err(req: Req, msg: String) -> bool {
             let _ = resp.send(Err(msg));
             true
         }
+        Req::OpenTerminal { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        // Fire-and-forget terminal messages have no reply channel.
+        Req::WriteTerminal { .. } | Req::ResizeTerminal { .. } | Req::CloseTerminal { .. } => true,
         Req::Disconnect => false,
     }
 }
 
 /// Shared state: the sender half of the channel to the current worker, if any.
 pub struct SessionManager {
-    tx: Mutex<Option<mpsc::UnboundedSender<Req>>>,
+    tx: Mutex<Option<mpsc::Sender<Req>>>,
 }
 
 impl SessionManager {
@@ -457,14 +492,174 @@ fn remove_recursive(sftp: &Sftp, path: &str) -> Result<(), String> {
         .map_err(|_| error::sftp_error("폴더를 삭제하는"))
 }
 
-/// The worker thread body: owns the session + SFTP handle for its whole life.
-fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>, app: AppHandle) {
+/// Open a new PTY shell channel on the existing session.
+fn open_shell(session: &Session, cols: u16, rows: u16) -> Result<Channel, String> {
+    let mut channel = session
+        .channel_session()
+        .map_err(|_| "터미널을 열 수 없어요.".to_string())?;
+    channel
+        .request_pty(
+            "xterm-256color",
+            None,
+            Some((cols as u32, rows as u32, 0, 0)),
+        )
+        .map_err(|_| "터미널을 준비하지 못했어요.".to_string())?;
+    channel
+        .shell()
+        .map_err(|_| "셸을 시작하지 못했어요.".to_string())?;
+    Ok(channel)
+}
+
+/// Handle one worker request. Assumes the session is in blocking mode.
+/// Returns `true` when the worker should stop (disconnect or dropped link).
+fn handle_req(
+    req: Req,
+    session: &Session,
+    sftp: &Sftp,
+    app: &AppHandle,
+    terminals: &mut HashMap<String, Channel>,
+) -> bool {
+    match req {
+        Req::Canonicalize { path, resp } => {
+            let result = sftp
+                .realpath(Path::new(&path))
+                .map(|p| p.to_string_lossy().into_owned())
+                .map_err(|_| error::sftp_error("경로를 확인하는"));
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::ListDir { path, resp } => {
+            send_and_check(sftp, app, read_dir_entries(sftp, &path), resp)
+        }
+        Req::Download {
+            id,
+            remote_path,
+            local_path,
+            resp,
+        } => {
+            let result = download_file(sftp, app, &id, &remote_path, &local_path);
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::Upload {
+            id,
+            local_path,
+            remote_path,
+            resp,
+        } => {
+            let result = upload_file(sftp, app, &id, &local_path, &remote_path);
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::Rename { from, to, resp } => {
+            let result = sftp
+                .rename(Path::new(&from), Path::new(&to), None)
+                .map_err(|_| error::sftp_error("이름을 바꾸는"));
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::Mkdir { path, resp } => {
+            let result = sftp
+                .mkdir(Path::new(&path), 0o755)
+                .map_err(|_| error::sftp_error("폴더를 만드는"));
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::Delete {
+            path,
+            is_dir,
+            resp,
+        } => {
+            let result = if is_dir {
+                remove_recursive(sftp, &path)
+            } else {
+                sftp.unlink(Path::new(&path))
+                    .map_err(|_| error::sftp_error("파일을 삭제하는"))
+            };
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::OpenTerminal {
+            id,
+            cols,
+            rows,
+            resp,
+        } => {
+            match open_shell(session, cols, rows) {
+                Ok(channel) => {
+                    terminals.insert(id, channel);
+                    let _ = resp.send(Ok(()));
+                }
+                Err(msg) => {
+                    let _ = resp.send(Err(msg));
+                }
+            }
+            false
+        }
+        Req::WriteTerminal { id, data } => {
+            if let Some(ch) = terminals.get_mut(&id) {
+                let _ = ch.write_all(&data);
+                let _ = ch.flush();
+            }
+            false
+        }
+        Req::ResizeTerminal { id, cols, rows } => {
+            if let Some(ch) = terminals.get_mut(&id) {
+                let _ = ch.request_pty_size(cols as u32, rows as u32, None, None);
+            }
+            false
+        }
+        Req::CloseTerminal { id } => {
+            if let Some(mut ch) = terminals.remove(&id) {
+                let _ = ch.close();
+            }
+            false
+        }
+        Req::Disconnect => true,
+    }
+}
+
+/// Read whatever a terminal channel currently has buffered (non-blocking) and
+/// emit it. Returns `true` if the channel reached EOF / errored (closed).
+fn drain_terminal(app: &AppHandle, id: &str, channel: &mut Channel, buf: &mut [u8]) -> bool {
+    let mut acc: Vec<u8> = Vec::new();
+    let mut closed = false;
+    loop {
+        match channel.read(buf) {
+            Ok(0) => {
+                closed = true;
+                break;
+            }
+            Ok(n) => {
+                acc.extend_from_slice(&buf[..n]);
+                // Bound per-cycle work so one gushing terminal can't starve others.
+                if acc.len() >= 256 * 1024 {
+                    break;
+                }
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+            Err(_) => {
+                closed = true;
+                break;
+            }
+        }
+    }
+    if !acc.is_empty() {
+        let _ = app.emit(
+            "terminal-output",
+            TerminalOutput {
+                id: id.to_string(),
+                data: acc,
+            },
+        );
+    }
+    closed
+}
+
+/// The worker thread body: owns the session, SFTP handle, and all terminal
+/// channels. Multiplexes file operations and interactive shells over the single
+/// connection, since libssh2 requires all session access from one thread.
+fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
     // Open the SFTP subsystem once and reuse it for every request.
     let sftp = match session.sftp() {
         Ok(sftp) => sftp,
         Err(_) => {
             // Couldn't start SFTP: fail every queued request so callers unblock.
-            while let Some(req) = rx.blocking_recv() {
+            while let Ok(req) = cmd_rx.recv() {
                 if !reply_err(req, error::sftp_error("파일 작업을 준비하는")) {
                     break;
                 }
@@ -473,72 +668,64 @@ fn worker_loop(session: Session, mut rx: mpsc::UnboundedReceiver<Req>, app: AppH
         }
     };
 
-    while let Some(req) = rx.blocking_recv() {
-        // Each arm computes a result, then hands it to `send_and_check`, which
-        // replies to the caller and reports whether the link has dropped.
-        let dropped = match req {
-            Req::Canonicalize { path, resp } => {
-                let result = sftp
-                    .realpath(Path::new(&path))
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .map_err(|_| error::sftp_error("경로를 확인하는"));
-                send_and_check(&sftp, &app, result, resp)
+    let mut terminals: HashMap<String, Channel> = HashMap::new();
+    let mut buf = [0u8; TERM_BUF];
+
+    'outer: loop {
+        // 1. Handle every command that's already queued (blocking mode).
+        loop {
+            match cmd_rx.try_recv() {
+                Ok(req) => {
+                    if handle_req(req, &session, &sftp, &app, &mut terminals) {
+                        break 'outer;
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => break 'outer,
             }
-            Req::ListDir { path, resp } => {
-                let result = read_dir_entries(&sftp, &path);
-                send_and_check(&sftp, &app, result, resp)
+        }
+
+        // 2. Poll terminals for output, batching each channel into one event.
+        if !terminals.is_empty() {
+            session.set_blocking(false);
+            let mut closed: Vec<String> = Vec::new();
+            for (id, channel) in terminals.iter_mut() {
+                if drain_terminal(&app, id, channel, &mut buf) {
+                    closed.push(id.clone());
+                }
             }
-            Req::Download {
-                id,
-                remote_path,
-                local_path,
-                resp,
-            } => {
-                let result = download_file(&sftp, &app, &id, &remote_path, &local_path);
-                send_and_check(&sftp, &app, result, resp)
+            session.set_blocking(true);
+            for id in closed {
+                terminals.remove(&id);
+                let _ = app.emit("terminal-closed", id);
             }
-            Req::Upload {
-                id,
-                local_path,
-                remote_path,
-                resp,
-            } => {
-                let result = upload_file(&sftp, &app, &id, &local_path, &remote_path);
-                send_and_check(&sftp, &app, result, resp)
+        }
+
+        // 3. Wait for the next command. Poll rapidly only while terminals live;
+        //    otherwise block so an idle connection uses no CPU.
+        let next = if terminals.is_empty() {
+            cmd_rx.recv().map_err(|_| ())
+        } else {
+            match cmd_rx.recv_timeout(TERMINAL_POLL) {
+                Ok(req) => Ok(req),
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break 'outer,
             }
-            Req::Rename { from, to, resp } => {
-                let result = sftp
-                    .rename(Path::new(&from), Path::new(&to), None)
-                    .map_err(|_| error::sftp_error("이름을 바꾸는"));
-                send_and_check(&sftp, &app, result, resp)
-            }
-            Req::Mkdir { path, resp } => {
-                let result = sftp
-                    .mkdir(Path::new(&path), 0o755)
-                    .map_err(|_| error::sftp_error("폴더를 만드는"));
-                send_and_check(&sftp, &app, result, resp)
-            }
-            Req::Delete {
-                path,
-                is_dir,
-                resp,
-            } => {
-                let result = if is_dir {
-                    remove_recursive(&sftp, &path)
-                } else {
-                    sftp.unlink(Path::new(&path))
-                        .map_err(|_| error::sftp_error("파일을 삭제하는"))
-                };
-                send_and_check(&sftp, &app, result, resp)
-            }
-            Req::Disconnect => break,
         };
-        if dropped {
-            break;
+        match next {
+            Ok(req) => {
+                if handle_req(req, &session, &sftp, &app, &mut terminals) {
+                    break 'outer;
+                }
+            }
+            Err(_) => break 'outer,
         }
     }
 
-    // Dropping `sftp`/`session` closes the channel; ask for a clean shutdown too.
+    // Close all terminals, then the session.
+    for (_, mut ch) in terminals.drain() {
+        let _ = ch.close();
+    }
     let _ = session.disconnect(None, "bye", None);
 }
 
@@ -560,7 +747,7 @@ pub async fn connect(
         .map_err(|_| "내부 오류가 발생했어요. 다시 시도해주세요.".to_string())??;
 
     // Hand the session to a dedicated worker thread.
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || worker_loop(session, rx, app));
     *state.tx.lock().unwrap() = Some(tx);
 
@@ -666,6 +853,54 @@ pub async fn delete(
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Open a new PTY shell (terminal) on the existing connection.
+#[tauri::command]
+pub async fn open_terminal(
+    state: State<'_, SessionManager>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::OpenTerminal {
+        id,
+        cols,
+        rows,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Send input (keystrokes) to a terminal.
+#[tauri::command]
+pub async fn write_terminal(
+    state: State<'_, SessionManager>,
+    id: String,
+    data: Vec<u8>,
+) -> Result<(), String> {
+    state.send(Req::WriteTerminal { id, data })
+}
+
+/// Notify a terminal's shell that its window size changed.
+#[tauri::command]
+pub async fn resize_terminal(
+    state: State<'_, SessionManager>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    state.send(Req::ResizeTerminal { id, cols, rows })
+}
+
+/// Close a terminal, leaving the SSH connection open.
+#[tauri::command]
+pub async fn close_terminal(
+    state: State<'_, SessionManager>,
+    id: String,
+) -> Result<(), String> {
+    state.send(Req::CloseTerminal { id })
 }
 
 /// Close the current connection, if any.
