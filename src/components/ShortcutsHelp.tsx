@@ -4,6 +4,7 @@ import { useState } from "react";
 const SHORTCUTS: { keys: string; desc: string }[] = [
   { keys: "Alt+Shift+H", desc: "좌우 분할 (새 터미널)" },
   { keys: "Alt+Shift+V", desc: "상하 분할 (새 터미널)" },
+  { keys: "Alt+방향키", desc: "포커스 이동" },
 ];
 
 export default function ShortcutsHelp() {

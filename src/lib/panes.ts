@@ -62,3 +62,99 @@ export function splitLeaf(
     ],
   };
 }
+
+// --- Geometry for directional focus movement ---
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+export type Direction = "left" | "right" | "up" | "down";
+
+/** Compute each leaf's normalized [0..1] rectangle from the split ratios. */
+export function collectRects(
+  node: PaneNode,
+  rect: Rect = { x: 0, y: 0, w: 1, h: 1 },
+  out: Record<string, Rect> = {}
+): Record<string, Rect> {
+  if (node.type === "leaf") {
+    out[node.id] = rect;
+    return out;
+  }
+  const { x, y, w, h } = rect;
+  if (node.direction === "horizontal") {
+    collectRects(node.children[0], { x, y, w: w * node.ratio, h }, out);
+    collectRects(
+      node.children[1],
+      { x: x + w * node.ratio, y, w: w * (1 - node.ratio), h },
+      out
+    );
+  } else {
+    collectRects(node.children[0], { x, y, w, h: h * node.ratio }, out);
+    collectRects(
+      node.children[1],
+      { x, y: y + h * node.ratio, w, h: h * (1 - node.ratio) },
+      out
+    );
+  }
+  return out;
+}
+
+function overlaps(a0: number, al: number, b0: number, bl: number): boolean {
+  return a0 < b0 + bl && b0 < a0 + al;
+}
+
+/** Find the nearest leaf adjacent to `id` in the given direction, or null. */
+export function findNeighbor(
+  rects: Record<string, Rect>,
+  id: string,
+  dir: Direction
+): string | null {
+  const f = rects[id];
+  if (!f) return null;
+  const fcx = f.x + f.w / 2;
+  const fcy = f.y + f.h / 2;
+
+  let best: string | null = null;
+  let bestScore = Infinity;
+  for (const [oid, r] of Object.entries(rects)) {
+    if (oid === id) continue;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+
+    let primary: number;
+    let perpOverlap: boolean;
+    if (dir === "left") {
+      if (cx >= fcx) continue;
+      primary = fcx - cx;
+      perpOverlap = overlaps(f.y, f.h, r.y, r.h);
+    } else if (dir === "right") {
+      if (cx <= fcx) continue;
+      primary = cx - fcx;
+      perpOverlap = overlaps(f.y, f.h, r.y, r.h);
+    } else if (dir === "up") {
+      if (cy >= fcy) continue;
+      primary = fcy - cy;
+      perpOverlap = overlaps(f.x, f.w, r.x, r.w);
+    } else {
+      if (cy <= fcy) continue;
+      primary = cy - fcy;
+      perpOverlap = overlaps(f.x, f.w, r.x, r.w);
+    }
+    if (!perpOverlap) continue;
+
+    const perp =
+      dir === "left" || dir === "right"
+        ? Math.abs(cy - fcy)
+        : Math.abs(cx - fcx);
+    // Prioritize the primary axis; break ties by perpendicular closeness.
+    const score = primary + perp * 0.001;
+    if (score < bestScore) {
+      bestScore = score;
+      best = oid;
+    }
+  }
+  return best;
+}

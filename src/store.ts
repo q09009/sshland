@@ -1,6 +1,14 @@
 import { create } from "zustand";
 import { FileEntry, listDir } from "./api";
-import { makeLeaf, PaneNode, splitLeaf, SplitDirection } from "./lib/panes";
+import {
+  collectRects,
+  Direction,
+  findNeighbor,
+  makeLeaf,
+  PaneNode,
+  splitLeaf,
+  SplitDirection,
+} from "./lib/panes";
 
 /** A file transfer shown in the transfers panel. */
 export interface Transfer {
@@ -61,6 +69,8 @@ interface AppState {
   setFocus: (id: string) => void;
   /** Split the focused pane, adding a new terminal pane and focusing it. */
   splitFocused: (direction: SplitDirection) => void;
+  /** Move focus to the nearest pane in a direction. */
+  moveFocus: (direction: Direction) => void;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: ConnectionInfo) => void;
@@ -101,6 +111,15 @@ export const useAppStore = create<AppState>((set) => ({
         paneTree: splitLeaf(s.paneTree, s.focusedPaneId, direction, term),
         focusedPaneId: term.id,
       };
+    }),
+  moveFocus: (direction) =>
+    set((s) => {
+      const next = findNeighbor(
+        collectRects(s.paneTree),
+        s.focusedPaneId,
+        direction
+      );
+      return next ? { focusedPaneId: next } : {};
     }),
 
   currentPath: "",

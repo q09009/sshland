@@ -10,6 +10,7 @@ import {
   TerminalOutput,
   writeTerminal,
 } from "../api";
+import { useAppStore } from "../store";
 
 const THEME = {
   background: "#0f172a",
@@ -26,6 +27,13 @@ const THEME = {
  */
 export default function TerminalPane({ id }: { id: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const focused = useAppStore((s) => s.focusedPaneId === id);
+
+  // Give the shell input focus when this pane becomes the focused one.
+  useEffect(() => {
+    if (focused) termRef.current?.focus();
+  }, [focused]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -43,6 +51,7 @@ export default function TerminalPane({ id }: { id: string }) {
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
+    termRef.current = term;
 
     const encoder = new TextEncoder();
     let disposed = false;
@@ -104,6 +113,7 @@ export default function TerminalPane({ id }: { id: string }) {
       closedSub.then((fn) => fn());
       closeTerminal(id).catch(() => {});
       term.dispose();
+      termRef.current = null;
     };
   }, [id]);
 
