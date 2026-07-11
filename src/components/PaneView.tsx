@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { LeafNode, PaneNode, SplitNode } from "../lib/panes";
+import { LeafNode, leafCount, PaneNode, SplitNode } from "../lib/panes";
 import { useAppStore } from "../store";
 import FilesScreen from "../screens/FilesScreen";
 import TerminalPane from "./TerminalPane";
@@ -89,15 +89,51 @@ function Leaf({ node }: { node: LeafNode }) {
   return (
     <div
       onMouseDownCapture={() => setFocus(node.id)}
-      className={`h-full w-full overflow-hidden border-2 ${
+      className={`flex h-full w-full flex-col overflow-hidden border-2 ${
         focused ? "border-sky-500" : "border-transparent"
       }`}
     >
-      {node.content === "file-manager" ? (
-        <FilesScreen />
-      ) : (
-        <TerminalPane id={node.id} />
-      )}
+      <PaneHeader node={node} />
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {node.content === "file-manager" ? (
+          <FilesScreen />
+        ) : (
+          <TerminalPane id={node.id} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Slim per-pane title bar with content-switch and close controls. */
+function PaneHeader({ node }: { node: LeafNode }) {
+  const setPaneContent = useAppStore((s) => s.setPaneContent);
+  const closePane = useAppStore((s) => s.closePane);
+  const canClose = useAppStore((s) => leafCount(s.paneTree) > 1);
+  const isFm = node.content === "file-manager";
+
+  return (
+    <div className="flex h-7 shrink-0 items-center justify-between border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
+      <span className="select-none">
+        {isFm ? "📁 파일관리자" : "❯_ 터미널"}
+      </span>
+      <span className="flex items-center gap-0.5">
+        <button
+          onClick={() => setPaneContent(node.id, isFm ? "terminal" : "file-manager")}
+          title={isFm ? "터미널로 전환" : "파일관리자로 전환"}
+          className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+        >
+          ⇄
+        </button>
+        <button
+          onClick={() => closePane(node.id)}
+          disabled={!canClose}
+          title="pane 닫기"
+          className="rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          ✕
+        </button>
+      </span>
     </div>
   );
 }

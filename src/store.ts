@@ -6,8 +6,10 @@ import {
   findNeighbor,
   firstLeafId,
   makeLeaf,
+  PaneContent,
   PaneNode,
   removeLeaf,
+  setLeafContent,
   splitLeaf,
   SplitDirection,
   updateRatio,
@@ -78,6 +80,8 @@ interface AppState {
   closePane: (id: string) => void;
   /** Set the ratio (0..1) of a split node while dragging its divider. */
   setRatio: (splitId: string, ratio: number) => void;
+  /** Switch a pane between the file manager and a terminal. */
+  setPaneContent: (id: string, content: PaneContent) => void;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: ConnectionInfo) => void;
@@ -159,6 +163,8 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   setRatio: (splitId, ratio) =>
     set((s) => ({ paneTree: updateRatio(s.paneTree, splitId, ratio) })),
+  setPaneContent: (id, content) =>
+    set((s) => ({ paneTree: setLeafContent(s.paneTree, id, content) })),
 
   currentPath: "",
   entries: [],

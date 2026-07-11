@@ -83,6 +83,31 @@ export function firstLeafId(node: PaneNode): string {
   return node.type === "leaf" ? node.id : firstLeafId(node.children[0]);
 }
 
+/** Total number of leaves in the tree. */
+export function leafCount(node: PaneNode): number {
+  return node.type === "leaf"
+    ? 1
+    : leafCount(node.children[0]) + leafCount(node.children[1]);
+}
+
+/** Change the content (file-manager/terminal) of the leaf `id`. */
+export function setLeafContent(
+  node: PaneNode,
+  id: string,
+  content: PaneContent
+): PaneNode {
+  if (node.type === "leaf") {
+    return node.id === id ? { ...node, content } : node;
+  }
+  return {
+    ...node,
+    children: [
+      setLeafContent(node.children[0], id, content),
+      setLeafContent(node.children[1], id, content),
+    ],
+  };
+}
+
 /** Set the ratio of the split `splitId`, returning a new tree. */
 export function updateRatio(
   node: PaneNode,
