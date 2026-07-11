@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { listen } from "@tauri-apps/api/event";
@@ -21,19 +21,45 @@ const THEME = {
   brightBlack: "#475569",
 };
 
+/** How often to repaint an unfocused terminal that keeps producing output. */
+const BLUR_FLUSH_MS = 200;
+
 /**
  * A single interactive shell rendered with xterm.js. Opens a PTY channel on
- * mount (using the provided pane id) and cleans it up on unmount.
+ * mount (using the pane id) and cleans it up on unmount.
+ *
+ * Performance: the focused terminal writes output immediately; unfocused
+ * terminals buffer output and flush at ~5fps, so background panes streaming
+ * logs don't burn CPU repainting every frame.
  */
 export default function TerminalPane({ id }: { id: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const pendingRef = useRef<Uint8Array[]>([]);
+  const flushTimerRef = useRef<number | null>(null);
+  const focusedRef = useRef(false);
   const focused = useAppStore((s) => s.focusedPaneId === id);
 
-  // Give the shell input focus when this pane becomes the focused one.
+  const flush = useCallback(() => {
+    if (flushTimerRef.current != null) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    const term = termRef.current;
+    if (!term || pendingRef.current.length === 0) return;
+    const chunks = pendingRef.current;
+    pendingRef.current = [];
+    for (const c of chunks) term.write(c);
+  }, []);
+
+  // When this pane gains focus: flush any buffered output and grab input.
   useEffect(() => {
-    if (focused) termRef.current?.focus();
-  }, [focused]);
+    focusedRef.current = focused;
+    if (focused) {
+      flush();
+      termRef.current?.focus();
+    }
+  }, [focused, flush]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -56,7 +82,6 @@ export default function TerminalPane({ id }: { id: string }) {
     const encoder = new TextEncoder();
     let disposed = false;
 
-    // Open the PTY with the current terminal size.
     openTerminal(id, term.cols, term.rows).catch(() => {
       if (!disposed) term.write("\r\n\x1b[31m터미널을 열지 못했어요.\x1b[0m\r\n");
     });
@@ -76,31 +101,49 @@ export default function TerminalPane({ id }: { id: string }) {
       }
       if (e.ctrlKey && e.shiftKey && e.code === "KeyV") {
         void navigator.clipboard.readText().then((text) => {
-          if (text) writeTerminal(id, Array.from(encoder.encode(text))).catch(() => {});
+          if (text)
+            writeTerminal(id, Array.from(encoder.encode(text))).catch(() => {});
         });
         return false;
       }
       return true;
     });
 
-    // Shell output -> terminal (batched bytes from the backend).
+    // Shell output: write immediately if focused, otherwise buffer + throttle.
     const outputSub = listen<TerminalOutput>("terminal-output", (e) => {
-      if (e.payload.id === id) term.write(new Uint8Array(e.payload.data));
+      if (e.payload.id !== id) return;
+      const bytes = new Uint8Array(e.payload.data);
+      if (focusedRef.current) {
+        term.write(bytes);
+      } else {
+        pendingRef.current.push(bytes);
+        if (flushTimerRef.current == null) {
+          flushTimerRef.current = window.setTimeout(() => {
+            flushTimerRef.current = null;
+            flush();
+          }, BLUR_FLUSH_MS);
+        }
+      }
     });
     const closedSub = listen<string>("terminal-closed", (e) => {
       if (e.payload === id && !disposed) {
+        flush();
         term.write("\r\n\x1b[90m[세션이 종료되었습니다]\x1b[0m\r\n");
       }
     });
 
-    // Keep the PTY size in sync with the pane.
+    // Keep the PTY size in sync with the pane (debounced backend call).
+    let resizeTimer: number | null = null;
     const doResize = () => {
       try {
         fit.fit();
-        resizeTerminal(id, term.cols, term.rows).catch(() => {});
       } catch {
-        /* element not visible yet */
+        return; /* element not visible yet */
       }
+      if (resizeTimer != null) clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        resizeTerminal(id, term.cols, term.rows).catch(() => {});
+      }, 100);
     };
     const observer = new ResizeObserver(doResize);
     observer.observe(host);
@@ -108,6 +151,8 @@ export default function TerminalPane({ id }: { id: string }) {
     return () => {
       disposed = true;
       observer.disconnect();
+      if (resizeTimer != null) clearTimeout(resizeTimer);
+      if (flushTimerRef.current != null) clearTimeout(flushTimerRef.current);
       dataSub.dispose();
       outputSub.then((fn) => fn());
       closedSub.then((fn) => fn());
@@ -115,7 +160,7 @@ export default function TerminalPane({ id }: { id: string }) {
       term.dispose();
       termRef.current = null;
     };
-  }, [id]);
+  }, [id, flush]);
 
   return <div ref={hostRef} className="h-full w-full bg-ink-900 p-1" />;
 }
