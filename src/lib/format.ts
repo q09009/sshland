@@ -14,6 +14,30 @@ export function formatSize(bytes: number, isDir: boolean): string {
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
 }
 
+/**
+ * Format a session's elapsed time (given in ms) like "1시간 12분", "12분", or
+ * "1분 미만". Minute granularity keeps the status bar minimal; computed entirely
+ * locally — never asks the server for the time.
+ */
+export function formatElapsed(ms: number): string {
+  const totalMinutes = Math.floor(ms / 60000);
+  if (totalMinutes < 1) return "1분 미만";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return `${hours}시간 ${minutes}분`;
+  return `${minutes}분`;
+}
+
+/**
+ * Format a Date as a wall clock, "HH:MM" or "HH:MM:SS". Uses the OS local time
+ * only — the server is never contacted for the time.
+ */
+export function formatClock(d: Date, showSeconds: boolean): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const base = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return showSeconds ? `${base}:${pad(d.getSeconds())}` : base;
+}
+
 /** Format a Unix timestamp (seconds) as "YYYY-MM-DD HH:mm". */
 export function formatDate(unixSeconds: number | null | undefined): string {
   if (!unixSeconds) return "-";

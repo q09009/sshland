@@ -58,11 +58,28 @@ export interface ConnectionInfo {
   username: string;
   /** Home directory reported by the server on connect. */
   home: string;
+  /** Local timestamp (ms) of when the session started, for elapsed-time display. */
+  connectedAt: number;
 }
+
+/**
+ * Health of the live connection, shown in the status bar. "reconnecting" is
+ * reserved for future auto-reconnect; today the app drops to the connect screen
+ * on loss, so only "connected" is seen while the shell is up.
+ */
+export type ConnectionStatus = "connected" | "reconnecting" | "disconnected";
 
 interface AppState {
   screen: Screen;
   connection: ConnectionInfo | null;
+  /** Live connection health, shown in the status bar. */
+  connectionStatus: ConnectionStatus;
+  setConnectionStatus: (status: ConnectionStatus) => void;
+
+  /** Whether the settings overlay is open. */
+  settingsOpen: boolean;
+  openSettings: () => void;
+  closeSettings: () => void;
   /**
    * A message to show on the connect screen after being kicked back there
    * (e.g. the connection dropped). Cleared once shown.
@@ -104,7 +121,7 @@ interface AppState {
   setPaneContent: (id: string, content: PaneContent) => void;
 
   /** Switch to the file manager after a successful connect. */
-  enterFiles: (connection: ConnectionInfo) => void;
+  enterFiles: (connection: Omit<ConnectionInfo, "connectedAt">) => void;
   /** Return to the connect screen, optionally with a notice to display. */
   returnToConnect: (notice?: string) => void;
   /** Clear a pending notice once it has been surfaced. */
@@ -131,6 +148,12 @@ export const useAppStore = create<AppState>((set) => ({
   screen: "connect",
   connection: null,
   connectNotice: null,
+  connectionStatus: "disconnected",
+  setConnectionStatus: (status) => set({ connectionStatus: status }),
+
+  settingsOpen: false,
+  openSettings: () => set({ settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
 
   paneTree: initialLeaf,
   focusedPaneId: initialLeaf.id,
@@ -191,8 +214,10 @@ export const useAppStore = create<AppState>((set) => ({
     const fm = makeLeaf("file-manager");
     set({
       screen: "files",
-      connection,
+      connection: { ...connection, connectedAt: Date.now() },
+      connectionStatus: "connected",
       connectNotice: null,
+      settingsOpen: false,
       paneTree: fm,
       focusedPaneId: fm.id,
     });
@@ -202,6 +227,8 @@ export const useAppStore = create<AppState>((set) => ({
     set({
       screen: "connect",
       connection: null,
+      connectionStatus: "disconnected",
+      settingsOpen: false,
       connectNotice: notice ?? null,
     }),
 

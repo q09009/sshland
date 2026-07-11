@@ -1,4 +1,5 @@
 mod error;
+mod settings;
 mod ssh;
 
 use ssh::SessionManager;
@@ -21,7 +22,9 @@ pub fn run() {
             ssh::write_terminal,
             ssh::resize_terminal,
             ssh::close_terminal,
-            ssh::disconnect
+            ssh::disconnect,
+            settings::load_settings,
+            settings::save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

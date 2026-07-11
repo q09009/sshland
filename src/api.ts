@@ -124,3 +124,13 @@ export interface TerminalOutput {
 export function disconnect(): Promise<void> {
   return invoke<void>("disconnect");
 }
+
+/** Read the persisted settings object (empty object on first run). */
+export function loadSettings(): Promise<Record<string, unknown>> {
+  return invoke<Record<string, unknown>>("load_settings");
+}
+
+/** Persist the whole settings object to disk. */
+export function saveSettings(settings: Record<string, unknown>): Promise<void> {
+  return invoke<void>("save_settings", { settings });
+}
