@@ -69,7 +69,7 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   const currentPathRef = useRef(currentPath);
   const focusedRef = useRef(focused);
   const highlightedElRef = useRef<HTMLElement | null>(null);
-  const didMountFsRef = useRef(false);
+  const lastFsRef = useRef(fsVersion);
   const didLoadInitialRef = useRef(false);
   useEffect(() => {
     currentPathRef.current = currentPath;
@@ -120,11 +120,13 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   }, []);
 
   // Any pane's filesystem mutation reloads this pane, keeping panes in sync.
+  // Compare the actual version (not a "did I mount" flag) so React StrictMode's
+  // dev-only double-invoke doesn't trigger a spurious reload on mount — that
+  // reload bumped reqId and dropped the initial loadDir's response, leaving the
+  // pane stuck on "불러오는 중...".
   useEffect(() => {
-    if (!didMountFsRef.current) {
-      didMountFsRef.current = true;
-      return;
-    }
+    if (lastFsRef.current === fsVersion) return;
+    lastFsRef.current = fsVersion;
     reloadSilently();
   }, [fsVersion, reloadSilently]);
 
