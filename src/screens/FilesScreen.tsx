@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
@@ -7,33 +6,35 @@ import {
   disconnect,
   download,
   FileEntry,
+  listDir,
   mkdir,
   rename,
-  TransferProgress,
   upload,
 } from "../api";
 import { useAppStore, ViewMode } from "../store";
 import { baseName, breadcrumbs, joinPath, parentPath } from "../lib/path";
+import { sortEntries } from "../lib/files";
 import { ConfirmDialog, PromptDialog } from "../components/Modal";
 import ContextMenu, { MenuItem } from "../components/ContextMenu";
-import TransfersPanel from "../components/TransfersPanel";
 import FileView from "../components/FileView";
 
-export default function FilesScreen() {
+/**
+ * One file-manager pane. All directory state (path, listing, view mode) is
+ * LOCAL so multiple file-manager panes navigate independently.
+ */
+export default function FilesScreen({ paneId }: { paneId: string }) {
   const connection = useAppStore((s) => s.connection);
-  const currentPath = useAppStore((s) => s.currentPath);
-  const entries = useAppStore((s) => s.entries);
-  const loading = useAppStore((s) => s.filesLoading);
-  const error = useAppStore((s) => s.filesError);
-  const showHidden = useAppStore((s) => s.showHidden);
-  const viewMode = useAppStore((s) => s.viewMode);
-  const loadDir = useAppStore((s) => s.loadDir);
-  const toggleHidden = useAppStore((s) => s.toggleHidden);
-  const setViewMode = useAppStore((s) => s.setViewMode);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
   const startTransfer = useAppStore((s) => s.startTransfer);
-  const updateTransfer = useAppStore((s) => s.updateTransfer);
   const finishTransfer = useAppStore((s) => s.finishTransfer);
+  const focused = useAppStore((s) => s.focusedPaneId === paneId);
+
+  const [currentPath, setCurrentPath] = useState(connection?.home ?? "/");
+  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("details");
 
   const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(
     null
@@ -52,32 +53,41 @@ export default function FilesScreen() {
   const [opError, setOpError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Load the starting directory on entry.
+  // Refs so the once-registered drag-drop listener sees current values.
+  const reqIdRef = useRef(0);
+  const currentPathRef = useRef(currentPath);
+  const focusedRef = useRef(focused);
+  useEffect(() => {
+    currentPathRef.current = currentPath;
+  }, [currentPath]);
+  useEffect(() => {
+    focusedRef.current = focused;
+  }, [focused]);
+
+  const loadDir = useCallback(async (path: string) => {
+    const reqId = ++reqIdRef.current;
+    setCurrentPath(path);
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await listDir(path);
+      if (reqIdRef.current === reqId) {
+        setEntries(sortEntries(list));
+        setLoading(false);
+      }
+    } catch (err) {
+      if (reqIdRef.current === reqId) {
+        setError(typeof err === "string" ? err : "폴더를 불러오지 못했어요.");
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  // Load the starting directory on mount.
   useEffect(() => {
     if (connection) loadDir(connection.home);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Stream transfer progress from the backend into the store.
-  useEffect(() => {
-    const unlisten = listen<TransferProgress>("transfer-progress", (e) => {
-      updateTransfer(e.payload.id, e.payload.transferred, e.payload.total);
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [updateTransfer]);
-
-  // Return to the connect screen if the backend reports the link dropped.
-  useEffect(() => {
-    const unlisten = listen("connection-lost", () => {
-      void disconnect().catch(() => {});
-      returnToConnect("서버와의 연결이 끊어졌어요. 다시 접속해주세요.");
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [returnToConnect]);
 
   // Auto-clear the operation error banner.
   useEffect(() => {
@@ -86,9 +96,11 @@ export default function FilesScreen() {
     return () => clearTimeout(t);
   }, [opError]);
 
-  // OS file drag-and-drop uploads into the current directory.
+  // OS file drag-and-drop uploads into this pane — but only when it's focused,
+  // so exactly one file-manager handles a drop.
   useEffect(() => {
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      if (!focusedRef.current) return;
       const p = event.payload;
       if (p.type === "enter" || p.type === "over") setIsDragging(true);
       else if (p.type === "leave") setIsDragging(false);
@@ -103,10 +115,9 @@ export default function FilesScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Upload each dropped local file into the current directory. */
+  /** Upload each dropped local file into this pane's current directory. */
   async function handleDrop(paths: string[]) {
-    // Read the path fresh so the once-registered listener isn't stale.
-    const dir = useAppStore.getState().currentPath;
+    const dir = currentPathRef.current;
     for (const local of paths) {
       const name = baseName(local);
       const id = crypto.randomUUID();
@@ -121,8 +132,7 @@ export default function FilesScreen() {
         );
       }
     }
-    // Refresh if we're still in the directory we uploaded into.
-    if (useAppStore.getState().currentPath === dir) await loadDir(dir);
+    if (currentPathRef.current === dir) await loadDir(dir);
   }
 
   const crumbs = useMemo(() => breadcrumbs(currentPath), [currentPath]);
@@ -139,15 +149,15 @@ export default function FilesScreen() {
     }
   }
 
-  function openEntry(path: string, isDir: boolean) {
-    if (isDir) loadDir(path);
+  function openEntry(entry: FileEntry) {
+    if (entry.isDir) loadDir(entry.path);
   }
 
   /** Run a mutating operation, then refresh the listing. */
   async function runOp(fn: () => Promise<void>) {
     try {
       await fn();
-      await loadDir(currentPath);
+      await loadDir(currentPathRef.current);
     } catch (err) {
       setOpError(typeof err === "string" ? err : "작업에 실패했어요.");
     }
@@ -232,13 +242,13 @@ export default function FilesScreen() {
 
   return (
     <div className="flex h-full flex-col bg-ink-900 text-slate-100">
-      <header className="flex items-center justify-between gap-3 border-b border-ink-700/60 bg-ink-800 px-4 py-2.5">
+      <header className="flex items-center justify-between gap-3 border-b border-ink-700/60 bg-ink-800 px-4 py-2">
         <p className="truncate text-sm font-medium">
           {connection?.username}@{connection?.host}
         </p>
         <button
           onClick={handleDisconnect}
-          className="shrink-0 rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-slate-300 hover:border-red-500/50 hover:text-red-300"
+          className="shrink-0 rounded-lg border border-ink-700 px-3 py-1 text-sm text-slate-300 hover:border-red-500/50 hover:text-red-300"
         >
           접속 끊기
         </button>
@@ -293,7 +303,7 @@ export default function FilesScreen() {
           <input
             type="checkbox"
             checked={showHidden}
-            onChange={toggleHidden}
+            onChange={() => setShowHidden((v) => !v)}
             className="accent-sky-600"
           />
           숨김파일
@@ -319,7 +329,7 @@ export default function FilesScreen() {
           <FileView
             entries={visibleEntries}
             viewMode={viewMode}
-            onOpen={(entry) => openEntry(entry.path, entry.isDir)}
+            onOpen={openEntry}
             onContextMenu={openMenu}
           />
         )}
@@ -371,8 +381,6 @@ export default function FilesScreen() {
           onCancel={() => setPrompt(null)}
         />
       )}
-
-      <TransfersPanel />
     </div>
   );
 }
