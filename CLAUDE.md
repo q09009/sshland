@@ -73,6 +73,16 @@ OS 파일 드롭은 브라우저 표준 `ondrop`이 **안 오고**, Tauri 네이
 - **설정 영속화**: `lib/settings.ts`(zustand)가 `AppSettings`(타입+기본값)를 들고, 앱 시작 시 `load()`(백엔드 `load_settings`)로 디스크 값을 기본값 위에 머지, `set(key,val)`마다 전체 객체를 `save_settings`로 즉시 기록. 백엔드는 `<app_config_dir>/settings.json`(레포 바깥, Windows면 `%APPDATA%\com.sshland.app\`)에 opaque JSON blob으로 저장 — git에 안 올라가고, **설정 추가 시 Rust 수정 불필요**. 설정 추가 절차: `AppSettings`에 필드 + `DEFAULTS`에 기본값 + 패널에 컨트롤, 3곳만.
 - **최근 접속정보 저장**(`AppSettings.lastConnection`): 접속 성공 시 host/port/username/authKind/keyPath를 저장해 다음 실행 때 접속 폼을 자동 채운다(`ConnectScreen`이 settings 로드 후 1회 prefill). **비밀번호·개인키 passphrase는 절대 저장 안 함**(핵심 철학 "비밀번호는 메모리에만" 준수 — `LastConnection`엔 secret 필드 자체가 없음).
 
+### 명령어 로그 바 (화면 맨 아래)
+
+파일관리자 조작을 **실제 터미널 명령어 문자열**로 바꿔 학습용으로 보여주는 얇은 한 줄 바. `App.tsx` 세로 flex에서 타일링 아래(`StatusBar`와 대칭)에 위치.
+
+- **변환은 순수 함수 `lib/commandLog.ts`의 `operationToCommandString(op, {user,host})`** 하나로 재사용: 업로드/다운로드=`scp`, 삭제=`rm`(디렉토리는 `-r`), 새폴더=`mkdir`, 이름변경·이동=`mv`, 복사=`cp -r`. 경로에 공백/특수문자 있을 때만 따옴표(학습용이라 실제 동작하는 명령어가 되도록). 실제 조작은 SFTP로 하고 이 문자열은 **표시 전용**.
+- 로그는 **세션 전용**(`store.commandLog`, 최신순, 최근 20개 cap) — 영속 저장 안 함, 재시작 시 초기화.
+- 각 조작 성공 지점(`FilesScreen`의 handleDrop/doDownload/performMove/doRename/doDelete/doNewFolder/doPaste)에서 `logOp(op)` 호출. **터미널 pane 입력은 로그에 안 올라감** — 파일관리자 조작만 명시적으로 훅을 걸었으므로 자동으로 중복 안 됨.
+- 바 클릭 시 위로 펼쳐지는 **히스토리 팝업**(최근 20개, 바깥클릭·Esc로 닫힘). 기록 없으면 클릭 무반응.
+- 설정 `commandLogEnabled`(기본 켜짐, 설정 탭 **첫 섹션** "명령어 로그")를 끄면 `CommandLogBar`가 `null` 반환 → 바 자체가 사라짐(숙련자용).
+
 ### 디자인 토큰 (단일 소스)
 
 색상·타이포·radius 리터럴은 전부 **`src/index.css`의 `:root`** 한 곳에 CSS 변수로 있다. `tailwind.config.js`는 값을 담지 않고 유틸 이름 → CSS 변수로 **연결만** 한다. 즉 `bg-ink-900` / `text-slate-400` / `rounded-lg` / `text-2xs` 같은 클래스가 전부 중앙 토큰을 가리킨다. 나중에 디자인을 갈아엎을 땐 `:root` 값만 바꾸면 되고 컴포넌트는 안 건드린다.
@@ -95,12 +105,13 @@ src-tauri/src/
   lib.rs      Tauri Builder 설정, command 등록
 
 src/
-  store.ts              zustand: 연결(상태·경과기준시각 포함)/연결상태/설정오버레이/화면 전환/pane 트리/전송목록/업로드배치/클립보드/드래그/fsVersion
+  store.ts              zustand: 연결(상태·경과기준시각 포함)/연결상태/설정오버레이/명령어로그/화면 전환/pane 트리/전송목록/업로드배치/클립보드/드래그/fsVersion
   api.ts                Tauri invoke 타입 래퍼 (설정 load/save 포함)
   lib/panes.ts           pane 트리 순수 함수 (분할/삭제/전환/비율/레이아웃/포커스탐색)
   lib/path.ts            경로 유틸 (join, parent, breadcrumb, baseName)
   lib/files.ts           sortEntries (폴더 우선 정렬)
   lib/format.ts          사람이 읽는 크기/날짜/경과시간/시계 포맷
+  lib/commandLog.ts      파일 조작 → CLI 명령어 문자열 변환 (operationToCommandString, 순수/재사용)
   lib/settings.ts        설정 zustand 스토어 (AppSettings 타입 + 기본값 + load/set, 변경 시 자동 영속화)
   lib/theme.ts           :root 디자인 토큰을 JS에서 읽는 헬퍼 (token/colorToken) — CSS 클래스 못 쓰는 xterm용
   index.css              디자인 토큰 :root 정의 (색/타이포/radius 단일 소스) + 전역 스타일
@@ -108,7 +119,8 @@ src/
   screens/ConnectScreen.tsx   접속 화면 (비밀번호/개인키, 로딩, 에러)
   screens/FilesScreen.tsx     파일관리자 pane 본체 (완전히 로컬 상태)
   components/StatusBar.tsx    상단 GNOME식 상태바 (user@host / 연결상태 / 세션경과 / 로컬시계 / 설정아이콘) — 전부 로컬 계산, 서버 호출 없음
-  components/SettingsPanel.tsx 설정 모달 (카테고리 사이드네비 + 섹션, 데이터주도 SECTIONS 배열로 확장)
+  components/CommandLogBar.tsx 하단 명령어 로그 바 (최근 1줄 + 클릭 시 히스토리 팝업, 설정으로 on/off)
+  components/SettingsPanel.tsx 설정 모달 (카테고리 사이드네비 + 섹션, 데이터주도 SECTIONS 배열로 확장; 현재 명령어로그/일반/정보)
   components/TilingShell.tsx  pane 트리 루트 + 전역 단축키 + 전역 이벤트 리스너(전송진행률/연결끊김)
   components/PaneView.tsx     pane 트리 → 평면 절대배치 렌더러 + 분할선 드래그
   components/TerminalPane.tsx xterm.js 터미널 (PTY 연결, 렌더 스로틀링)
@@ -130,7 +142,10 @@ src/
 PTY 스트리밍 → xterm pane → pane 트리+렌더러 → 분할 단축키 → 포커스이동 → 닫기 → 분할선 드래그 → pane 전환 → 비활성 pane 렌더 스로틀링.
 
 **Phase 3 — 상단 상태바 + 설정 탭: 완료**
-pane와 분리된 GNOME식 상단 상태바(user@host / 연결상태 / 세션경과 / 로컬시계 / 설정아이콘, 전부 로컬 계산), 설정 모달(카테고리 사이드네비, 데이터주도 확장구조, 현재 일반·정보 2섹션), 로컬 JSON 영속화(`settings.json`). 위 "상단 상태바 + 설정" 아키텍처 섹션 참고. 향후 명령어 로그/단축키/테마는 이 설정 구조에 섹션 추가로 확장 예정.
+pane와 분리된 GNOME식 상단 상태바(user@host / 연결상태 / 세션경과 / 로컬시계 / 설정아이콘, 전부 로컬 계산), 설정 모달(카테고리 사이드네비, 데이터주도 확장구조), 로컬 JSON 영속화(`settings.json`). 위 "상단 상태바 + 설정" 아키텍처 섹션 참고.
+
+**Phase 4 — 명령어 로그 바: 완료**
+화면 맨 아래 얇은 바에 파일관리자 조작을 실제 CLI 명령어(scp/rm/mkdir/mv/cp)로 표시(최근 1줄 + 클릭 시 히스토리 팝업), 세션 전용. 설정 탭 첫 섹션 "명령어 로그" 토글로 on/off(끄면 바 사라짐). 위 "명령어 로그 바" 아키텍처 섹션 참고. 향후 단축키/테마 섹션은 같은 설정 구조에 추가로 확장 예정.
 
 **추가 개선 (사용자 피드백 기반, 완료):**
 - 파일관리자 메뉴바(파일/편집/보기)로 툴바 정리, 단일 선택, 빈공간 우클릭(새폴더/붙여넣기), 파일 우클릭(복사/다운로드/이름변경/삭제)
