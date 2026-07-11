@@ -70,6 +70,7 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   const focusedRef = useRef(focused);
   const highlightedElRef = useRef<HTMLElement | null>(null);
   const didMountFsRef = useRef(false);
+  const didLoadInitialRef = useRef(false);
   useEffect(() => {
     currentPathRef.current = currentPath;
   }, [currentPath]);
@@ -107,8 +108,13 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
       .catch(() => {});
   }, []);
 
-  // Load the starting directory on mount.
+  // Load the starting directory on mount. Guarded so React StrictMode's
+  // dev-only double-invoke of this effect can't fire two competing loadDir
+  // calls for the same path (the loser's response was silently dropped,
+  // sometimes leaving the pane stuck on "불러오는 중...").
   useEffect(() => {
+    if (didLoadInitialRef.current) return;
+    didLoadInitialRef.current = true;
     if (connection) loadDir(connection.home);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
