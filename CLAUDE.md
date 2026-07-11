@@ -6,7 +6,7 @@
 
 - **가벼움 우선**: 무거운 의존성 추가 전 반드시 필요성을 따진다.
 - **초보자 타겟**: 사용자에게 보이는 모든 에러는 기술 용어 없이 자연스러운 한글 문장이어야 한다 (`src-tauri/src/error.rs`에서 중앙 관리).
-- **UI**: 미니멀 다크 테마.
+- **UI**: 미니멀 다크 테마. 색/여백/폰트/radius 리터럴은 **디자인 토큰(`src/index.css`의 `:root`) 한 곳**에만 둔다 — 아래 "디자인 토큰" 섹션 참고. 컴포넌트에 hex/px 직접 박기 금지.
 - **파괴적 작업**(삭제 등)은 반드시 확인 다이얼로그를 거친다.
 - **비밀번호는 메모리에만**: 디스크 저장 금지, 로그 출력 금지 (secret을 담는 타입엔 `Debug` derive 금지).
 
@@ -50,24 +50,65 @@
 
 `src/components/TerminalPane.tsx`: PTY를 마운트 시 열고(`open_terminal`), 언마운트 시 채널만 닫는다(`close_terminal`, SSH 연결은 유지). 성능을 위해 **포커스 없는 터미널은 출력을 버퍼링해 ~200ms(5fps)마다 배치 flush**, 포커스된 터미널은 즉시 반영. 포커스를 받으면 즉시 flush.
 
+### OS 드래그인 업로드 (로컬 → 서버)
+
+OS 파일 드롭은 브라우저 표준 `ondrop`이 **안 오고**, Tauri 네이티브 이벤트 `getCurrentWebview().onDragDropEvent(...)`로만 온다 (`FilesScreen.tsx`에서 마운트 시 1회 구독). `dragDropEnabled`는 `tauri.conf.json` 기본값 true여야 이벤트가 온다.
+
+**타겟 pane은 포커스가 아니라 커서 위치로 정한다.** 이벤트는 창(webview) 단위로 한 번 발생 → 열려 있는 모든 `FilesScreen` 리스너가 다 실행되므로, 각 pane이 **자기 루트 rect 안에 커서가 있는지**(`rootRef.getBoundingClientRect()` 포함검사) 확인해 그 pane만 반응한다. 터미널 pane엔 `FilesScreen`이 없어 자동으로 무시되고, 드롭은 포커스를 옮기지 않으므로 위치 검사가 유일하게 올바른 방법이다. (예전엔 포커스 기반이라 pane 두 개일 때 엉뚱한 pane으로 업로드되던 문제가 있었다.)
+
+- payload `position`은 **물리 픽셀**(`PhysicalPosition`)이라 `window.devicePixelRatio`로 나눠 CSS 좌표로 변환해야 `getBoundingClientRect`와 맞는다 (Windows 배율 100%가 아니면 안 그러면 어긋남).
+- 여러 파일은 순차 업로드. `>1`개면 `store.uploadBatches`에 배치를 만들어 `TransfersPanel`이 "N개 중 M개 완료" 전체 진행률을 개별 카드 위에 표시. 개별 진행률은 기존 `transfer-progress` 흐름 그대로.
+- **폴더는 백엔드(`upload_file`)가 거부** — `std::fs::metadata`로 dir이면 "폴더는 업로드할 수 없어요…" 반환. 프론트에서 로컬 경로가 폴더인지 알 방법이 마땅찮아(fs 플러그인 추가 회피) 백엔드에서 막고 에러 카드로 안내한다.
+- hover 하이라이트는 **해당 pane에 국한**(pane 루트가 `relative`, 오버레이가 `absolute inset-0` + 점선 테두리). 창 전체 `fixed` 오버레이 아님.
+
+### 상단 상태바 + 설정 (pane 타일링과 분리된 레이어)
+
+파일 화면(`App.tsx`)은 **세로 flex**: `StatusBar`(고정 높이 `h-8`, `shrink-0`) 위 + 타일링 영역(`flex-1 min-h-0`) 아래. 타일링 시스템은 이 아래 영역만 차지한다. 설정은 `flex` 밖의 모달 오버레이(`fixed inset-0`)로 타일링을 덮는다.
+
+- **상태바(`StatusBar.tsx`)는 서버에 아무것도 요청하지 않는다** (원칙). 표시 항목: 왼쪽 `user@host` + 연결상태 인디케이터(색 점: 연결됨=emerald / 재연결중=amber pulse / 끊김=red), 오른쪽 세션 경과시간·로컬 시계·설정 톱니바퀴.
+  - 세션 경과시간 = `now - connection.connectedAt`(둘 다 로컬 `Date`). 시계 = `new Date(now)`. **1초 로컬 인터벌 하나**로 `now`(=`Date.now()`)만 갱신해 둘 다 파생. 서버 시간 요청 절대 없음.
+  - `connectionStatus`는 store에 있고 지금은 `connected`만 실제로 보인다(끊기면 즉시 접속화면 복귀). `reconnecting`은 **향후 자동재연결용 예약값**(`setConnectionStatus`로 세팅).
+  - 가운데 영역은 **향후 서버 리소스(CPU/메모리) 위젯 자리로 비워둠**(3분할 레이아웃이라 리플로우 없이 삽입 가능).
+- **설정(`SettingsPanel.tsx`)**: 카테고리 사이드네비 + 콘텐츠. 카테고리는 **데이터주도 `SECTIONS` 배열**(`{id,label,render}`)이라 "명령어 로그/단축키/테마" 같은 섹션은 배열에 한 줄 추가하면 끝. 현재 `일반`(시계 초표시 토글)·`정보`(앱 이름/버전, `@tauri-apps/api/app`의 `getVersion`/`getName`/`getTauriVersion`) 두 섹션. Esc·배경클릭·✕로 닫힘.
+- **설정 영속화**: `lib/settings.ts`(zustand)가 `AppSettings`(타입+기본값)를 들고, 앱 시작 시 `load()`(백엔드 `load_settings`)로 디스크 값을 기본값 위에 머지, `set(key,val)`마다 전체 객체를 `save_settings`로 즉시 기록. 백엔드는 `<app_config_dir>/settings.json`(레포 바깥, Windows면 `%APPDATA%\com.sshland.app\`)에 opaque JSON blob으로 저장 — git에 안 올라가고, **설정 추가 시 Rust 수정 불필요**. 설정 추가 절차: `AppSettings`에 필드 + `DEFAULTS`에 기본값 + 패널에 컨트롤, 3곳만.
+- **최근 접속정보 저장**(`AppSettings.lastConnection`): 접속 성공 시 host/port/username/authKind/keyPath를 저장해 다음 실행 때 접속 폼을 자동 채운다(`ConnectScreen`이 settings 로드 후 1회 prefill). **비밀번호·개인키 passphrase는 절대 저장 안 함**(핵심 철학 "비밀번호는 메모리에만" 준수 — `LastConnection`엔 secret 필드 자체가 없음).
+
+### 디자인 토큰 (단일 소스)
+
+색상·타이포·radius 리터럴은 전부 **`src/index.css`의 `:root`** 한 곳에 CSS 변수로 있다. `tailwind.config.js`는 값을 담지 않고 유틸 이름 → CSS 변수로 **연결만** 한다. 즉 `bg-ink-900` / `text-slate-400` / `rounded-lg` / `text-2xs` 같은 클래스가 전부 중앙 토큰을 가리킨다. 나중에 디자인을 갈아엎을 땐 `:root` 값만 바꾸면 되고 컴포넌트는 안 건드린다.
+
+- **색은 RGB 채널("15 23 42")로 저장** → Tailwind 투명도 modifier가 동작하도록 config에서 `rgb(var(--color-x) / <alpha-value>)`로 매핑. 그래서 `bg-sky-500/20` 같은 것도 그대로 됨.
+- 팔레트 이름(`ink`/`slate`/`sky`/`emerald`/`amber`/`red`)과 클래스명은 **일부러 그대로 유지**했다(이번은 리팩터지 리디자인이 아님 — 값만 `:root`로 이동, 시각적 변화 0). 실제로 색 32종·폰트크기·radius·터미널 색을 리팩터 전후 computed-style로 비교해 **완전 동일** 확인함.
+- **폰트 크기**: `text-2xs`(11px, line-height 없음 — 옛 `text-[11px]`과 동일)만 새로 추가. 나머지 `text-xs~2xl`은 Tailwind 기본 스케일 값을 `:root` 변수로 옮겨 config에서 참조(라인하이트 포함 기본값 그대로).
+- **spacing 스케일**은 Tailwind 기본 스케일을 그대로 쓴다(이미 일관된 스케일이라 굳이 :root로 안 옮김). 컴포넌트에 남은 one-off 레이아웃 px(드롭다운 `min-w-[140px]`/`[160px]`, 설정 모달 `max-h-[560px]`)는 디자인 토큰이 아니라 개별 치수라 그대로 둠.
+- **CSS 클래스를 못 쓰는 곳(xterm 터미널의 JS theme 객체)**은 `src/lib/theme.ts`의 `token()`/`colorToken()`으로 `:root` 변수를 런타임에 읽어 쓴다 — 터미널도 hex 중복 없이 같은 소스를 참조(`--font-terminal` 포함).
+
 ## 파일 구조
 
 ```
 src-tauri/src/
   ssh.rs      SSH/SFTP 세션 관리자 + 워커 루프 + 모든 Tauri command (connect, list_dir,
               download, upload, rename, mkdir, delete, copy, open/write/resize/close_terminal, disconnect)
+  settings.rs 설정 영속화 command (load_settings/save_settings) — 앱 config 폴더의 settings.json
+              에 JSON blob으로 읽고 씀. 스키마는 프론트가 소유(백엔드는 opaque).
   error.rs    기술 에러 → 친절한 한글 메시지 변환 (중앙 관리)
   lib.rs      Tauri Builder 설정, command 등록
 
 src/
-  store.ts              zustand: 연결/화면 전환/pane 트리/전송목록/클립보드/드래그/fsVersion
-  api.ts                Tauri invoke 타입 래퍼
+  store.ts              zustand: 연결(상태·경과기준시각 포함)/연결상태/설정오버레이/화면 전환/pane 트리/전송목록/업로드배치/클립보드/드래그/fsVersion
+  api.ts                Tauri invoke 타입 래퍼 (설정 load/save 포함)
   lib/panes.ts           pane 트리 순수 함수 (분할/삭제/전환/비율/레이아웃/포커스탐색)
   lib/path.ts            경로 유틸 (join, parent, breadcrumb, baseName)
   lib/files.ts           sortEntries (폴더 우선 정렬)
-  lib/format.ts          사람이 읽는 크기/날짜 포맷
+  lib/format.ts          사람이 읽는 크기/날짜/경과시간/시계 포맷
+  lib/settings.ts        설정 zustand 스토어 (AppSettings 타입 + 기본값 + load/set, 변경 시 자동 영속화)
+  lib/theme.ts           :root 디자인 토큰을 JS에서 읽는 헬퍼 (token/colorToken) — CSS 클래스 못 쓰는 xterm용
+  index.css              디자인 토큰 :root 정의 (색/타이포/radius 단일 소스) + 전역 스타일
+  ../tailwind.config.js  토큰 → Tailwind 유틸 이름 연결 (값 없음, var 매핑만)
   screens/ConnectScreen.tsx   접속 화면 (비밀번호/개인키, 로딩, 에러)
-  screens/FilesScreen.tsx     파일관리자 pane 본체 (paneId prop, 완전히 로컬 상태)
+  screens/FilesScreen.tsx     파일관리자 pane 본체 (완전히 로컬 상태)
+  components/StatusBar.tsx    상단 GNOME식 상태바 (user@host / 연결상태 / 세션경과 / 로컬시계 / 설정아이콘) — 전부 로컬 계산, 서버 호출 없음
+  components/SettingsPanel.tsx 설정 모달 (카테고리 사이드네비 + 섹션, 데이터주도 SECTIONS 배열로 확장)
   components/TilingShell.tsx  pane 트리 루트 + 전역 단축키 + 전역 이벤트 리스너(전송진행률/연결끊김)
   components/PaneView.tsx     pane 트리 → 평면 절대배치 렌더러 + 분할선 드래그
   components/TerminalPane.tsx xterm.js 터미널 (PTY 연결, 렌더 스로틀링)
@@ -76,7 +117,7 @@ src/
   components/ContextMenu.tsx  우클릭 컨텍스트 메뉴
   components/Modal.tsx        확인 다이얼로그 / 입력 다이얼로그
   components/DragLayer.tsx    드래그 중 커서 따라다니는 고스트 라벨
-  components/TransfersPanel.tsx  업/다운로드 진행률 패널
+  components/TransfersPanel.tsx  업/다운로드 진행률 패널 (완료된 카드·배치는 3초 뒤 페이드아웃 자동 정리, 에러는 수동 닫기)
   components/ShortcutsHelp.tsx   우하단 단축키 도움말
 ```
 
@@ -88,9 +129,14 @@ src/
 **Phase 2 — 터미널 + Hyprland식 타일링: 완료 (9단계 전부)**
 PTY 스트리밍 → xterm pane → pane 트리+렌더러 → 분할 단축키 → 포커스이동 → 닫기 → 분할선 드래그 → pane 전환 → 비활성 pane 렌더 스로틀링.
 
+**Phase 3 — 상단 상태바 + 설정 탭: 완료**
+pane와 분리된 GNOME식 상단 상태바(user@host / 연결상태 / 세션경과 / 로컬시계 / 설정아이콘, 전부 로컬 계산), 설정 모달(카테고리 사이드네비, 데이터주도 확장구조, 현재 일반·정보 2섹션), 로컬 JSON 영속화(`settings.json`). 위 "상단 상태바 + 설정" 아키텍처 섹션 참고. 향후 명령어 로그/단축키/테마는 이 설정 구조에 섹션 추가로 확장 예정.
+
 **추가 개선 (사용자 피드백 기반, 완료):**
 - 파일관리자 메뉴바(파일/편집/보기)로 툴바 정리, 단일 선택, 빈공간 우클릭(새폴더/붙여넣기), 파일 우클릭(복사/다운로드/이름변경/삭제)
 - 앱 내부 드래그로 파일/폴더 아이콘을 다른 폴더나 다른 pane으로 옮기기 (SFTP rename)
+- **OS 파일 드래그인 업로드**(로컬 → 서버): 탐색기/Finder에서 파일관리자 pane으로 드래그하면 그 pane의 현재 폴더에 업로드. 아래 "OS 드래그인 업로드" 섹션 참고. (반대 방향 드래그아웃은 Tauri 웹뷰가 크로스플랫폼으로 지원 안 해서 만들지 않음 — 다운로드는 버튼 흐름 유지.)
+- **디자인 토큰 중앙화**(리팩터, 시각 변화 0): 모든 색/타이포/radius 리터럴을 `:root`(`index.css`) 단일 소스로 이동, Tailwind는 매핑만. 위 "디자인 토큰" 섹션 참고. 미래 리디자인 대비 구조 정리.
 
 **수정된 버그:**
 - pane 닫을 때 살아남아야 할 형제 터미널까지 죽던 문제 (렌더링을 트리 재귀 → 평면 절대배치로 전환)
