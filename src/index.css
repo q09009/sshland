@@ -2,6 +2,84 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * ============================================================================
+ * DESIGN TOKENS — single source of truth for the whole app.
+ * ============================================================================
+ * Every literal color / radius / font value lives here. Components reference
+ * these only through Tailwind utility classes (bg-ink-900, text-slate-400,
+ * rounded-lg, …) whose values are wired to these vars in tailwind.config.js.
+ * A future restyle edits values here; nothing in the components changes.
+ *
+ * Dark theme only for now. Colors are stored as space-separated RGB channels
+ * so Tailwind can apply opacity modifiers, e.g. `rgb(var(--color-sky-500) / .2)`
+ * for `bg-sky-500/20`.
+ */
+:root {
+  /* --- Neutral surfaces (custom "ink" scale) --- */
+  --color-ink-900: 15 23 42;
+  --color-ink-800: 30 41 59;
+  --color-ink-700: 51 65 85;
+  --color-ink-600: 71 85 105;
+
+  /* --- Text / neutral foreground (slate) --- */
+  --color-slate-100: 241 245 249;
+  --color-slate-200: 226 232 240;
+  --color-slate-300: 203 213 225;
+  --color-slate-400: 148 163 184;
+  --color-slate-500: 100 116 139;
+  --color-slate-600: 71 85 105;
+
+  /* --- Accent (sky) --- */
+  --color-sky-200: 186 230 253;
+  --color-sky-300: 125 211 252;
+  --color-sky-400: 56 189 248;
+  --color-sky-500: 14 165 233;
+  --color-sky-600: 2 132 199;
+  --color-sky-950: 8 47 73;
+
+  /* --- Status --- */
+  --color-emerald-500: 16 185 129;
+  --color-amber-400: 251 191 36;
+  --color-red-200: 254 202 202;
+  --color-red-300: 252 165 165;
+  --color-red-400: 248 113 113;
+  --color-red-500: 239 68 68;
+  --color-red-600: 220 38 38;
+  --color-red-950: 69 10 10;
+
+  /* --- Typography --- */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Malgun Gothic",
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  /* Terminal (xterm) monospace stack — read from JS in TerminalPane. */
+  --font-terminal: "Cascadia Code", "D2Coding", Consolas, "Courier New",
+    monospace;
+
+  /* Type scale (size / line-height) — mirrors Tailwind defaults, centralized. */
+  --text-2xs: 11px;
+  --text-xs: 0.75rem;
+  --leading-xs: 1rem;
+  --text-sm: 0.875rem;
+  --leading-sm: 1.25rem;
+  --text-base: 1rem;
+  --leading-base: 1.5rem;
+  --text-lg: 1.125rem;
+  --leading-lg: 1.75rem;
+  --text-2xl: 1.5rem;
+  --leading-2xl: 2rem;
+
+  /* --- Border radius (mirrors Tailwind defaults, centralized) --- */
+  --radius-sm: 0.125rem;
+  --radius: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-full: 9999px;
+}
+
 html,
 body,
 #root {
@@ -10,16 +88,15 @@ body,
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Malgun Gothic",
-    sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
 /* Highlight a folder / pane that a dragged item would drop into. */
 .drop-target-active {
-  outline: 2px solid #38bdf8;
+  outline: 2px solid rgb(var(--color-sky-400));
   outline-offset: -2px;
-  background: rgba(56, 189, 248, 0.12);
+  background: rgb(var(--color-sky-400) / 0.12);
 }
 
 /* Slim, dark scrollbars to match the theme. */
@@ -28,7 +105,7 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: rgb(var(--color-ink-700));
   border-radius: 5px;
 }
 ::-webkit-scrollbar-track {

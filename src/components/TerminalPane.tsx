@@ -11,15 +11,19 @@ import {
   writeTerminal,
 } from "../api";
 import { useAppStore } from "../store";
+import { colorToken, token } from "../lib/theme";
 
-const THEME = {
-  background: "#0f172a",
-  foreground: "#e2e8f0",
-  cursor: "#38bdf8",
-  selectionBackground: "#334155",
-  black: "#1e293b",
-  brightBlack: "#475569",
-};
+/** xterm color theme, sourced from the central design tokens (see index.css). */
+function terminalTheme() {
+  return {
+    background: colorToken("--color-ink-900"),
+    foreground: colorToken("--color-slate-200"),
+    cursor: colorToken("--color-sky-400"),
+    selectionBackground: colorToken("--color-ink-700"),
+    black: colorToken("--color-ink-800"),
+    brightBlack: colorToken("--color-ink-600"),
+  };
+}
 
 /** How often to repaint an unfocused terminal that keeps producing output. */
 const BLUR_FLUSH_MS = 200;
@@ -66,11 +70,10 @@ export default function TerminalPane({ id }: { id: string }) {
     if (!host) return;
 
     const term = new Terminal({
-      fontFamily:
-        '"Cascadia Code", "D2Coding", Consolas, "Courier New", monospace',
+      fontFamily: token("--font-terminal"),
       fontSize: 13,
       cursorBlink: true,
-      theme: THEME,
+      theme: terminalTheme(),
       scrollback: 5000,
     });
     const fit = new FitAddon();

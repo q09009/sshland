@@ -139,7 +139,7 @@ function GridView(props: Props) {
             {entry.name}
           </span>
           {!entry.isDir && (
-            <span className="text-[11px] text-slate-500">
+            <span className="text-2xs text-slate-500">
               {formatSize(entry.size, entry.isDir)}
             </span>
           )}

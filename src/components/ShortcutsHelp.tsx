@@ -22,7 +22,7 @@ export default function ShortcutsHelp() {
             {SHORTCUTS.map((s) => (
               <li key={s.keys} className="flex items-center justify-between gap-3">
                 <span className="text-xs text-slate-300">{s.desc}</span>
-                <kbd className="shrink-0 rounded bg-ink-900 px-1.5 py-0.5 font-mono text-[11px] text-slate-400">
+                <kbd className="shrink-0 rounded bg-ink-900 px-1.5 py-0.5 font-mono text-2xs text-slate-400">
                   {s.keys}
                 </kbd>
               </li>
