@@ -499,9 +499,6 @@ export default function FilesScreen() {
         <Menu label="파일" items={fileMenu} />
         <Menu label="편집" items={editMenu} />
         <Menu label="보기" items={viewMenu} />
-        <span className="ml-auto truncate pl-2 text-xs text-slate-500">
-          {connection?.username}@{connection?.host}
-        </span>
       </div>
 
       {/* Navigation row: up / home / refresh + breadcrumb */}
