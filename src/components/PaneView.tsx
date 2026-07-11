@@ -123,7 +123,7 @@ function Leaf({ node }: { node: LeafNode }) {
       <PaneHeader node={node} />
       <div className="min-h-0 flex-1 overflow-hidden">
         {node.content === "file-manager" ? (
-          <FilesScreen paneId={node.id} />
+          <FilesScreen />
         ) : (
           <TerminalPane id={node.id} />
         )}

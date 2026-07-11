@@ -25,6 +25,18 @@ export interface Transfer {
   error?: string;
 }
 
+/**
+ * A multi-file drag-in upload, shown as an overall "N개 중 M개 완료" counter
+ * above the per-file transfer cards. Only created when >1 file is dropped.
+ */
+export interface UploadBatch {
+  id: string;
+  /** How many files this batch is uploading. */
+  total: number;
+  /** How many have finished (success or error). */
+  done: number;
+}
+
 /** Which top-level screen is shown. */
 export type Screen = "connect" | "files";
 
@@ -104,6 +116,12 @@ interface AppState {
   updateTransfer: (id: string, transferred: number, total: number) => void;
   finishTransfer: (id: string, error?: string) => void;
   dismissTransfer: (id: string) => void;
+
+  // --- Multi-file upload batches (overall progress) ---
+  uploadBatches: UploadBatch[];
+  startBatch: (id: string, total: number) => void;
+  advanceBatch: (id: string) => void;
+  dismissBatch: (id: string) => void;
 }
 
 // Placeholder tree until a connection seeds a real one.
@@ -229,4 +247,16 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   dismissTransfer: (id) =>
     set((s) => ({ transfers: s.transfers.filter((t) => t.id !== id) })),
+
+  uploadBatches: [],
+  startBatch: (id, total) =>
+    set((s) => ({ uploadBatches: [...s.uploadBatches, { id, total, done: 0 }] })),
+  advanceBatch: (id) =>
+    set((s) => ({
+      uploadBatches: s.uploadBatches.map((b) =>
+        b.id === id ? { ...b, done: b.done + 1 } : b
+      ),
+    })),
+  dismissBatch: (id) =>
+    set((s) => ({ uploadBatches: s.uploadBatches.filter((b) => b.id !== id) })),
 }));

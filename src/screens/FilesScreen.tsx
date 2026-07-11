@@ -24,17 +24,18 @@ import FileView from "../components/FileView";
  * One file-manager pane. All directory state (path, listing, view mode) is
  * LOCAL so multiple file-manager panes navigate independently.
  */
-export default function FilesScreen({ paneId }: { paneId: string }) {
+export default function FilesScreen() {
   const connection = useAppStore((s) => s.connection);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
   const startTransfer = useAppStore((s) => s.startTransfer);
   const finishTransfer = useAppStore((s) => s.finishTransfer);
+  const startBatch = useAppStore((s) => s.startBatch);
+  const advanceBatch = useAppStore((s) => s.advanceBatch);
   const clipboard = useAppStore((s) => s.clipboard);
   const setClipboard = useAppStore((s) => s.setClipboard);
   const setDragItem = useAppStore((s) => s.setDragItem);
   const bumpFs = useAppStore((s) => s.bumpFs);
   const fsVersion = useAppStore((s) => s.fsVersion);
-  const focused = useAppStore((s) => s.focusedPaneId === paneId);
 
   const [currentPath, setCurrentPath] = useState(connection?.home ?? "/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -67,16 +68,13 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   // Refs so the once-registered drag-drop listener sees current values.
   const reqIdRef = useRef(0);
   const currentPathRef = useRef(currentPath);
-  const focusedRef = useRef(focused);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const highlightedElRef = useRef<HTMLElement | null>(null);
   const lastFsRef = useRef(fsVersion);
   const didLoadInitialRef = useRef(false);
   useEffect(() => {
     currentPathRef.current = currentPath;
   }, [currentPath]);
-  useEffect(() => {
-    focusedRef.current = focused;
-  }, [focused]);
 
   const loadDir = useCallback(async (path: string) => {
     const reqId = ++reqIdRef.current;
@@ -137,17 +135,35 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
     return () => clearTimeout(t);
   }, [opError]);
 
-  // OS file drag-and-drop uploads into this pane — but only when it's focused,
-  // so exactly one file-manager handles a drop.
+  // OS file drag-and-drop uploads into this pane. The drop is routed by CURSOR
+  // POSITION, not focus: Tauri fires one window-level event, so every pane's
+  // listener runs — each checks whether the cursor is inside its own rect and
+  // only the pane under the cursor reacts. Terminal panes have no FilesScreen
+  // (so they never react), and dropping never moves focus, so a position check
+  // is the only correct way to pick the target pane.
   useEffect(() => {
+    // Tauri reports the cursor in physical pixels; convert to CSS pixels
+    // (what getBoundingClientRect uses) by dividing out the device pixel ratio.
+    const isOverThisPane = (pos: { x: number; y: number }) => {
+      const el = rootRef.current;
+      if (!el) return false;
+      const dpr = window.devicePixelRatio || 1;
+      const x = pos.x / dpr;
+      const y = pos.y / dpr;
+      const r = el.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
-      if (!focusedRef.current) return;
       const p = event.payload;
-      if (p.type === "enter" || p.type === "over") setIsDragging(true);
-      else if (p.type === "leave") setIsDragging(false);
-      else if (p.type === "drop") {
+      if (p.type === "enter" || p.type === "over") {
+        setIsDragging(isOverThisPane(p.position));
+      } else if (p.type === "leave") {
         setIsDragging(false);
-        void handleDrop(p.paths);
+      } else if (p.type === "drop") {
+        const over = isOverThisPane(p.position);
+        setIsDragging(false);
+        if (over) void handleDrop(p.paths);
       }
     });
     return () => {
@@ -156,9 +172,16 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Upload each dropped local file into this pane's current directory. */
+  /**
+   * Upload each dropped local file into this pane's current directory,
+   * sequentially. Folders are rejected by the backend with a friendly message.
+   * For multi-file drops, an overall "N개 중 M개 완료" batch counter is shown.
+   */
   async function handleDrop(paths: string[]) {
     const dir = currentPathRef.current;
+    const batchId = crypto.randomUUID();
+    const showBatch = paths.length > 1;
+    if (showBatch) startBatch(batchId, paths.length);
     for (const local of paths) {
       const name = baseName(local);
       const id = crypto.randomUUID();
@@ -172,8 +195,10 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
           typeof err === "string" ? err : "업로드에 실패했어요."
         );
       }
+      if (showBatch) advanceBatch(batchId);
     }
     bumpFs();
+    // The overall counter auto-dismisses itself from TransfersPanel once done.
   }
 
   /** Start a potential drag-to-move; commits on drop over a folder/pane. */
@@ -432,7 +457,10 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   const atRoot = currentPath === "/";
 
   return (
-    <div className="flex h-full flex-col bg-ink-900 text-slate-100">
+    <div
+      ref={rootRef}
+      className="relative flex h-full flex-col bg-ink-900 text-slate-100"
+    >
       {/* Menu bar */}
       <div className="flex items-center gap-1 border-b border-ink-700/60 bg-ink-800 px-2 py-1">
         <Menu label="파일" items={fileMenu} />
@@ -513,13 +541,13 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
       </div>
 
       {isDragging && (
-        <div className="pointer-events-none fixed inset-0 z-20 flex items-center justify-center bg-sky-950/60 backdrop-blur-sm">
-          <div className="rounded-2xl border-2 border-dashed border-sky-400 px-10 py-8 text-center">
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-sky-400 bg-sky-950/60 backdrop-blur-sm">
+          <div className="rounded-2xl px-10 py-8 text-center">
             <div className="text-lg font-medium text-sky-200">
               여기에 놓으면 업로드돼요
             </div>
-            <div className="mt-1 text-sm text-sky-300/80">
-              현재 폴더에 파일이 올라갑니다
+            <div className="mt-1 truncate text-sm text-sky-300/80">
+              {currentPath} 에 파일이 올라갑니다
             </div>
           </div>
         </div>
