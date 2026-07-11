@@ -31,6 +31,9 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   const finishTransfer = useAppStore((s) => s.finishTransfer);
   const clipboard = useAppStore((s) => s.clipboard);
   const setClipboard = useAppStore((s) => s.setClipboard);
+  const setDragItem = useAppStore((s) => s.setDragItem);
+  const bumpFs = useAppStore((s) => s.bumpFs);
+  const fsVersion = useAppStore((s) => s.fsVersion);
   const focused = useAppStore((s) => s.focusedPaneId === paneId);
 
   const [currentPath, setCurrentPath] = useState(connection?.home ?? "/");
@@ -65,6 +68,8 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
   const reqIdRef = useRef(0);
   const currentPathRef = useRef(currentPath);
   const focusedRef = useRef(focused);
+  const highlightedElRef = useRef<HTMLElement | null>(null);
+  const didMountFsRef = useRef(false);
   useEffect(() => {
     currentPathRef.current = currentPath;
   }, [currentPath]);
@@ -92,11 +97,30 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
     }
   }, []);
 
+  // Refresh the current directory without a loading flicker (keeps selection).
+  const reloadSilently = useCallback(() => {
+    const reqId = ++reqIdRef.current;
+    listDir(currentPathRef.current)
+      .then((list) => {
+        if (reqIdRef.current === reqId) setEntries(sortEntries(list));
+      })
+      .catch(() => {});
+  }, []);
+
   // Load the starting directory on mount.
   useEffect(() => {
     if (connection) loadDir(connection.home);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Any pane's filesystem mutation reloads this pane, keeping panes in sync.
+  useEffect(() => {
+    if (!didMountFsRef.current) {
+      didMountFsRef.current = true;
+      return;
+    }
+    reloadSilently();
+  }, [fsVersion, reloadSilently]);
 
   // Auto-clear the operation error banner.
   useEffect(() => {
@@ -141,7 +165,80 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
         );
       }
     }
-    if (currentPathRef.current === dir) await loadDir(dir);
+    bumpFs();
+  }
+
+  /** Start a potential drag-to-move; commits on drop over a folder/pane. */
+  function onItemMouseDown(entry: FileEntry, e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragging = false;
+
+    const targetDirAt = (x: number, y: number): string | null => {
+      const el = document.elementFromPoint(x, y);
+      const t = el?.closest("[data-drop-dir]") as HTMLElement | null;
+      return t?.getAttribute("data-drop-dir") ?? null;
+    };
+    const clearHighlight = () => {
+      highlightedElRef.current?.classList.remove("drop-target-active");
+      highlightedElRef.current = null;
+    };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging) {
+        if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 5)
+          return;
+        dragging = true;
+        setDragItem({
+          name: entry.name,
+          path: entry.path,
+          isDir: entry.isDir,
+          sourceDir: currentPathRef.current,
+        });
+        document.body.style.userSelect = "none";
+      }
+      const el = document.elementFromPoint(
+        ev.clientX,
+        ev.clientY
+      )?.closest("[data-drop-dir]") as HTMLElement | null;
+      if (el !== highlightedElRef.current) {
+        clearHighlight();
+        if (el) {
+          el.classList.add("drop-target-active");
+          highlightedElRef.current = el;
+        }
+      }
+    };
+    const onUp = (ev: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+      clearHighlight();
+      if (dragging) {
+        const destDir = targetDirAt(ev.clientX, ev.clientY);
+        setDragItem(null);
+        if (destDir != null) void performMove(entry, destDir);
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  /** Move an item into destDir via rename (same connection = same filesystem). */
+  async function performMove(entry: FileEntry, destDir: string) {
+    const src = entry.path;
+    if (destDir === parentPath(src)) return; // already there
+    if (entry.isDir && (destDir === src || destDir.startsWith(src + "/"))) {
+      setOpError("폴더를 자기 자신 안으로 옮길 수 없어요.");
+      return;
+    }
+    try {
+      await rename(src, joinPath(destDir, entry.name));
+      bumpFs();
+    } catch (err) {
+      setOpError(typeof err === "string" ? err : "옮기지 못했어요.");
+    }
   }
 
   const crumbs = useMemo(() => breadcrumbs(currentPath), [currentPath]);
@@ -162,11 +259,11 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
     if (entry.isDir) loadDir(entry.path);
   }
 
-  /** Run a mutating operation, then refresh the listing. */
+  /** Run a mutating operation, then refresh all panes. */
   async function runOp(fn: () => Promise<void>) {
     try {
       await fn();
-      await loadDir(currentPathRef.current);
+      bumpFs();
     } catch (err) {
       setOpError(typeof err === "string" ? err : "작업에 실패했어요.");
     }
@@ -380,6 +477,7 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
       <div
         className="min-h-0 flex-1 overflow-auto"
         onContextMenu={openEmptyMenu}
+        data-drop-dir={currentPath}
       >
         {loading ? (
           <CenterMessage>불러오는 중…</CenterMessage>
@@ -401,6 +499,7 @@ export default function FilesScreen({ paneId }: { paneId: string }) {
             onOpen={openEntry}
             onSelect={setSelected}
             onContextMenu={openMenu}
+            onItemMouseDown={onItemMouseDown}
           />
         )}
       </div>

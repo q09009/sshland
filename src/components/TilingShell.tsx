@@ -5,6 +5,7 @@ import { useAppStore } from "../store";
 import PaneView from "./PaneView";
 import ShortcutsHelp from "./ShortcutsHelp";
 import TransfersPanel from "./TransfersPanel";
+import DragLayer from "./DragLayer";
 
 /** Hosts the pane tree, global tiling shortcuts, and connection-wide events. */
 export default function TilingShell() {
@@ -81,6 +82,7 @@ export default function TilingShell() {
       <PaneView node={paneTree} />
       <ShortcutsHelp />
       <TransfersPanel />
+      <DragLayer />
     </div>
   );
 }

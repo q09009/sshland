@@ -15,6 +15,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Highlight a folder / pane that a dragged item would drop into. */
+.drop-target-active {
+  outline: 2px solid #38bdf8;
+  outline-offset: -2px;
+  background: rgba(56, 189, 248, 0.12);
+}
+
 /* Slim, dark scrollbars to match the theme. */
 ::-webkit-scrollbar {
   width: 10px;

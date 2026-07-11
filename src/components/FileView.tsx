@@ -9,6 +9,8 @@ interface Props {
   onOpen: (entry: FileEntry) => void;
   onSelect: (entry: FileEntry) => void;
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
+  /** Begin a potential drag-to-move of an item. */
+  onItemMouseDown: (entry: FileEntry, e: React.MouseEvent) => void;
 }
 
 /** Renders the current directory in the selected layout. */
@@ -23,15 +25,19 @@ export default function FileView(props: Props) {
   }
 }
 
-/** Common row event handlers: single-click selects, double-click opens. */
+/** Common row props: click selects, double-click opens, folders are drop
+ *  targets (data-drop-dir), and mousedown may start a drag-to-move. */
 function rowHandlers(entry: FileEntry, p: Props) {
   return {
     onClick: () => p.onSelect(entry),
     onDoubleClick: () => p.onOpen(entry),
+    onMouseDown: (e: React.MouseEvent) => p.onItemMouseDown(entry, e),
     onContextMenu: (e: React.MouseEvent) => {
       e.stopPropagation();
       p.onContextMenu(e, entry);
     },
+    // Folders accept dropped items.
+    "data-drop-dir": entry.isDir ? entry.path : undefined,
   };
 }
 

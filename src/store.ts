@@ -28,6 +28,15 @@ export interface Transfer {
 /** Which top-level screen is shown. */
 export type Screen = "connect" | "files";
 
+/** A file/folder being dragged for an in-app move. */
+export interface DragItem {
+  name: string;
+  path: string;
+  isDir: boolean;
+  /** Directory the item is being dragged from. */
+  sourceDir: string;
+}
+
 /** File-listing layout: compact list, detailed table, or large icons. */
 export type ViewMode = "list" | "details" | "grid";
 
@@ -54,6 +63,17 @@ interface AppState {
   /** A copied file/folder, shared across panes for paste. */
   clipboard: { name: string; path: string; isDir: boolean } | null;
   setClipboard: (item: { name: string; path: string; isDir: boolean }) => void;
+
+  /** The file/folder currently being dragged between panes (move), if any. */
+  dragItem: DragItem | null;
+  setDragItem: (item: DragItem | null) => void;
+
+  /**
+   * Bumped after any filesystem mutation so every file-manager pane reloads its
+   * directory and they stay in sync.
+   */
+  fsVersion: number;
+  bumpFs: () => void;
 
   // --- Tiling pane tree ---
   paneTree: PaneNode;
@@ -171,6 +191,12 @@ export const useAppStore = create<AppState>((set) => ({
 
   clipboard: null,
   setClipboard: (item) => set({ clipboard: item }),
+
+  dragItem: null,
+  setDragItem: (item) => set({ dragItem: item }),
+
+  fsVersion: 0,
+  bumpFs: () => set((s) => ({ fsVersion: s.fsVersion + 1 })),
 
   transfers: [],
   startTransfer: (t) =>
