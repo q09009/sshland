@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { FileEntry, listDir } from "./api";
-import { makeLeaf, newId, PaneNode } from "./lib/panes";
+import { makeLeaf, PaneNode, splitLeaf, SplitDirection } from "./lib/panes";
 
 /** A file transfer shown in the transfers panel. */
 export interface Transfer {
@@ -59,6 +59,8 @@ interface AppState {
   focusedPaneId: string;
   /** Mark a pane as focused. */
   setFocus: (id: string) => void;
+  /** Split the focused pane, adding a new terminal pane and focusing it. */
+  splitFocused: (direction: SplitDirection) => void;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: ConnectionInfo) => void;
@@ -92,6 +94,14 @@ export const useAppStore = create<AppState>((set) => ({
   paneTree: initialLeaf,
   focusedPaneId: initialLeaf.id,
   setFocus: (id) => set({ focusedPaneId: id }),
+  splitFocused: (direction) =>
+    set((s) => {
+      const term = makeLeaf("terminal");
+      return {
+        paneTree: splitLeaf(s.paneTree, s.focusedPaneId, direction, term),
+        focusedPaneId: term.id,
+      };
+    }),
 
   currentPath: "",
   entries: [],
@@ -101,17 +111,8 @@ export const useAppStore = create<AppState>((set) => ({
   viewMode: "details",
 
   enterFiles: (connection) => {
-    // TEMP(tiling step 3): seed a file-manager | terminal split so the
-    // recursive renderer is exercised. Step 4 makes this a single leaf.
+    // Start with a single full-screen file-manager pane.
     const fm = makeLeaf("file-manager");
-    const term = makeLeaf("terminal");
-    const tree: PaneNode = {
-      type: "split",
-      id: newId("split"),
-      direction: "horizontal",
-      ratio: 0.5,
-      children: [fm, term],
-    };
     set({
       screen: "files",
       connection,
@@ -119,7 +120,7 @@ export const useAppStore = create<AppState>((set) => ({
       currentPath: connection.home,
       entries: [],
       filesError: null,
-      paneTree: tree,
+      paneTree: fm,
       focusedPaneId: fm.id,
     });
   },
