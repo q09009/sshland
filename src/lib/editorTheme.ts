@@ -14,10 +14,15 @@ export function editorTheme() {
   const ink900 = colorToken("--color-ink-900");
   const ink800 = colorToken("--color-ink-800");
   const ink700 = colorToken("--color-ink-700");
+  const ink600 = colorToken("--color-ink-600");
+  const slate100 = colorToken("--color-slate-100");
   const slate200 = colorToken("--color-slate-200");
   const slate400 = colorToken("--color-slate-400");
   const slate500 = colorToken("--color-slate-500");
   const sky400 = colorToken("--color-sky-400");
+  // Build a translucent color from a token's raw channels ("56 189 248").
+  const rgba = (name: string, a: number) =>
+    `rgba(${token(name).split(/\s+/).join(", ")}, ${a})`;
 
   return EditorView.theme(
     {
@@ -50,6 +55,51 @@ export function editorTheme() {
         backgroundColor: ink800,
         border: "none",
         color: slate400,
+      },
+      // Bracket matching + same-text selection matches.
+      "&.cm-focused .cm-matchingBracket": {
+        backgroundColor: rgba("--color-sky-400", 0.2),
+        outline: `1px solid ${rgba("--color-sky-400", 0.4)}`,
+      },
+      "&.cm-focused .cm-nonmatchingBracket": {
+        backgroundColor: rgba("--color-red-500", 0.2),
+      },
+      ".cm-selectionMatch": { backgroundColor: rgba("--color-sky-400", 0.13) },
+      // Search / replace panel, styled to match the dark theme.
+      ".cm-panels": {
+        backgroundColor: ink800,
+        color: slate200,
+        borderTop: `1px solid ${ink700}`,
+      },
+      ".cm-panel.cm-search": { padding: "6px 8px" },
+      ".cm-panel.cm-search label": { fontSize: "11px", color: slate400 },
+      ".cm-textfield": {
+        backgroundColor: ink900,
+        color: slate200,
+        border: `1px solid ${ink700}`,
+        borderRadius: "4px",
+        padding: "2px 6px",
+      },
+      ".cm-textfield:focus": { outline: `1px solid ${sky400}` },
+      ".cm-button": {
+        backgroundColor: ink700,
+        backgroundImage: "none",
+        color: slate200,
+        border: "none",
+        borderRadius: "4px",
+        padding: "2px 8px",
+      },
+      ".cm-button:hover": { backgroundColor: ink600 },
+      ".cm-completionIcon": { color: slate400 },
+      ".cm-tooltip": {
+        backgroundColor: ink800,
+        color: slate200,
+        border: `1px solid ${ink700}`,
+        borderRadius: "6px",
+      },
+      ".cm-tooltip-autocomplete ul li[aria-selected]": {
+        backgroundColor: rgba("--color-sky-400", 0.2),
+        color: slate100,
       },
     },
     { dark: true }

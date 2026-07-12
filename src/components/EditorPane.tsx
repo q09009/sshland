@@ -15,7 +15,18 @@ import {
   historyKeymap,
   indentWithTab,
 } from "@codemirror/commands";
-import { syntaxHighlighting } from "@codemirror/language";
+import {
+  syntaxHighlighting,
+  bracketMatching,
+  indentOnInput,
+} from "@codemirror/language";
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+} from "@codemirror/autocomplete";
+import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { download, readRemoteFile, writeRemoteFile } from "../api";
 import { useAppStore } from "../store";
 import { baseName } from "../lib/path";
@@ -124,6 +135,11 @@ export default function EditorPane({
               highlightActiveLineGutter(),
               drawSelection(),
               history(),
+              bracketMatching(),
+              closeBrackets(),
+              indentOnInput(),
+              autocompletion(),
+              highlightSelectionMatches(),
               syntaxHighlighting(editorHighlight()),
               ...(language ? [language] : []),
               // Ctrl/Cmd+S saves; listed first so it wins over any default.
@@ -136,8 +152,11 @@ export default function EditorPane({
                     return true;
                   },
                 },
+                ...closeBracketsKeymap,
                 ...defaultKeymap,
                 ...historyKeymap,
+                ...searchKeymap,
+                ...completionKeymap,
                 indentWithTab,
               ]),
               editorTheme(),
