@@ -15,8 +15,13 @@ use tauri::{AppHandle, Manager};
 
 /// Embedded read-only defaults: (filename stem, TOML source). Add more here as
 /// the bundled command set grows.
-const DEFAULT_COMMANDS: &[(&str, &str)] =
-    &[("ps-aux", include_str!("../default_commands/ps-aux.toml"))];
+const DEFAULT_COMMANDS: &[(&str, &str)] = &[
+    ("ps-aux", include_str!("../default_commands/ps-aux.toml")),
+    (
+        "systemctl-status",
+        include_str!("../default_commands/systemctl-status.toml"),
+    ),
+];
 
 const PARSERS: &[&str] = &["columns", "keyvalue", "regex"];
 const RENDERS: &[&str] = &["table", "keyvalue-card", "list"];
@@ -133,6 +138,14 @@ mod tests {
         assert_eq!(cfg.render, "table");
         assert_eq!(cfg.highlight_column.as_deref(), Some("%CPU"));
         assert!(!cfg.match_pattern.is_empty());
+    }
+
+    #[test]
+    fn bundled_systemctl_status_parses() {
+        let text = include_str!("../default_commands/systemctl-status.toml");
+        let cfg = parse_config("systemctl-status", "default", text).expect("should parse");
+        assert_eq!(cfg.parser, "keyvalue");
+        assert_eq!(cfg.render, "keyvalue-card");
     }
 
     #[test]

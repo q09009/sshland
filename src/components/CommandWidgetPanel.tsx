@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { CommandConfig } from "../api";
-import { ColumnsData, parseColumns } from "../lib/parsers";
+import {
+  ColumnsData,
+  KeyValueData,
+  parseColumns,
+  parseKeyValue,
+} from "../lib/parsers";
 
 /** A captured command whose output matched a config, ready to render. */
 export interface CommandResult {
@@ -69,11 +74,35 @@ function WidgetBody({ result }: { result: CommandResult }) {
       return <TableWidget data={data} highlightColumn={config.highlightColumn} />;
     }
   }
-  // Other render types arrive in later steps; until then, show raw text.
+  if (config.render === "keyvalue-card") {
+    const data = parseKeyValue(output);
+    if (data) return <KeyValueCardWidget data={data} />;
+  }
+  // Anything we couldn't parse into the chosen widget: show raw text.
   return (
     <pre className="whitespace-pre font-mono text-xs text-slate-300">
       {output}
     </pre>
+  );
+}
+
+function KeyValueCardWidget({ data }: { data: KeyValueData }) {
+  return (
+    <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+      {data.pairs.map((p, i) => (
+        <div
+          key={i}
+          className="rounded-lg border border-ink-700/60 bg-ink-900/40 px-3 py-2"
+        >
+          <div className="truncate text-2xs uppercase tracking-wide text-slate-500" title={p.key}>
+            {p.key}
+          </div>
+          <div className="mt-0.5 break-words font-mono text-xs text-slate-200">
+            {p.value}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -9,6 +9,41 @@ export interface ColumnsData {
   rows: string[][];
 }
 
+export interface KeyValueData {
+  pairs: { key: string; value: string }[];
+}
+
+/**
+ * `keyvalue` parser: one key-value pair per line, split on the first `:` or on
+ * a run of 2+ spaces (e.g. `systemctl status`, `free -h` style lines). Header
+ * bullets and tree-drawing lines are skipped, and overly long keys (prose) are
+ * ignored so the card grid stays clean.
+ */
+export function parseKeyValue(text: string): KeyValueData | null {
+  const pairs: { key: string; value: string }[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "") continue;
+    if (/^[●○├└│─*•]/.test(line)) continue; // bullets / tree lines
+
+    let key = "";
+    let value = "";
+    const colon = line.indexOf(":");
+    if (colon > 0) {
+      key = line.slice(0, colon).trim();
+      value = line.slice(colon + 1).trim();
+    } else {
+      const m = line.match(/^(.*?)\s{2,}(.*)$/);
+      if (!m) continue;
+      key = m[1].trim();
+      value = m[2].trim();
+    }
+    if (key === "" || value === "" || key.length > 40) continue;
+    pairs.push({ key, value });
+  }
+  return pairs.length > 0 ? { pairs } : null;
+}
+
 /**
  * `columns` parser: whitespace-separated table with a header row.
  *

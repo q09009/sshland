@@ -1,0 +1,4 @@
+# systemctl status [service] — service state as a key-value card grid.
+match = '^\s*systemctl\s+status(\s+[\w.@:-]+)?\s*$'
+parser = "keyvalue"
+render = "keyvalue-card"
