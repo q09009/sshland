@@ -520,22 +520,34 @@ fn emit_progress(app: &AppHandle, id: &str, transferred: u64, total: u64) {
 /// returned so a save re-encodes to the same bytes. A file that still can't be
 /// decoded cleanly is treated as binary (editing it could corrupt it on save).
 fn read_file_contents(sftp: &Sftp, path: &str) -> Result<FileContent, String> {
-    let mut remote_file = sftp
-        .open(Path::new(path))
-        .map_err(|_| error::sftp_error("파일을 여는"))?;
+    let mut remote_file = sftp.open(Path::new(path)).map_err(|e| {
+        eprintln!("read_remote_file: open failed for {path}: {e}");
+        error::sftp_error("파일을 여는")
+    })?;
 
     let size = remote_file.stat().ok().and_then(|s| s.size).unwrap_or(0);
     if size > MAX_EDIT_SIZE {
         return Err(error::file_too_large());
     }
 
-    let mut bytes = Vec::with_capacity(size as usize);
-    remote_file
-        .read_to_end(&mut bytes)
-        .map_err(|_| error::sftp_error("파일을 여는"))?;
-    // Guard again on the actual byte count in case the stat lied.
-    if bytes.len() as u64 > MAX_EDIT_SIZE {
-        return Err(error::file_too_large());
+    // Read in a fixed-buffer loop — the same path download uses. `read_to_end`
+    // on an `ssh2::File` errors on some servers (it keeps reading past EOF
+    // instead of returning Ok(0)), which surfaced as a spurious open error.
+    let mut bytes: Vec<u8> = Vec::with_capacity(size.min(MAX_EDIT_SIZE) as usize);
+    let mut buf = [0u8; 32 * 1024];
+    loop {
+        let n = match remote_file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("read_remote_file: read failed for {path}: {e}");
+                return Err(error::sftp_error("파일을 여는"));
+            }
+        };
+        bytes.extend_from_slice(&buf[..n]);
+        if bytes.len() as u64 > MAX_EDIT_SIZE {
+            return Err(error::file_too_large());
+        }
     }
 
     decode_text(&bytes)

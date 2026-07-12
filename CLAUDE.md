@@ -202,6 +202,7 @@ Shell-integration (OSC 133) boundary detection → declarative TOML config loade
 - **Design-token centralization** (a refactor, zero visual change): moved every color/typography/radius literal into `:root` (`index.css`) as the single source, with Tailwind only mapping to it. See the "Design tokens" section above. Structural groundwork for a future redesign.
 
 **Fixed bugs:**
+- The editor refused to open some valid text files (e.g. a small `.yaml`) with the generic "파일을 여는 중 문제가 발생했어요" error. Cause: `read_file_contents` used `Read::read_to_end` on an `ssh2::File`, which errors on some servers instead of returning `Ok(0)` at EOF. Fixed by reading in a fixed-buffer loop — the same proven path `download_file` uses (both `read` in a loop and break on `Ok(0)`). Read open/read failures now also `eprintln!` the raw ssh2 error to stderr for diagnosis.
 - Closing a pane used to kill a sibling terminal that should have survived (fixed by switching rendering from recursive tree to flat absolute positioning)
 - Two file-manager panes used to share state and move together (fixed by switching from global state to per-pane local state)
 - Getting stuck on "Loading…" on first entry (caused by React StrictMode's double-invoke plus a boolean `fsVersion` guard race condition — fixed with a value-comparison guard)
