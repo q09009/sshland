@@ -26,7 +26,9 @@ pub fn run() {
             ssh::disconnect,
             settings::load_settings,
             settings::save_settings,
-            commands_config::load_command_configs
+            commands_config::load_command_configs,
+            commands_config::commands_dir_path,
+            commands_config::open_commands_dir
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

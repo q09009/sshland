@@ -9,9 +9,19 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+
+/// The user-editable command config folder (`<app_config_dir>/commands`).
+fn commands_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|_| "설정 폴더를 찾지 못했어요.".to_string())?;
+    Ok(dir.join("commands"))
+}
 
 /// Embedded read-only defaults: (filename stem, TOML source). Add more here as
 /// the bundled command set grows.
@@ -96,8 +106,7 @@ pub fn load_command_configs(app: AppHandle) -> Vec<CommandConfig> {
         }
     }
 
-    if let Ok(dir) = app.path().app_config_dir() {
-        let cmd_dir = dir.join("commands");
+    if let Ok(cmd_dir) = commands_dir(&app) {
         // Create the folder so users have somewhere to drop their own configs.
         let _ = fs::create_dir_all(&cmd_dir);
         if let Ok(entries) = fs::read_dir(&cmd_dir) {
@@ -128,6 +137,37 @@ pub fn load_command_configs(app: AppHandle) -> Vec<CommandConfig> {
     }
 
     map.into_values().collect()
+}
+
+/// Absolute path of the user command folder (created if missing), for display.
+#[tauri::command]
+pub fn commands_dir_path(app: AppHandle) -> Result<String, String> {
+    let dir = commands_dir(&app)?;
+    let _ = fs::create_dir_all(&dir);
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+/// Open the user command folder in the OS file manager.
+#[tauri::command]
+pub fn open_commands_dir(app: AppHandle) -> Result<(), String> {
+    let dir = commands_dir(&app)?;
+    fs::create_dir_all(&dir).map_err(|_| "폴더를 만들지 못했어요.".to_string())?;
+    open_in_file_manager(&dir)
+}
+
+fn open_in_file_manager(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let program = "xdg-open";
+
+    std::process::Command::new(program)
+        .arg(path)
+        .spawn()
+        .map_err(|_| "폴더를 열지 못했어요.".to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]

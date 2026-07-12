@@ -154,3 +154,13 @@ export interface CommandConfig {
 export function loadCommandConfigs(): Promise<CommandConfig[]> {
   return invoke<CommandConfig[]>("load_command_configs");
 }
+
+/** Absolute path of the user command-config folder (created if missing). */
+export function commandsDirPath(): Promise<string> {
+  return invoke<string>("commands_dir_path");
+}
+
+/** Open the user command-config folder in the OS file manager. */
+export function openCommandsDir(): Promise<void> {
+  return invoke<void>("open_commands_dir");
+}
