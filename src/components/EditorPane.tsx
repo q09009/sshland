@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { EditorState } from "@codemirror/state";
 import {
@@ -15,16 +15,15 @@ import {
   historyKeymap,
   indentWithTab,
 } from "@codemirror/commands";
-import { download, readRemoteFile } from "../api";
+import { download, readRemoteFile, writeRemoteFile } from "../api";
 import { useAppStore } from "../store";
 import { baseName } from "../lib/path";
 import { editorTheme } from "../lib/editorTheme";
 
 /**
  * A lightweight text/code editor for one remote file, rendered with CodeMirror
- * 6. Loads the file's contents into memory on mount (no local temp file) and
- * shows them for editing. Syntax highlighting, saving, and dirty-tracking are
- * layered on in later steps; this is the base load/display integration.
+ * 6. Loads the file's contents into memory on mount (no local temp file), tracks
+ * unsaved changes, and writes back to the server on save (Ctrl/Cmd+S or button).
  *
  * If the file can't be opened (too large, binary/non-text, or any read error),
  * the pane offers to download it instead — this is where the backend's UTF-8 /
@@ -39,19 +38,65 @@ export default function EditorPane({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // The last saved/loaded contents; the doc is "dirty" when it differs.
+  const baselineRef = useRef("");
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const closePane = useAppStore((s) => s.closePane);
+  const setPaneDirty = useAppStore((s) => s.setPaneDirty);
   const startTransfer = useAppStore((s) => s.startTransfer);
   const finishTransfer = useAppStore((s) => s.finishTransfer);
 
   const name = baseName(filePath);
 
+  // Update the dirty flag in both local state and the pane tree (for the close
+  // confirm), but only when it actually flips — not on every keystroke.
+  const markDirty = useCallback(
+    (d: boolean) => {
+      if (dirtyRef.current === d) return;
+      dirtyRef.current = d;
+      setDirty(d);
+      setPaneDirty(id, d);
+    },
+    [id, setPaneDirty]
+  );
+
+  // Save the current contents back to the server. Held in a ref so the (once-
+  // built) CodeMirror keymap always calls the latest version.
+  const doSave = useCallback(async () => {
+    const view = viewRef.current;
+    if (!view || savingRef.current) return;
+    const content = view.state.doc.toString();
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await writeRemoteFile(filePath, content);
+      baselineRef.current = content;
+      markDirty(false);
+    } catch (err) {
+      setSaveError(typeof err === "string" ? err : "저장하지 못했어요.");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [filePath, markDirty]);
+
+  const saveRef = useRef(doSave);
+  saveRef.current = doSave;
+
   useEffect(() => {
     let disposed = false;
     setLoading(true);
     setError(null);
+    markDirty(false);
 
     readRemoteFile(filePath)
       .then((contents) => {
@@ -59,6 +104,7 @@ export default function EditorPane({
         const host = hostRef.current;
         if (!host) return;
 
+        baselineRef.current = contents;
         const view = new EditorView({
           parent: host,
           state: EditorState.create({
@@ -69,8 +115,33 @@ export default function EditorPane({
               highlightActiveLineGutter(),
               drawSelection(),
               history(),
-              keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+              // Ctrl/Cmd+S saves; listed first so it wins over any default.
+              keymap.of([
+                {
+                  key: "Mod-s",
+                  preventDefault: true,
+                  run: () => {
+                    void saveRef.current();
+                    return true;
+                  },
+                },
+                ...defaultKeymap,
+                ...historyKeymap,
+                indentWithTab,
+              ]),
               editorTheme(),
+              // Recompute dirty on edits. Compare length first (cheap) and only
+              // stringify the (<=5MB) doc when lengths match, so typing in a big
+              // file doesn't serialize it on every keystroke.
+              EditorView.updateListener.of((u) => {
+                if (!u.docChanged) return;
+                const doc = u.state.doc;
+                const d =
+                  doc.length !== baselineRef.current.length
+                    ? true
+                    : doc.toString() !== baselineRef.current;
+                markDirty(d);
+              }),
             ],
           }),
         });
@@ -88,7 +159,7 @@ export default function EditorPane({
       viewRef.current?.destroy();
       viewRef.current = null;
     };
-  }, [filePath]);
+  }, [filePath, markDirty]);
 
   /** Download the file locally (offered when it can't be edited). */
   async function downloadInstead() {
@@ -107,17 +178,39 @@ export default function EditorPane({
   return (
     <div className="flex h-full w-full flex-col bg-ink-900">
       <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
-        <span className="truncate" title={filePath}>
-          📝 {name}
+        <span className="flex min-w-0 items-center gap-1" title={filePath}>
+          <span className="truncate">📝 {name}</span>
+          {dirty && (
+            <span className="text-amber-400" title="저장하지 않은 변경사항">
+              ●
+            </span>
+          )}
         </span>
-        <button
-          onClick={() => closePane(id)}
-          title="pane 닫기"
-          className="rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300"
-        >
-          ✕
-        </button>
+        <span className="flex shrink-0 items-center gap-0.5">
+          {!error && (
+            <button
+              onClick={() => void doSave()}
+              disabled={!dirty || saving}
+              title="저장 (Ctrl+S)"
+              className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              {saving ? "저장 중…" : "저장"}
+            </button>
+          )}
+          <button
+            onClick={() => closePane(id)}
+            title="pane 닫기"
+            className="rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300"
+          >
+            ✕
+          </button>
+        </span>
       </div>
+      {saveError && (
+        <div className="shrink-0 bg-red-950/80 px-2 py-1 text-2xs text-red-300">
+          {saveError}
+        </div>
+      )}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {error ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">

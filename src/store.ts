@@ -10,6 +10,7 @@ import {
   PaneNode,
   removeLeaf,
   setLeafContent,
+  setLeafDirty,
   splitLeaf,
   SplitDirection,
   updateRatio,
@@ -143,6 +144,9 @@ interface AppState {
    * open, just focus it; otherwise split the focused pane and open it beside.
    */
   openEditor: (filePath: string) => void;
+  /** Mark an editor pane's unsaved-changes state (drives the dirty indicator
+   *  and the unsaved-changes confirm on close). */
+  setPaneDirty: (id: string, isDirty: boolean) => void;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: Omit<ConnectionInfo, "connectedAt">) => void;
@@ -251,6 +255,8 @@ export const useAppStore = create<AppState>((set) => ({
         focusedPaneId: ed.id,
       };
     }),
+  setPaneDirty: (id, isDirty) =>
+    set((s) => ({ paneTree: setLeafDirty(s.paneTree, id, isDirty) })),
 
   enterFiles: (connection) => {
     // Start with a single full-screen file-manager pane.
