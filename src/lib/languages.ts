@@ -111,11 +111,30 @@ const BY_NAME: Record<string, string> = {
   "nginx.conf": "nginx",
 };
 
+/** The canonical language key for a file (e.g. "yaml"), or null for plain text. */
+function languageNameForFile(filePath: string): string | null {
+  const name = baseName(filePath).toLowerCase();
+  return BY_NAME[name] ?? BY_EXTENSION[fileExtension(name)] ?? null;
+}
+
 /** The syntax-highlighting extension for a file, or null for plain text. */
 export function languageForFile(filePath: string): Extension | null {
-  const name = baseName(filePath).toLowerCase();
-  const byName = BY_NAME[name];
-  if (byName) return lang(byName);
-  const byExt = BY_EXTENSION[fileExtension(name)];
-  return byExt ? lang(byExt) : null;
+  const key = languageNameForFile(filePath);
+  return key ? lang(key) : null;
+}
+
+/** Human-readable label for the detected language, shown in the editor header. */
+const DISPLAY_NAMES: Record<string, string> = {
+  javascript: "JavaScript", jsx: "JSX", typescript: "TypeScript", tsx: "TSX",
+  python: "Python", json: "JSON", markdown: "Markdown", yaml: "YAML",
+  rust: "Rust", html: "HTML", css: "CSS", xml: "XML", sql: "SQL",
+  cpp: "C/C++", java: "Java", shell: "Shell", toml: "TOML",
+  properties: "INI", go: "Go", ruby: "Ruby", perl: "Perl", lua: "Lua",
+  dockerfile: "Dockerfile", nginx: "Nginx", diff: "Diff", powershell: "PowerShell",
+};
+
+/** Display label for a file's language, or "텍스트" when none is detected. */
+export function languageLabel(filePath: string): string {
+  const key = languageNameForFile(filePath);
+  return key ? DISPLAY_NAMES[key] ?? key : "텍스트";
 }

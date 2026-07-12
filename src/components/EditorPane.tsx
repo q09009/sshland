@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { EditorState } from "@codemirror/state";
 import {
@@ -14,6 +14,8 @@ import {
   history,
   historyKeymap,
   indentWithTab,
+  undo,
+  redo,
 } from "@codemirror/commands";
 import {
   syntaxHighlighting,
@@ -26,13 +28,17 @@ import {
   closeBracketsKeymap,
   completionKeymap,
 } from "@codemirror/autocomplete";
-import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
+import {
+  highlightSelectionMatches,
+  searchKeymap,
+  openSearchPanel,
+} from "@codemirror/search";
 import { download, readRemoteFile, writeRemoteFile } from "../api";
 import { useAppStore } from "../store";
 import { operationToCommandString } from "../lib/commandLog";
 import { baseName } from "../lib/path";
 import { editorTheme, editorHighlight } from "../lib/editorTheme";
-import { languageForFile } from "../lib/languages";
+import { languageForFile, languageLabel } from "../lib/languages";
 import { UnsavedChangesDialog } from "./Modal";
 
 /**
@@ -218,18 +224,53 @@ export default function EditorPane({
     }
   }
 
+  // Run a CodeMirror command from a toolbar button, then restore editor focus.
+  const runCmd = (fn: (v: EditorView) => boolean) => {
+    const view = viewRef.current;
+    if (!view) return;
+    fn(view);
+    view.focus();
+  };
+  // Editing tools only make sense once the doc is actually loaded.
+  const ready = !loading && !error;
+
   return (
     <div className="flex h-full w-full flex-col bg-ink-900">
       <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
-        <span className="flex min-w-0 items-center gap-1" title={filePath}>
+        <span className="flex min-w-0 items-center gap-1.5" title={filePath}>
           <span className="truncate">📝 {name}</span>
           {dirty && (
             <span className="text-amber-400" title="저장하지 않은 변경사항">
               ●
             </span>
           )}
+          <span className="shrink-0 rounded bg-ink-700 px-1.5 py-px text-2xs text-slate-400">
+            {languageLabel(filePath)}
+          </span>
         </span>
         <span className="flex shrink-0 items-center gap-0.5">
+          {ready && (
+            <>
+              <ToolbarButton label="실행취소 (Ctrl+Z)" onClick={() => runCmd(undo)}>
+                ↶
+              </ToolbarButton>
+              <ToolbarButton label="다시실행 (Ctrl+Y)" onClick={() => runCmd(redo)}>
+                ↷
+              </ToolbarButton>
+              <ToolbarButton
+                label="찾기 / 바꾸기 (Ctrl+F)"
+                onClick={() =>
+                  runCmd((v) => {
+                    openSearchPanel(v);
+                    return true;
+                  })
+                }
+              >
+                찾기
+              </ToolbarButton>
+              <span className="mx-0.5 h-4 w-px bg-ink-700" />
+            </>
+          )}
           {!error && (
             <button
               onClick={() => void doSave()}
@@ -293,5 +334,27 @@ export default function EditorPane({
         )}
       </div>
     </div>
+  );
+}
+
+/** A compact icon/text button in the editor header toolbar. */
+function ToolbarButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+    >
+      {children}
+    </button>
   );
 }
