@@ -62,3 +62,13 @@ pub fn sftp_error(action: &str) -> String {
 pub fn disconnected_error() -> String {
     "서버와의 연결이 끊어졌어요. 다시 접속해주세요.".into()
 }
+
+/// Shown when a file is too large to open in the editor.
+pub fn file_too_large() -> String {
+    "파일이 너무 커서 편집기로 열 수 없어요. 대신 다운로드해주세요.".into()
+}
+
+/// Shown when a file isn't text (binary) and can't be edited.
+pub fn binary_file() -> String {
+    "이 파일은 편집기로 열 수 없어요. 텍스트 파일이 아니에요.".into()
+}

@@ -26,6 +26,10 @@ use crate::error;
 const TERMINAL_POLL: Duration = Duration::from_millis(15);
 /// Read buffer size for terminal output.
 const TERM_BUF: usize = 32 * 1024;
+/// Largest file the editor will open in-memory. Bigger files are refused so a
+/// huge file can't exhaust memory or bog down CodeMirror; the frontend catches
+/// this earlier via the listing size and offers a download instead.
+const MAX_EDIT_SIZE: u64 = 5 * 1024 * 1024;
 
 /// How the user proves their identity to the server.
 ///
@@ -142,6 +146,17 @@ pub enum Req {
         dst: String,
         resp: oneshot::Sender<Result<(), String>>,
     },
+    /// Read a remote text file's whole contents into memory (for the editor).
+    ReadFile {
+        path: String,
+        resp: oneshot::Sender<Result<String, String>>,
+    },
+    /// Overwrite a remote file with new text contents (from the editor).
+    WriteFile {
+        path: String,
+        contents: String,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
     /// Open a new PTY shell channel on the existing connection.
     OpenTerminal {
         id: String,
@@ -192,6 +207,14 @@ fn reply_err(req: Req, msg: String) -> bool {
             true
         }
         Req::Copy { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::ReadFile { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::WriteFile { resp, .. } => {
             let _ = resp.send(Err(msg));
             true
         }
@@ -476,6 +499,44 @@ fn emit_progress(app: &AppHandle, id: &str, transferred: u64, total: u64) {
     );
 }
 
+/// Read a remote file's whole contents into a UTF-8 string for the editor.
+///
+/// Refuses anything too large ([`MAX_EDIT_SIZE`]) and anything that isn't valid
+/// UTF-8 text (binaries contain null bytes / invalid sequences), so a binary
+/// never reaches the editor even if the frontend's extension guess was wrong.
+fn read_file_contents(sftp: &Sftp, path: &str) -> Result<String, String> {
+    let mut remote_file = sftp
+        .open(Path::new(path))
+        .map_err(|_| error::sftp_error("파일을 여는"))?;
+
+    let size = remote_file.stat().ok().and_then(|s| s.size).unwrap_or(0);
+    if size > MAX_EDIT_SIZE {
+        return Err(error::file_too_large());
+    }
+
+    let mut bytes = Vec::with_capacity(size as usize);
+    remote_file
+        .read_to_end(&mut bytes)
+        .map_err(|_| error::sftp_error("파일을 여는"))?;
+    // Guard again on the actual byte count in case the stat lied.
+    if bytes.len() as u64 > MAX_EDIT_SIZE {
+        return Err(error::file_too_large());
+    }
+
+    String::from_utf8(bytes).map_err(|_| error::binary_file())
+}
+
+/// Overwrite a remote file with new text (truncating any existing contents).
+fn write_file_contents(sftp: &Sftp, path: &str, contents: &str) -> Result<(), String> {
+    let mut remote_file = sftp
+        .create(Path::new(path))
+        .map_err(|_| error::sftp_error("파일을 저장하는"))?;
+    remote_file
+        .write_all(contents.as_bytes())
+        .map_err(|_| error::sftp_error("파일을 저장하는"))?;
+    Ok(())
+}
+
 /// Recursively delete a directory and everything inside it.
 fn remove_recursive(sftp: &Sftp, path: &str) -> Result<(), String> {
     let raw = sftp
@@ -614,6 +675,17 @@ fn handle_req(
         }
         Req::Copy { src, dst, resp } => {
             let result = exec_copy(session, &src, &dst);
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::ReadFile { path, resp } => {
+            send_and_check(sftp, app, read_file_contents(sftp, &path), resp)
+        }
+        Req::WriteFile {
+            path,
+            contents,
+            resp,
+        } => {
+            let result = write_file_contents(sftp, &path, &contents);
             send_and_check(sftp, app, result, resp)
         }
         Req::OpenTerminal {
@@ -957,6 +1029,36 @@ pub async fn copy(
     state.send(Req::Copy {
         src,
         dst,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Read a remote text file's contents (for the editor pane).
+#[tauri::command]
+pub async fn read_remote_file(
+    state: State<'_, SessionManager>,
+    path: String,
+) -> Result<String, String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::ReadFile {
+        path,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Overwrite a remote file with new text (from the editor pane).
+#[tauri::command]
+pub async fn write_remote_file(
+    state: State<'_, SessionManager>,
+    path: String,
+    contents: String,
+) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::WriteFile {
+        path,
+        contents,
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?

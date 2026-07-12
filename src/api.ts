@@ -79,6 +79,19 @@ export function copyPath(src: string, dst: string): Promise<void> {
   return invoke<void>("copy", { src, dst });
 }
 
+/**
+ * Read a remote text file's whole contents (for the editor pane).
+ * Rejects if the file is too large or isn't valid UTF-8 text.
+ */
+export function readRemoteFile(path: string): Promise<string> {
+  return invoke<string>("read_remote_file", { path });
+}
+
+/** Overwrite a remote file with new text contents (from the editor pane). */
+export function writeRemoteFile(path: string, contents: string): Promise<void> {
+  return invoke<void>("write_remote_file", { path, contents });
+}
+
 /** Progress event payload emitted during a transfer. */
 export interface TransferProgress {
   id: string;

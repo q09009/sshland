@@ -19,6 +19,8 @@ pub fn run() {
             ssh::mkdir,
             ssh::delete,
             ssh::copy,
+            ssh::read_remote_file,
+            ssh::write_remote_file,
             ssh::open_terminal,
             ssh::write_terminal,
             ssh::resize_terminal,
