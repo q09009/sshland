@@ -215,6 +215,7 @@ Shell-integration (OSC 133) boundary detection → declarative TOML config loade
 
 - In this environment (Windows), the `create-tauri-app` CLI refuses to run non-interactively (non-TTY), so the project was scaffolded manually.
 - Build: `npm run build` (frontend), `cd src-tauri && cargo build` (backend). Run: `npm run tauri dev` (in PowerShell, `~/.cargo/bin` may need adding to `$env:Path`).
+- **Port 1420 is auto-freed before the dev server starts.** Tauri pins Vite to port 1420 (`strictPort: true`, since `devUrl` points there), so a leftover Vite/Node process from a crash or restart used to make `npm run tauri dev` fail with "Port 1420 is already in use". A `predev` npm hook (`scripts/free-port.mjs`) now kills whatever is LISTENING on 1420 first — cross-platform (Windows `netstat`/`taskkill`, Unix `lsof`/`kill`), always exits 0, and runs automatically because Tauri's `beforeDevCommand` is `npm run dev` (npm runs `predev` before `dev`). Run it manually with `npm run free-port` if needed. Don't lower `strictPort` — Tauri needs the fixed port, so freeing it (not falling back to another) is the correct fix.
 - React `<StrictMode>` is enabled (`src/main.tsx`), so mount effects run twice in dev mode — this must be accounted for whenever adding a mount-time side effect (use a ref-based guard, and compare **values** rather than a boolean "have I already mounted" flag).
 
 ### Working conventions & verification (established through this point)
