@@ -35,8 +35,9 @@ The `ssh2` crate (built against the WinCNG backend on Windows, so no OpenSSL/Per
 ### Tiling pane tree (Hyprland-style, partial feature set)
 
 Implemented as pure functions in `src/lib/panes.ts`:
-- `PaneNode` = a `LeafNode` (`file-manager` | `terminal`) or a `SplitNode` (`horizontal`/`vertical`, a `ratio`, and a binary tree of two children).
-- `splitLeaf`/`removeLeaf`/`setLeafContent`/`updateRatio`: immutable tree operations.
+- `PaneNode` = a `LeafNode` (`file-manager` | `terminal` | `editor`; an `editor` leaf also carries `filePath`/`isDirty`) or a `SplitNode` (`horizontal`/`vertical`, a `ratio`, and a binary tree of two children).
+- `splitLeaf`/`removeLeaf`/`setLeafContent`/`updateRatio`/`setLeafDirty`: immutable tree operations.
+- `findLeaf`/`findEditorLeaf`: locate a leaf by id, or an editor leaf by its file (for open-reuse).
 - `collectRects`/`findNeighbor`: geometry calculations for arrow-key focus movement.
 - `collectLayout`: converts the tree into a **flat list of leaves + absolute coordinates (%)**.
 
@@ -51,6 +52,20 @@ Keyboard shortcuts (`src/components/TilingShell.tsx`, registered on the capture 
 ### Terminal (xterm.js)
 
 `src/components/TerminalPane.tsx`: opens the PTY on mount (`open_terminal`) and only closes the channel on unmount (`close_terminal`; the SSH connection stays alive). For performance, **an unfocused terminal buffers its output and flushes it in batches every ~200ms (5fps)**, while the focused terminal reflects output immediately. Gaining focus triggers an immediate flush.
+
+### Editor pane (CodeMirror 6) — the third pane type
+
+`src/components/EditorPane.tsx`: a lightweight text/code editor, opened by **double-clicking a text file** in the file manager. It's the third leaf type (`editor`) and reuses all the existing tiling logic. **CodeMirror 6 was chosen over Monaco** to stay light (core is ~3 small packages; language grammars are added on top).
+
+- **Read/write is in-memory SFTP — no local temp file.** Opening calls `read_remote_file` (Rust `sftp.open` → read the whole file into a `String`); saving (Ctrl/Cmd+S or the header 저장 button) calls `write_remote_file` (`sftp.create` truncates + writes the whole buffer). The content lives only in the client-side CodeMirror doc, never a file on local disk — unlike download/upload, which stream to/from a chosen local path. (Editing has to run client-side, so the file's bytes do round-trip through the client's memory; this is *not* a fully server-side operation like `copy`'s `cp -r`.)
+- **What may be opened** (`lib/editable.ts`): an **extension denylist** (`isProbablyBinary` — images/video/audio/archives/executables/docs/fonts/db; `svg` is treated as text). Unknown / extension-less files (`.bashrc`, `Makefile`, a bare `config`) are **allowed**, since server config files often have no extension. The backend `read_remote_file` is the real safety net: it refuses files ≥5MB (`MAX_EDIT_SIZE`, mirrored as `MAX_EDITABLE_SIZE`) and any **non-UTF-8** content (the null-byte / binary fallback), with a friendly error. Binary-by-extension or oversized files aren't opened — the file manager offers to **download** them instead, and any read error inside `EditorPane` also surfaces a download button.
+- **Opens beside, with reuse.** `store.openEditor(filePath)` splits the focused pane **horizontally** and puts the editor on the right; re-opening the same file just focuses the existing editor leaf (`findEditorLeaf`). The editor renders **its own header** (path + 저장 + ✕) instead of the shared `PaneHeader`, which stays for file-manager/terminal.
+- **Dirty tracking.** The doc is compared to the last saved/loaded baseline — **length-first, full string compare only when lengths match**, so typing in a large file doesn't serialize it every keystroke. Dirty shows as an amber ● by the filename and is mirrored onto the leaf (`setPaneDirty` → `setLeafDirty`) so the close guard can see it.
+- **Unsaved-changes close guard.** Every close path (editor ✕, shared pane-header ✕, `Alt+Shift+W`) routes through `store.requestClose(id)`: a **dirty editor defers** to `UnsavedChangesDialog` (저장 / 저장 안 함 / 취소) via `store.closeRequest`; everything else closes immediately. Save-and-close only closes if the write succeeded. `closePane` also clears a stale `closeRequest` for the removed pane.
+- **Syntax highlighting** (`lib/languages.ts`): language auto-detected from the extension (or exact filename, for extension-less configs), mapped to a CodeMirror grammar — lang packages for js/ts, python, json, markdown, **yaml (`.yaml` and `.yml` alike)**, rust, html, css, xml/svg, sql, cpp/c, java, plus `@codemirror/legacy-modes` stream parsers for shell, toml, ini/properties, go, ruby, perl, lua, dockerfile, nginx, diff, powershell. Unknown → plain text (never an error). Languages are **statically imported** (bundle grew ~+220 KB gzip; fine for a disk-loaded desktop app — dynamic-import code-splitting is a possible future optimization). The dark `HighlightStyle` (`editorHighlight`) is built from the design tokens, since CodeMirror's default style targets light backgrounds.
+- **Coding conveniences**: search/replace panel (Ctrl+F), bracket matching, auto-closing brackets, indent-on-input, same-text selection-match highlight, and CodeMirror's built-in keyword autocomplete (completions come from the grammar where available — no heavy LSP). Auto-close bracket insertion rides CodeMirror's real input path, which **can't be driven headlessly** (same limit as xterm decorations) — confirm by typing in the real app.
+- **The CodeMirror theme + all its panels/tooltip are themed dark from the design tokens** (`editorTheme` in `lib/editorTheme.ts`, read via `token`/`colorToken` like the xterm theme — CodeMirror themes are JS objects, not CSS classes). A small local `rgba()` helper builds translucent token colors for highlight overlays.
+- **Save in the command-log bar**: a save has no honest shell equivalent (`echo`/redirect would misrepresent it), so `operationToCommandString` renders a descriptive `(편집기로 저장) <path>` line (a new `save` case) instead of a fake command.
 
 ### OS drag-in upload (local → server)
 
@@ -79,7 +94,7 @@ The files screen (`App.tsx`) is a **vertical flex**: `StatusBar` (fixed height `
 
 A thin one-line bar that turns file-manager operations into **actual terminal command strings** for learning purposes. Positioned below the tiling in `App.tsx`'s vertical flex (symmetric with `StatusBar`).
 
-- **The conversion is one reusable pure function, `operationToCommandString(op, {user,host})` in `lib/commandLog.ts`**: upload/download → `scp`, delete → `rm` (`-r` for directories), new folder → `mkdir`, rename/move → `mv`, copy → `cp -r`. Paths are quoted only when they contain spaces/special characters (so the shown command stays one that would actually work, since this is for learning). The operation itself runs over SFTP; this string is **display-only**.
+- **The conversion is one reusable pure function, `operationToCommandString(op, {user,host})` in `lib/commandLog.ts`**: upload/download → `scp`, delete → `rm` (`-r` for directories), new folder → `mkdir`, rename/move → `mv`, copy → `cp -r`, **editor save → a descriptive `(편집기로 저장) <path>` line** (no honest shell equivalent). Paths are quoted only when they contain spaces/special characters (so the shown command stays one that would actually work, since this is for learning). The operation itself runs over SFTP; this string is **display-only**.
 - The log is **session-only** (`store.commandLog`, newest first, capped at the most recent 20) — not persisted, reset on restart.
 - `logOp(op)` is called at each operation's success point (`FilesScreen`'s handleDrop/doDownload/performMove/doRename/doDelete/doNewFolder/doPaste). **Terminal-pane input never lands in this log** — only file-manager operations are explicitly hooked, so there's no automatic duplication.
 - Clicking the bar expands a **history popup** upward (the most recent 20, closes on outside click or Esc). Clicking does nothing when there's no history.
@@ -112,7 +127,8 @@ Every color/typography/radius literal lives in exactly **one place — `:root` i
 ```
 src-tauri/src/
   ssh.rs      SSH/SFTP session manager + worker loop + every Tauri command (connect, list_dir,
-              download, upload, rename, mkdir, delete, copy, open/write/resize/close_terminal, disconnect)
+              download, upload, rename, mkdir, delete, copy, read_remote_file/write_remote_file
+              (in-memory editor read/write), open/write/resize/close_terminal, disconnect)
   settings.rs Settings persistence commands (load_settings/save_settings) — reads/writes a JSON
               blob at the app config folder's settings.json. The frontend owns the schema.
   commands_config.rs  Command-GUI config loader (load_command_configs: scans/merges/validates
@@ -128,7 +144,10 @@ src/
   lib/path.ts            Path utilities (join, parent, breadcrumb, baseName)
   lib/files.ts           sortEntries (folders-first sort)
   lib/format.ts          Human-readable size/date/elapsed-time/clock formatting
-  lib/commandLog.ts      File operation → CLI command string conversion (operationToCommandString, pure/reusable)
+  lib/commandLog.ts      File operation → CLI command string conversion (operationToCommandString, pure/reusable; incl. the editor "save" case)
+  lib/editable.ts        isProbablyBinary (extension denylist) + MAX_EDITABLE_SIZE — what may open in the editor
+  lib/languages.ts       Extension/filename → CodeMirror language grammar (lang packages + legacy stream modes); null → plain text
+  lib/editorTheme.ts     CodeMirror dark theme + HighlightStyle, built from the design tokens (editorTheme/editorHighlight)
   lib/shellIntegration.ts  OSC 133 shell-boundary detection (setup injection + command/output/exit capture) — a base layer independent of command parsing
   lib/commandConfigs.ts   Command-GUI config zustand store (load) + pure matchCommand
   lib/parsers.ts          columns/keyvalue/regex parsers (pure; return null → raw on mismatch)
@@ -145,10 +164,11 @@ src/
   components/TilingShell.tsx  Pane-tree root + global shortcuts + global event listeners (transfer progress/connection lost)
   components/PaneView.tsx     Pane tree → flat absolute-position renderer + divider dragging
   components/TerminalPane.tsx xterm.js terminal (PTY connection, render throttling, shell integration + command-GUI inline icon + panel)
+  components/EditorPane.tsx   CodeMirror 6 editor pane (in-memory SFTP read/write, dirty tracking + save, own header, syntax highlighting, search/brackets/autocomplete)
   components/FileView.tsx     Three view modes — list/details/large icons (selection, drag-start, right-click support)
   components/Menu.tsx         Menu-bar dropdown (File/Edit/View)
   components/ContextMenu.tsx  Right-click context menu
-  components/Modal.tsx        Confirm dialog / prompt dialog
+  components/Modal.tsx        Confirm dialog / prompt dialog / unsaved-changes dialog (저장·저장 안 함·취소)
   components/DragLayer.tsx    Ghost label that follows the cursor while dragging
   components/TransfersPanel.tsx  Upload/download progress panel (finished cards/batches auto-fade after 3s; errors are dismissed manually)
   components/ShortcutsHelp.tsx   Bottom-right shortcuts help
@@ -170,6 +190,9 @@ A thin bar at the bottom of the screen showing file-manager operations as real C
 
 **Phase 5 — Command GUI (the core feature): done (all 8 steps)**
 Shell-integration (OSC 133) boundary detection → declarative TOML config loader (defaults + user, with override) → columns/keyvalue/regex parsers + table/keyvalue-card/list renderers → inline terminal "▦" icon (decoration) + panel below (with a raw toggle) → 6 bundled defaults (ps aux/systemctl status/df -h/du -sh/free -h/ip addr) → reload/open-folder → a settings master toggle. See the "Command GUI" architecture section above. Parser/render verification was done in-browser against real xterm/React components; the inline decoration display needs confirming in the real app (rAF-dependent). **Not yet implemented (future work): file-change watching (currently a reload button), zsh/fish shell integration (currently bash only), fine-tuning the decoration icon's position (currently covers the first 3 columns of the output's first line).**
+
+**Phase 6 — Editor pane (CodeMirror 6): done (all 8 steps)**
+`read_remote_file`/`write_remote_file` (in-memory SFTP, no temp file) → CodeMirror base load/display → third `editor` leaf type + double-click open (text/binary/size gating) → save (Ctrl+S/button) + dirty tracking → unsaved-changes close guard → extension-based syntax highlighting → search/replace + bracket matching/auto-close + autocomplete → save event in the command-log bar. See the "Editor pane" architecture section above. Pure frontend logic (binary classification, pane-tree open/reuse/close-guard, dirty detection, language detection + token colors, save-string formatting) verified in-browser against the real compiled modules; **needs real-SSH confirmation in the app**: the actual load/save round-trip and its command-log line, the binary/oversized download-instead flow, and **bracket auto-close** (CodeMirror's real input path can't be driven headlessly, same limit as the xterm decoration).
 
 **Additional improvements (from user feedback, done):**
 - Cleaned up the toolbar into a file-manager menu bar (File/Edit/View), single selection, right-click on empty space (new folder/paste), right-click on a file (copy/download/rename/delete)
