@@ -29,6 +29,7 @@ import {
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { download, readRemoteFile, writeRemoteFile } from "../api";
 import { useAppStore } from "../store";
+import { operationToCommandString } from "../lib/commandLog";
 import { baseName } from "../lib/path";
 import { editorTheme, editorHighlight } from "../lib/editorTheme";
 import { languageForFile } from "../lib/languages";
@@ -70,6 +71,8 @@ export default function EditorPane({
   const setPaneDirty = useAppStore((s) => s.setPaneDirty);
   const startTransfer = useAppStore((s) => s.startTransfer);
   const finishTransfer = useAppStore((s) => s.finishTransfer);
+  const logCommand = useAppStore((s) => s.logCommand);
+  const connection = useAppStore((s) => s.connection);
 
   const name = baseName(filePath);
 
@@ -98,6 +101,16 @@ export default function EditorPane({
       await writeRemoteFile(filePath, content);
       baselineRef.current = content;
       markDirty(false);
+      // Record the save in the command-log bar (a descriptive line, since a
+      // save has no clean shell-command equivalent).
+      if (connection) {
+        logCommand(
+          operationToCommandString(
+            { type: "save", path: filePath },
+            { user: connection.username, host: connection.host }
+          )
+        );
+      }
       return true;
     } catch (err) {
       setSaveError(typeof err === "string" ? err : "저장하지 못했어요.");
@@ -106,7 +119,7 @@ export default function EditorPane({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [filePath, markDirty]);
+  }, [filePath, markDirty, logCommand, connection]);
 
   const saveRef = useRef(doSave);
   saveRef.current = doSave;

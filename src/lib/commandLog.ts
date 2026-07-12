@@ -19,7 +19,8 @@ export type FileOperation =
   | { type: "delete"; path: string; isDir: boolean }
   | { type: "mkdir"; path: string }
   | { type: "move"; from: string; to: string }
-  | { type: "copy"; from: string; to: string };
+  | { type: "copy"; from: string; to: string }
+  | { type: "save"; path: string };
 
 /** Last path segment, handling both `/` and `\` separators. */
 function baseName(p: string): string {
@@ -62,5 +63,9 @@ export function operationToCommandString(
       return `mv ${shellArg(op.from)} ${shellArg(op.to)}`;
     case "copy":
       return `cp -r ${shellArg(op.from)} ${shellArg(op.to)}`;
+    case "save":
+      // Saving edits has no single natural shell equivalent (echo/redirect
+      // would be misleading), so show a plain descriptive line instead.
+      return `(편집기로 저장) ${shellArg(op.path)}`;
   }
 }
