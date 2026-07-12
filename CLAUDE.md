@@ -83,6 +83,18 @@ OS 파일 드롭은 브라우저 표준 `ondrop`이 **안 오고**, Tauri 네이
 - 바 클릭 시 위로 펼쳐지는 **히스토리 팝업**(최근 20개, 바깥클릭·Esc로 닫힘). 기록 없으면 클릭 무반응.
 - 설정 `commandLogEnabled`(기본 켜짐, 설정 탭 **첫 섹션** "명령어 로그")를 끄면 `CommandLogBar`가 `null` 반환 → 바 자체가 사라짐(숙련자용).
 
+### 명령어 GUI (터미널 출력 → 위젯) — 핵심 기능
+
+터미널에서 명령을 치면 raw 텍스트 대신(토글로 전환 가능) 사람이 읽기 쉬운 GUI 위젯으로 보여준다. **파싱/렌더 규칙은 하드코딩이 아니라 선언적 TOML**로 정의 → 유저가 추가/수정 가능. **코드 실행 없는 선언적 방식만** 지원(임의 JS 실행 절대 금지 — SSH 자격증명·서버 접근을 다루므로). 매치 안 되면 조용히 raw로 fallback, 파싱 실패도 에러 아님.
+
+- **셸 경계 감지(`lib/shellIntegration.ts`)**: 터미널 열릴 때 bash에 **OSC 133 마커**를 emit하는 setup을 주입(`SHELL_INTEGRATION_SETUP`, `PROMPT_COMMAND`+`PS1`+`DEBUG trap`). xterm `parser.registerOscHandler(133,…)`로 마커를 **보이지 않게** 가로채, 명령어(B→C)·출력(C→D)·exit code(D;n)를 **버퍼에서** 읽음(wrapped 줄 재결합). bash 아니면 마커 없어 raw fallback. 명령 파싱과 무관한 공통 기반 레이어.
+- **설정 로더(백엔드 `commands_config.rs`)**: 바이너리에 임베드된 **기본 제공(읽기전용, `default_commands/*.toml`)** + **유저 폴더(`<app_config_dir>/commands/*.toml`, 읽기/쓰기)** 두 곳 스캔, 같은 파일명은 **유저가 override**. 잘못된 TOML/스펙 위반은 그 파일만 스킵(stderr 로그), 앱 안 죽음. `load_command_configs`가 병합 목록을 JSON으로 반환. 프론트 `lib/commandConfigs.ts`가 시작 시 로드 + 순수 `matchCommand(configs, command)`(첫 매치, 잘못된 정규식 스킵).
+- **TOML 스펙**: `match`(명령 전체와 매칭할 정규식) / `parser`(`columns`|`keyvalue`|`regex`) / `render`(`table`|`keyvalue-card`|`list`) / `capture_pattern`(regex 파서 필수, named group) / `highlight_column`(table 선택). TOML **literal string(작은따옴표)**으로 정규식 백슬래시 이스케이프 회피.
+- **파서(`lib/parsers.ts`, 순수)**: `columns`(첫 줄 헤더, 마지막 컬럼은 헤더 시작 위치로 슬라이스해 공백 포함 COMMAND 보존, 앞 컬럼은 공백 split로 우측정렬 숫자 안전; df의 두 단어 `Mounted on` 헤더는 데이터 토큰 수로 감지해 병합) / `keyvalue`(`:` 또는 다중공백, `●`·트리줄 스킵) / `regex`(named group per line). 안 맞으면 null → raw.
+- **렌더(`components/CommandWidgetPanel.tsx`)**: `config.parser`로 파싱 → `config.render`로 렌더(자연스러운 짝만, 나머진 raw). `table`(정렬 가능, `highlight_column` 값 크기별 빨강 그라데이션 — 토큰 `rgb(var(--color-red-500)/α)`) / `keyvalue-card`(카드 그리드) / `list`(필드 행). `asNumber`는 선두 숫자 파싱(`25%`,`1.2G`).
+- **터미널 인라인 통합(하이브리드)**: 매치되면 shellIntegration이 출력 시작줄에 만든 **마커**에 xterm **decoration**(`allowProposedApi` 필요)으로 작은 **"▦" 아이콘**만 인라인 표시 → 클릭 시 터미널 pane **아래 패널**(`CommandWidgetPanel`)에 위젯 오픈. 패널에 **원본↔GUI 토글**. decoration 렌더는 애니메이션 프레임 의존이라 헤드리스 검증 불가(실앱 확인). *decoration으로 멀티행 인터랙티브 오버레이를 직접 그리는 방식은 rAF 의존+복잡해서 피하고, 무거운 위젯은 일반 React 패널로 뺀 게 이 하이브리드의 핵심.*
+- **설정**: `commandGuiEnabled`(기본 켜짐, 설정 탭 "명령어 GUI" 섹션) 끄면 `TerminalPane`이 매칭 자체를 스킵 → 전부 raw. 섹션에 등록 명령 목록(읽기전용)·유저 폴더 경로+열기 버튼(`open_commands_dir`)·다시 불러오기 버튼(재-`load()`). 파일 변경 watch는 미구현(스펙 허용 — 다시 불러오기 버튼으로 대체).
+
 ### 디자인 토큰 (단일 소스)
 
 색상·타이포·radius 리터럴은 전부 **`src/index.css`의 `:root`** 한 곳에 CSS 변수로 있다. `tailwind.config.js`는 값을 담지 않고 유틸 이름 → CSS 변수로 **연결만** 한다. 즉 `bg-ink-900` / `text-slate-400` / `rounded-lg` / `text-2xs` 같은 클래스가 전부 중앙 토큰을 가리킨다. 나중에 디자인을 갈아엎을 땐 `:root` 값만 바꾸면 되고 컴포넌트는 안 건드린다.
@@ -101,6 +113,9 @@ src-tauri/src/
               download, upload, rename, mkdir, delete, copy, open/write/resize/close_terminal, disconnect)
   settings.rs 설정 영속화 command (load_settings/save_settings) — 앱 config 폴더의 settings.json
               에 JSON blob으로 읽고 씀. 스키마는 프론트가 소유(백엔드는 opaque).
+  commands_config.rs 명령어 GUI 설정 로더 (load_command_configs: 임베드 기본+유저폴더 스캔·병합·검증,
+              commands_dir_path/open_commands_dir) — toml 크레이트
+  default_commands/*.toml  기본 제공 명령어 규칙 (ps-aux/systemctl-status/df-h/du-sh/free-h/ip-addr), include_str!로 임베드
   error.rs    기술 에러 → 친절한 한글 메시지 변환 (중앙 관리)
   lib.rs      Tauri Builder 설정, command 등록
 
@@ -112,6 +127,9 @@ src/
   lib/files.ts           sortEntries (폴더 우선 정렬)
   lib/format.ts          사람이 읽는 크기/날짜/경과시간/시계 포맷
   lib/commandLog.ts      파일 조작 → CLI 명령어 문자열 변환 (operationToCommandString, 순수/재사용)
+  lib/shellIntegration.ts OSC 133 셸 경계 감지 (setup 주입 + 명령/출력/exit 캡처) — 명령 파싱과 분리된 기반
+  lib/commandConfigs.ts   명령어 GUI 설정 zustand 스토어 (load) + 순수 matchCommand
+  lib/parsers.ts          columns/keyvalue/regex 파서 (순수, 안 맞으면 null → raw)
   lib/settings.ts        설정 zustand 스토어 (AppSettings 타입 + 기본값 + load/set, 변경 시 자동 영속화)
   lib/theme.ts           :root 디자인 토큰을 JS에서 읽는 헬퍼 (token/colorToken) — CSS 클래스 못 쓰는 xterm용
   index.css              디자인 토큰 :root 정의 (색/타이포/radius 단일 소스) + 전역 스타일
@@ -120,10 +138,11 @@ src/
   screens/FilesScreen.tsx     파일관리자 pane 본체 (완전히 로컬 상태)
   components/StatusBar.tsx    상단 GNOME식 상태바 (user@host / 연결상태 / 세션경과 / 로컬시계 / 설정아이콘) — 전부 로컬 계산, 서버 호출 없음
   components/CommandLogBar.tsx 하단 명령어 로그 바 (최근 1줄 + 클릭 시 히스토리 팝업, 설정으로 on/off)
-  components/SettingsPanel.tsx 설정 모달 (카테고리 사이드네비 + 섹션, 데이터주도 SECTIONS 배열로 확장; 현재 명령어로그/일반/정보)
+  components/CommandWidgetPanel.tsx 명령어 GUI 위젯 패널 (parser로 파싱→render로 표/카드/목록, 원본 토글) — 터미널 pane 아래
+  components/SettingsPanel.tsx 설정 모달 (카테고리 사이드네비 + 섹션, 데이터주도 SECTIONS 배열로 확장; 현재 명령어로그/명령어GUI/일반/정보)
   components/TilingShell.tsx  pane 트리 루트 + 전역 단축키 + 전역 이벤트 리스너(전송진행률/연결끊김)
   components/PaneView.tsx     pane 트리 → 평면 절대배치 렌더러 + 분할선 드래그
-  components/TerminalPane.tsx xterm.js 터미널 (PTY 연결, 렌더 스로틀링)
+  components/TerminalPane.tsx xterm.js 터미널 (PTY 연결, 렌더 스로틀링, 셸통합·명령어GUI 인라인 아이콘+패널)
   components/FileView.tsx     목록/자세히/큰아이콘 3가지 보기 (선택, 드래그시작, 우클릭 지원)
   components/Menu.tsx         메뉴바 드롭다운 (파일/편집/보기)
   components/ContextMenu.tsx  우클릭 컨텍스트 메뉴
@@ -146,6 +165,9 @@ pane와 분리된 GNOME식 상단 상태바(user@host / 연결상태 / 세션경
 
 **Phase 4 — 명령어 로그 바: 완료**
 화면 맨 아래 얇은 바에 파일관리자 조작을 실제 CLI 명령어(scp/rm/mkdir/mv/cp)로 표시(최근 1줄 + 클릭 시 히스토리 팝업), 세션 전용. 설정 탭 첫 섹션 "명령어 로그" 토글로 on/off(끄면 바 사라짐). 위 "명령어 로그 바" 아키텍처 섹션 참고. 향후 단축키/테마 섹션은 같은 설정 구조에 추가로 확장 예정.
+
+**Phase 5 — 명령어 GUI (핵심 기능): 완료 (8단계 전부)**
+셸통합(OSC 133) 경계 감지 → 선언적 TOML 설정 로더(기본+유저, override) → columns/keyvalue/regex 파서 + table/keyvalue-card/list 렌더 → 터미널 인라인 "▦" 아이콘(decoration)+아래 패널(원본 토글) → 기본 제공 6종(ps aux/systemctl status/df -h/du -sh/free -h/ip addr) → 다시 불러오기·폴더 열기 → 설정 마스터 토글. 위 "명령어 GUI" 아키텍처 섹션 참고. 파서/렌더 검증은 실제 xterm·React 컴포넌트로 브라우저에서 완료, 인라인 decoration 표시는 실앱에서 확인(rAF 의존). **미구현(향후): 파일변경 watch(현재 다시불러오기 버튼), zsh/fish 셸 통합(현재 bash만), decoration 아이콘 위치 다듬기(현재 출력 첫 줄 좌측 3칸 덮음).**
 
 **추가 개선 (사용자 피드백 기반, 완료):**
 - 파일관리자 메뉴바(파일/편집/보기)로 툴바 정리, 단일 선택, 빈공간 우클릭(새폴더/붙여넣기), 파일 우클릭(복사/다운로드/이름변경/삭제)
