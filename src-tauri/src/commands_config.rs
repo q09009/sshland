@@ -21,6 +21,10 @@ const DEFAULT_COMMANDS: &[(&str, &str)] = &[
         "systemctl-status",
         include_str!("../default_commands/systemctl-status.toml"),
     ),
+    ("df-h", include_str!("../default_commands/df-h.toml")),
+    ("du-sh", include_str!("../default_commands/du-sh.toml")),
+    ("free-h", include_str!("../default_commands/free-h.toml")),
+    ("ip-addr", include_str!("../default_commands/ip-addr.toml")),
 ];
 
 const PARSERS: &[&str] = &["columns", "keyvalue", "regex"];
@@ -146,6 +150,14 @@ mod tests {
         let cfg = parse_config("systemctl-status", "default", text).expect("should parse");
         assert_eq!(cfg.parser, "keyvalue");
         assert_eq!(cfg.render, "keyvalue-card");
+    }
+
+    #[test]
+    fn every_bundled_default_parses() {
+        for (name, text) in DEFAULT_COMMANDS {
+            parse_config(name, "default", text)
+                .unwrap_or_else(|e| panic!("bundled default '{name}' failed: {e}"));
+        }
     }
 
     #[test]

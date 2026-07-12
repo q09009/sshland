@@ -1,0 +1,6 @@
+# free -h — memory/swap totals per line as a list (first column has no header,
+# so a regex fits better than columns).
+match = '^\s*free\s+-h\s*$'
+parser = "regex"
+render = "list"
+capture_pattern = '^(?<type>\w+):\s+(?<total>\S+)\s+(?<used>\S+)\s+(?<free>\S+)'

@@ -1,0 +1,5 @@
+# du -sh [paths] — size + path per line (no header), shown as a list.
+match = '^\s*du\s+-sh?\b.*$'
+parser = "regex"
+render = "list"
+capture_pattern = '^(?<size>\S+)\s+(?<path>.+)$'

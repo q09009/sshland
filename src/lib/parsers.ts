@@ -97,8 +97,27 @@ export function parseColumns(text: string): ColumnsData | null {
     starts.push(m.index);
     headers.push(m[0]);
   }
-  const n = headers.length;
+  let n = headers.length;
   if (n === 0) return null;
+
+  const dataLines = lines.slice(1).filter((l) => l.trim() !== "");
+  // Detect a multi-word last header (e.g. df's "Mounted on"): if every data row
+  // has consistently fewer whitespace tokens than there are header words, fold
+  // the trailing header words into the last column. `ps aux` is unaffected — its
+  // rows have >= as many tokens as headers (COMMAND spans several words).
+  if (dataLines.length > 0) {
+    let minTokens = Infinity;
+    for (const l of dataLines) {
+      minTokens = Math.min(minTokens, l.trim().split(/\s+/).length);
+    }
+    if (minTokens >= 1 && minTokens < n) {
+      const merged = headers.slice(minTokens - 1).join(" ");
+      headers.length = minTokens - 1;
+      headers.push(merged);
+      starts.length = minTokens;
+      n = minTokens;
+    }
+  }
   const lastStart = starts[n - 1];
 
   const rows: string[][] = [];

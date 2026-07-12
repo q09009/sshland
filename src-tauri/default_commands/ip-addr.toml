@@ -1,0 +1,5 @@
+# ip addr — IPv4 addresses per interface as a list.
+match = '^\s*ip\s+addr(\s+show)?\s*$'
+parser = "regex"
+render = "list"
+capture_pattern = 'inet\s+(?<addr>\d+\.\d+\.\d+\.\d+)/(?<prefix>\d+).*scope\s+(?<scope>\w+)\s+(?<iface>\S+)'

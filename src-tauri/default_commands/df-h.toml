@@ -1,0 +1,5 @@
+# df -h — disk usage as a table, filesystems shaded by how full they are.
+match = '^\s*df\s+-h\s*$'
+parser = "columns"
+render = "table"
+highlight_column = "Use%"

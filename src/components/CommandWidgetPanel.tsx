@@ -160,10 +160,11 @@ function KeyValueCardWidget({ data }: { data: KeyValueData }) {
 
 type Sort = { col: number; dir: 1 | -1 };
 
+/** Leading numeric value of a cell, e.g. "25%" → 25, "1.2G" → 1.2, "eth0" → null. */
 function asNumber(s: string): number | null {
   const t = s.trim();
-  if (t === "") return null;
-  const n = Number(t);
+  if (!/^[+-]?[\d.]/.test(t)) return null;
+  const n = Number.parseFloat(t);
   return Number.isNaN(n) ? null : n;
 }
 
