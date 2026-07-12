@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { listen } from "@tauri-apps/api/event";
@@ -16,6 +16,10 @@ import {
   attachShellIntegration,
   SHELL_INTEGRATION_SETUP,
 } from "../lib/shellIntegration";
+import { matchCommand, useCommandConfigs } from "../lib/commandConfigs";
+import CommandWidgetPanel, {
+  CommandResult,
+} from "./CommandWidgetPanel";
 
 /** xterm color theme, sourced from the central design tokens (see index.css). */
 function terminalTheme() {
@@ -48,6 +52,10 @@ export default function TerminalPane({ id }: { id: string }) {
   const focusedRef = useRef(false);
   const focused = useAppStore((s) => s.focusedPaneId === id);
 
+  // Command-GUI results captured in this pane, and which one is open below.
+  const [results, setResults] = useState<CommandResult[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
+
   const flush = useCallback(() => {
     if (flushTimerRef.current != null) {
       clearTimeout(flushTimerRef.current);
@@ -79,6 +87,7 @@ export default function TerminalPane({ id }: { id: string }) {
       cursorBlink: true,
       theme: terminalTheme(),
       scrollback: 5000,
+      allowProposedApi: true, // for buffer markers + inline decorations
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -89,15 +98,43 @@ export default function TerminalPane({ id }: { id: string }) {
     const encoder = new TextEncoder();
     let disposed = false;
 
-    // Detect command boundaries via OSC 133 markers. Step 1: just log each
-    // captured command block so we can confirm capture is accurate.
+    // Detect command boundaries via OSC 133 markers. When a command's output
+    // matches a config, drop a small inline "view as GUI" icon on its line
+    // (a decoration) that opens the rendered widget in the panel below.
     const shellIntegration = attachShellIntegration(term, (block) => {
-      // eslint-disable-next-line no-console
-      console.log("[shell-integration] command finished", {
-        command: block.command,
-        exitCode: block.exitCode,
-        outputLines: block.output.split("\n").length,
-        output: block.output,
+      const config = matchCommand(
+        useCommandConfigs.getState().configs,
+        block.command
+      );
+      if (!config || !block.marker) return;
+
+      const resultId = crypto.randomUUID();
+      setResults((prev) => [
+        ...prev,
+        {
+          id: resultId,
+          command: block.command,
+          output: block.output,
+          config,
+        },
+      ]);
+
+      const decoration = term.registerDecoration({
+        marker: block.marker,
+        x: 0,
+        width: 3,
+        height: 1,
+      });
+      decoration?.onRender((el) => {
+        el.textContent = "▦";
+        el.title = "GUI로 보기";
+        el.style.cursor = "pointer";
+        el.style.pointerEvents = "auto";
+        el.style.color = colorToken("--color-ink-900");
+        el.style.background = colorToken("--color-sky-400");
+        el.style.textAlign = "center";
+        el.style.borderRadius = "2px";
+        el.onclick = () => setOpenId(resultId);
       });
     });
 
@@ -191,5 +228,19 @@ export default function TerminalPane({ id }: { id: string }) {
     };
   }, [id, flush]);
 
-  return <div ref={hostRef} className="h-full w-full bg-ink-900 p-1" />;
+  const openResult = openId
+    ? results.find((r) => r.id === openId) ?? null
+    : null;
+
+  return (
+    <div className="flex h-full w-full flex-col bg-ink-900">
+      <div ref={hostRef} className="min-h-0 flex-1 p-1" />
+      {openResult && (
+        <CommandWidgetPanel
+          result={openResult}
+          onClose={() => setOpenId(null)}
+        />
+      )}
+    </div>
+  );
 }

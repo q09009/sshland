@@ -1,4 +1,4 @@
-import type { IDisposable, Terminal } from "@xterm/xterm";
+import type { IDisposable, IMarker, Terminal } from "@xterm/xterm";
 
 /**
  * Shell integration: detect where each shell command starts and ends so its
@@ -29,6 +29,12 @@ export interface CommandBlock {
   command: string;
   output: string;
   exitCode: number | null;
+  /**
+   * A marker anchored at the command's output-start line, for attaching an
+   * inline affordance (e.g. a "view as GUI" icon) that scrolls with the buffer.
+   * Undefined if the terminal couldn't create one.
+   */
+  marker?: IMarker;
 }
 
 /** Absolute buffer position (line index includes scrollback). */
@@ -48,6 +54,7 @@ export function attachShellIntegration(
 ): IDisposable {
   let commandStart: Pos | null = null; // B: where the typed command begins
   let outputStart: Pos | null = null; // C: where the command output begins
+  let outputMarker: IMarker | undefined; // anchor at the output-start line
   let command = "";
 
   const pos = (): Pos => {
@@ -68,6 +75,7 @@ export function attachShellIntegration(
         break;
       case "C": // output start; the command line is now complete (B→C)
         outputStart = pos();
+        outputMarker = term.registerMarker(0) ?? undefined;
         command = commandStart
           ? readRange(term, commandStart, outputStart).trim()
           : "";
@@ -81,10 +89,12 @@ export function attachShellIntegration(
             command,
             output,
             exitCode: Number.isNaN(code) ? null : code,
+            marker: outputMarker,
           });
         }
         commandStart = null;
         outputStart = null;
+        outputMarker = undefined;
         command = "";
         break;
       }
