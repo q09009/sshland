@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import { EditorState } from "@codemirror/state";
 import {
   EditorView,
@@ -14,7 +15,8 @@ import {
   historyKeymap,
   indentWithTab,
 } from "@codemirror/commands";
-import { readRemoteFile } from "../api";
+import { download, readRemoteFile } from "../api";
+import { useAppStore } from "../store";
 import { baseName } from "../lib/path";
 import { editorTheme } from "../lib/editorTheme";
 
@@ -23,12 +25,28 @@ import { editorTheme } from "../lib/editorTheme";
  * 6. Loads the file's contents into memory on mount (no local temp file) and
  * shows them for editing. Syntax highlighting, saving, and dirty-tracking are
  * layered on in later steps; this is the base load/display integration.
+ *
+ * If the file can't be opened (too large, binary/non-text, or any read error),
+ * the pane offers to download it instead — this is where the backend's UTF-8 /
+ * null-byte check (the content-based binary fallback) surfaces to the user.
  */
-export default function EditorPane({ filePath }: { filePath: string }) {
+export default function EditorPane({
+  id,
+  filePath,
+}: {
+  id: string;
+  filePath: string;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const closePane = useAppStore((s) => s.closePane);
+  const startTransfer = useAppStore((s) => s.startTransfer);
+  const finishTransfer = useAppStore((s) => s.finishTransfer);
+
+  const name = baseName(filePath);
 
   useEffect(() => {
     let disposed = false;
@@ -72,17 +90,44 @@ export default function EditorPane({ filePath }: { filePath: string }) {
     };
   }, [filePath]);
 
+  /** Download the file locally (offered when it can't be edited). */
+  async function downloadInstead() {
+    const local = await save({ defaultPath: name });
+    if (!local) return;
+    const tid = crypto.randomUUID();
+    startTransfer({ id: tid, name, kind: "download", total: 0 });
+    try {
+      await download(tid, filePath, local);
+      finishTransfer(tid);
+    } catch (err) {
+      finishTransfer(tid, typeof err === "string" ? err : "다운로드에 실패했어요.");
+    }
+  }
+
   return (
     <div className="flex h-full w-full flex-col bg-ink-900">
-      <div className="flex h-7 shrink-0 items-center gap-2 border-b border-ink-700/60 bg-ink-800 px-2 text-xs text-slate-400">
+      <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
         <span className="truncate" title={filePath}>
-          📝 {baseName(filePath)}
+          📝 {name}
         </span>
+        <button
+          onClick={() => closePane(id)}
+          title="pane 닫기"
+          className="rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300"
+        >
+          ✕
+        </button>
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {error ? (
-          <div className="flex h-full items-center justify-center p-4 text-center text-sm text-red-300">
-            {error}
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
+            <span className="text-sm text-red-300">{error}</span>
+            <button
+              onClick={downloadInstead}
+              className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-500"
+            >
+              다운로드
+            </button>
           </div>
         ) : (
           <>

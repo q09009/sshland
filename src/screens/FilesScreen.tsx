@@ -15,6 +15,7 @@ import {
 import { useAppStore, ViewMode } from "../store";
 import { baseName, breadcrumbs, joinPath, parentPath } from "../lib/path";
 import { sortEntries } from "../lib/files";
+import { isProbablyBinary, MAX_EDITABLE_SIZE } from "../lib/editable";
 import { FileOperation, operationToCommandString } from "../lib/commandLog";
 import { ConfirmDialog, PromptDialog } from "../components/Modal";
 import ContextMenu, { MenuItem } from "../components/ContextMenu";
@@ -38,6 +39,7 @@ export default function FilesScreen() {
   const bumpFs = useAppStore((s) => s.bumpFs);
   const logCommand = useAppStore((s) => s.logCommand);
   const fsVersion = useAppStore((s) => s.fsVersion);
+  const openEditor = useAppStore((s) => s.openEditor);
 
   const [currentPath, setCurrentPath] = useState(connection?.home ?? "/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -56,6 +58,8 @@ export default function FilesScreen() {
   const [confirm, setConfirm] = useState<{
     title: string;
     message: React.ReactNode;
+    confirmLabel?: string;
+    danger?: boolean;
     onConfirm: () => void;
   } | null>(null);
   const [prompt, setPrompt] = useState<{
@@ -293,8 +297,47 @@ export default function FilesScreen() {
     }
   }
 
+  /** Offer to download a file that can't be opened in the editor. */
+  function offerDownload(entry: FileEntry, reason: React.ReactNode) {
+    setConfirm({
+      title: "편집기로 열 수 없어요",
+      message: reason,
+      confirmLabel: "다운로드",
+      onConfirm: () => {
+        setConfirm(null);
+        void doDownload(entry);
+      },
+    });
+  }
+
+  /** Double-click: open a folder, or open a text file in the editor. Binary or
+   *  oversized files can't be edited, so we offer to download them instead. */
   function openEntry(entry: FileEntry) {
-    if (entry.isDir) loadDir(entry.path);
+    if (entry.isDir) {
+      loadDir(entry.path);
+      return;
+    }
+    if (isProbablyBinary(entry.name)) {
+      offerDownload(
+        entry,
+        <>
+          <span className="font-medium text-slate-100">{entry.name}</span> 은(는)
+          텍스트 파일이 아니라서 편집기로 열 수 없어요. 대신 다운로드할까요?
+        </>
+      );
+      return;
+    }
+    if (entry.size >= MAX_EDITABLE_SIZE) {
+      offerDownload(
+        entry,
+        <>
+          <span className="font-medium text-slate-100">{entry.name}</span> 은(는)
+          너무 커서 편집기로 열 수 없어요. 대신 다운로드할까요?
+        </>
+      );
+      return;
+    }
+    openEditor(entry.path);
   }
 
   /** Record a completed file operation as a CLI command in the log bar. */
@@ -356,6 +399,8 @@ export default function FilesScreen() {
   function doDelete(entry: FileEntry) {
     setConfirm({
       title: entry.isDir ? "폴더를 삭제할까요?" : "파일을 삭제할까요?",
+      confirmLabel: "삭제",
+      danger: true,
       message: (
         <>
           <span className="font-medium text-slate-100">{entry.name}</span>
@@ -601,8 +646,8 @@ export default function FilesScreen() {
         <ConfirmDialog
           title={confirm.title}
           message={confirm.message}
-          confirmLabel="삭제"
-          danger
+          confirmLabel={confirm.confirmLabel ?? "확인"}
+          danger={confirm.danger}
           onConfirm={confirm.onConfirm}
           onCancel={() => setConfirm(null)}
         />

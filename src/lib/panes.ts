@@ -3,13 +3,17 @@
 // A pane is either a `leaf` (an actual file-manager or terminal view) or a
 // `split` with exactly two children laid out horizontally or vertically.
 
-export type PaneContent = "file-manager" | "terminal";
+export type PaneContent = "file-manager" | "terminal" | "editor";
 export type SplitDirection = "horizontal" | "vertical";
 
 export interface LeafNode {
   type: "leaf";
   id: string;
   content: PaneContent;
+  /** For `editor` leaves: the remote file being edited. */
+  filePath?: string;
+  /** For `editor` leaves: whether there are unsaved changes. */
+  isDirty?: boolean;
 }
 
 export interface SplitNode {
@@ -30,8 +34,41 @@ export function newId(prefix = "pane"): string {
   return `${prefix}-${counter}`;
 }
 
-export function makeLeaf(content: PaneContent): LeafNode {
-  return { type: "leaf", id: newId(content === "terminal" ? "term" : "fm"), content };
+export function makeLeaf(content: PaneContent, filePath?: string): LeafNode {
+  const prefix =
+    content === "terminal" ? "term" : content === "editor" ? "ed" : "fm";
+  return { type: "leaf", id: newId(prefix), content, filePath };
+}
+
+/** Find an existing editor leaf for `filePath`, so re-opening it reuses it. */
+export function findEditorLeaf(node: PaneNode, filePath: string): string | null {
+  if (node.type === "leaf") {
+    return node.content === "editor" && node.filePath === filePath
+      ? node.id
+      : null;
+  }
+  return (
+    findEditorLeaf(node.children[0], filePath) ??
+    findEditorLeaf(node.children[1], filePath)
+  );
+}
+
+/** Set the dirty (unsaved-changes) flag on an editor leaf, returning a new tree. */
+export function setLeafDirty(
+  node: PaneNode,
+  id: string,
+  isDirty: boolean
+): PaneNode {
+  if (node.type === "leaf") {
+    return node.id === id ? { ...node, isDirty } : node;
+  }
+  return {
+    ...node,
+    children: [
+      setLeafDirty(node.children[0], id, isDirty),
+      setLeafDirty(node.children[1], id, isDirty),
+    ],
+  };
 }
 
 /**

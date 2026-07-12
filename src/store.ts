@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   collectRects,
   Direction,
+  findEditorLeaf,
   findNeighbor,
   firstLeafId,
   makeLeaf,
@@ -137,6 +138,11 @@ interface AppState {
   setRatio: (splitId: string, ratio: number) => void;
   /** Switch a pane between the file manager and a terminal. */
   setPaneContent: (id: string, content: PaneContent) => void;
+  /**
+   * Open a remote file in an editor pane. If an editor for that file is already
+   * open, just focus it; otherwise split the focused pane and open it beside.
+   */
+  openEditor: (filePath: string) => void;
 
   /** Switch to the file manager after a successful connect. */
   enterFiles: (connection: Omit<ConnectionInfo, "connectedAt">) => void;
@@ -235,6 +241,16 @@ export const useAppStore = create<AppState>((set) => ({
     set((s) => ({ paneTree: updateRatio(s.paneTree, splitId, ratio) })),
   setPaneContent: (id, content) =>
     set((s) => ({ paneTree: setLeafContent(s.paneTree, id, content) })),
+  openEditor: (filePath) =>
+    set((s) => {
+      const existing = findEditorLeaf(s.paneTree, filePath);
+      if (existing) return { focusedPaneId: existing };
+      const ed = makeLeaf("editor", filePath);
+      return {
+        paneTree: splitLeaf(s.paneTree, s.focusedPaneId, "horizontal", ed),
+        focusedPaneId: ed.id,
+      };
+    }),
 
   enterFiles: (connection) => {
     // Start with a single full-screen file-manager pane.

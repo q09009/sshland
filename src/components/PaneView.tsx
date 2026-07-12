@@ -10,6 +10,7 @@ import {
 import { useAppStore } from "../store";
 import FilesScreen from "../screens/FilesScreen";
 import TerminalPane from "./TerminalPane";
+import EditorPane from "./EditorPane";
 
 /**
  * Renders the pane tree as a FLAT list of absolutely-positioned leaves plus
@@ -112,6 +113,9 @@ function Divider({ layout }: { layout: DividerLayout }) {
 function Leaf({ node }: { node: LeafNode }) {
   const focused = useAppStore((s) => s.focusedPaneId === node.id);
   const setFocus = useAppStore((s) => s.setFocus);
+  // The editor provides its own header (path + save + close), so it skips the
+  // generic PaneHeader; every other pane type gets the shared header.
+  const isEditor = node.content === "editor";
 
   return (
     <div
@@ -120,10 +124,12 @@ function Leaf({ node }: { node: LeafNode }) {
         focused ? "border-sky-500" : "border-transparent"
       }`}
     >
-      <PaneHeader node={node} />
+      {!isEditor && <PaneHeader node={node} />}
       <div className="min-h-0 flex-1 overflow-hidden">
         {node.content === "file-manager" ? (
           <FilesScreen />
+        ) : node.content === "editor" ? (
+          <EditorPane id={node.id} filePath={node.filePath ?? ""} />
         ) : (
           <TerminalPane id={node.id} />
         )}
