@@ -15,10 +15,12 @@ import {
   historyKeymap,
   indentWithTab,
 } from "@codemirror/commands";
+import { syntaxHighlighting } from "@codemirror/language";
 import { download, readRemoteFile, writeRemoteFile } from "../api";
 import { useAppStore } from "../store";
 import { baseName } from "../lib/path";
-import { editorTheme } from "../lib/editorTheme";
+import { editorTheme, editorHighlight } from "../lib/editorTheme";
+import { languageForFile } from "../lib/languages";
 import { UnsavedChangesDialog } from "./Modal";
 
 /**
@@ -111,6 +113,7 @@ export default function EditorPane({
         if (!host) return;
 
         baselineRef.current = contents;
+        const language = languageForFile(filePath);
         const view = new EditorView({
           parent: host,
           state: EditorState.create({
@@ -121,6 +124,8 @@ export default function EditorPane({
               highlightActiveLineGutter(),
               drawSelection(),
               history(),
+              syntaxHighlighting(editorHighlight()),
+              ...(language ? [language] : []),
               // Ctrl/Cmd+S saves; listed first so it wins over any default.
               keymap.of([
                 {

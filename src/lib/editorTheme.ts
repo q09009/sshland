@@ -5,6 +5,8 @@
  * to stay on the single source of truth (no duplicated hex codes).
  */
 import { EditorView } from "@codemirror/view";
+import { HighlightStyle } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 import { colorToken, token } from "./theme";
 
 /** A dark CodeMirror theme mirroring the app's ink/slate/sky palette. */
@@ -52,4 +54,46 @@ export function editorTheme() {
     },
     { dark: true }
   );
+}
+
+/**
+ * Syntax-highlighting colors, built from the design tokens so highlighting
+ * matches the app palette (the CodeMirror default style targets light
+ * backgrounds and reads poorly on our dark ink surface).
+ */
+export function editorHighlight() {
+  const slate100 = colorToken("--color-slate-100");
+  const slate200 = colorToken("--color-slate-200");
+  const slate400 = colorToken("--color-slate-400");
+  const slate500 = colorToken("--color-slate-500");
+  const sky200 = colorToken("--color-sky-200");
+  const sky300 = colorToken("--color-sky-300");
+  const sky400 = colorToken("--color-sky-400");
+  const emerald = colorToken("--color-emerald-500");
+  const amber = colorToken("--color-amber-400");
+  const red = colorToken("--color-red-400");
+
+  return HighlightStyle.define([
+    { tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword, t.definitionKeyword], color: sky300 },
+    { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: slate500, fontStyle: "italic" },
+    { tag: [t.string, t.special(t.string), t.docString, t.attributeValue], color: emerald },
+    { tag: [t.regexp], color: emerald },
+    { tag: [t.escape, t.character], color: amber },
+    { tag: [t.number, t.integer, t.float, t.bool, t.null, t.atom], color: amber },
+    { tag: [t.propertyName], color: sky200 },
+    { tag: [t.function(t.variableName), t.function(t.propertyName)], color: sky200 },
+    { tag: [t.definition(t.variableName), t.definition(t.propertyName)], color: slate100 },
+    { tag: [t.variableName, t.name], color: slate200 },
+    { tag: [t.typeName, t.className, t.namespace, t.self, t.constant(t.variableName)], color: amber },
+    { tag: [t.tagName], color: red },
+    { tag: [t.attributeName], color: amber },
+    { tag: [t.operator, t.punctuation, t.bracket, t.separator, t.derefOperator], color: slate400 },
+    { tag: [t.meta, t.processingInstruction], color: slate500 },
+    { tag: [t.heading], color: sky300, fontWeight: "bold" },
+    { tag: [t.strong], fontWeight: "bold" },
+    { tag: [t.emphasis], fontStyle: "italic" },
+    { tag: [t.strikethrough], textDecoration: "line-through" },
+    { tag: [t.link, t.url], color: sky400, textDecoration: "underline" },
+    { tag: [t.invalid], color: red },
+  ]);
 }
