@@ -16,7 +16,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use ssh2::{Channel, Session, Sftp};
+use ssh2::{Channel, OpenFlags, OpenType, Session, Sftp};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::oneshot;
 
@@ -145,6 +145,11 @@ pub enum Req {
         path: String,
         resp: oneshot::Sender<Result<(), String>>,
     },
+    /// Create a new, empty file (fails if one already exists).
+    CreateFile {
+        path: String,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
     /// Delete a file, or a directory (recursively).
     Delete {
         path: String,
@@ -212,6 +217,10 @@ fn reply_err(req: Req, msg: String) -> bool {
             true
         }
         Req::Mkdir { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::CreateFile { resp, .. } => {
             let _ = resp.send(Err(msg));
             true
         }
@@ -598,6 +607,24 @@ fn encode_text(contents: &str, encoding: &str) -> Vec<u8> {
     }
 }
 
+/// Create a new, empty file. Fails if something already exists at `path`, so an
+/// existing file is never clobbered (the editor's "new file" flow).
+fn create_empty_file(sftp: &Sftp, path: &str) -> Result<(), String> {
+    if sftp.stat(Path::new(path)).is_ok() {
+        return Err(error::already_exists());
+    }
+    // Opening with CREATE|TRUNCATE and immediately dropping the handle leaves a
+    // zero-byte file behind.
+    sftp.open_mode(
+        Path::new(path),
+        OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
+        0o644,
+        OpenType::File,
+    )
+    .map_err(|_| error::sftp_error("파일을 만드는"))?;
+    Ok(())
+}
+
 /// Overwrite a remote file with new text (truncating any existing contents),
 /// re-encoding from UTF-8 to `encoding` (the file's original encoding).
 fn write_file_contents(
@@ -737,6 +764,10 @@ fn handle_req(
             let result = sftp
                 .mkdir(Path::new(&path), 0o755)
                 .map_err(|_| error::sftp_error("폴더를 만드는"));
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::CreateFile { path, resp } => {
+            let result = create_empty_file(sftp, &path);
             send_and_check(sftp, app, result, resp)
         }
         Req::Delete {
@@ -1028,6 +1059,17 @@ pub async fn rename(
 pub async fn mkdir(state: State<'_, SessionManager>, path: String) -> Result<(), String> {
     let (resp_tx, resp_rx) = oneshot::channel();
     state.send(Req::Mkdir {
+        path,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Create a new, empty file (fails if one already exists at the path).
+#[tauri::command]
+pub async fn create_file(state: State<'_, SessionManager>, path: String) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::CreateFile {
         path,
         resp: resp_tx,
     })?;

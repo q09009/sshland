@@ -17,6 +17,7 @@ pub fn run() {
             ssh::upload,
             ssh::rename,
             ssh::mkdir,
+            ssh::create_file,
             ssh::delete,
             ssh::copy,
             ssh::read_remote_file,

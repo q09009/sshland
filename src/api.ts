@@ -69,6 +69,11 @@ export function mkdir(path: string): Promise<void> {
   return invoke<void>("mkdir", { path });
 }
 
+/** Create a new, empty file. Rejects if something already exists at the path. */
+export function createFile(path: string): Promise<void> {
+  return invoke<void>("create_file", { path });
+}
+
 /** Delete a file, or a directory and its contents. */
 export function deletePath(path: string, isDir: boolean): Promise<void> {
   return invoke<void>("delete", { path, isDir });

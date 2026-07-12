@@ -72,3 +72,8 @@ pub fn file_too_large() -> String {
 pub fn binary_file() -> String {
     "이 파일은 편집기로 열 수 없어요. 텍스트 파일이 아니에요.".into()
 }
+
+/// Shown when creating a file/folder whose name is already taken.
+pub fn already_exists() -> String {
+    "같은 이름이 이미 있어요. 다른 이름을 써주세요.".into()
+}

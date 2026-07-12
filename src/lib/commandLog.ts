@@ -18,6 +18,7 @@ export type FileOperation =
   | { type: "download"; remotePath: string }
   | { type: "delete"; path: string; isDir: boolean }
   | { type: "mkdir"; path: string }
+  | { type: "newfile"; path: string }
   | { type: "move"; from: string; to: string }
   | { type: "copy"; from: string; to: string }
   | { type: "save"; path: string };
@@ -59,6 +60,8 @@ export function operationToCommandString(
       return `rm ${op.isDir ? "-r " : ""}${shellArg(op.path)}`;
     case "mkdir":
       return `mkdir ${shellArg(op.path)}`;
+    case "newfile":
+      return `touch ${shellArg(op.path)}`;
     case "move":
       return `mv ${shellArg(op.from)} ${shellArg(op.to)}`;
     case "copy":

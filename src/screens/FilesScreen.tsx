@@ -3,6 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   copyPath,
+  createFile,
   deletePath,
   disconnect,
   download,
@@ -433,6 +434,29 @@ export default function FilesScreen() {
     });
   }
 
+  function doNewFile() {
+    setPrompt({
+      title: "새 파일 만들기",
+      placeholder: "파일 이름 (예: notes.txt)",
+      onConfirm: (name) => {
+        setPrompt(null);
+        void createNewFile(joinPath(currentPath, name));
+      },
+    });
+  }
+
+  /** Create an empty file, then open it in the editor so typing can start. */
+  async function createNewFile(path: string) {
+    try {
+      await createFile(path);
+      logOp({ type: "newfile", path });
+      bumpFs();
+      openEditor(path);
+    } catch (err) {
+      setOpError(typeof err === "string" ? err : "파일을 만들지 못했어요.");
+    }
+  }
+
   function doCopy(entry: FileEntry) {
     setClipboard({ name: entry.name, path: entry.path, isDir: entry.isDir });
   }
@@ -473,7 +497,10 @@ export default function FilesScreen() {
     if (!menu) return [];
     if (!menu.entry) {
       // Background menu.
-      const items: MenuItem[] = [{ label: "새 폴더", onClick: doNewFolder }];
+      const items: MenuItem[] = [
+        { label: "새 파일", onClick: doNewFile },
+        { label: "새 폴더", onClick: doNewFolder },
+      ];
       if (clipboard)
         items.push({ label: `붙여넣기 (${clipboard.name})`, onClick: doPaste });
       return items;
@@ -490,6 +517,7 @@ export default function FilesScreen() {
 
   // Menu-bar dropdown contents.
   const fileMenu: DropItem[] = [
+    { label: "새 파일", onClick: doNewFile },
     { label: "새 폴더", onClick: doNewFolder },
     {
       label: "다운로드",
