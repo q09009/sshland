@@ -12,6 +12,10 @@ import {
 } from "../api";
 import { useAppStore } from "../store";
 import { colorToken, token } from "../lib/theme";
+import {
+  attachShellIntegration,
+  SHELL_INTEGRATION_SETUP,
+} from "../lib/shellIntegration";
 
 /** xterm color theme, sourced from the central design tokens (see index.css). */
 function terminalTheme() {
@@ -85,9 +89,30 @@ export default function TerminalPane({ id }: { id: string }) {
     const encoder = new TextEncoder();
     let disposed = false;
 
-    openTerminal(id, term.cols, term.rows).catch(() => {
-      if (!disposed) term.write("\r\n\x1b[31m터미널을 열지 못했어요.\x1b[0m\r\n");
+    // Detect command boundaries via OSC 133 markers. Step 1: just log each
+    // captured command block so we can confirm capture is accurate.
+    const shellIntegration = attachShellIntegration(term, (block) => {
+      // eslint-disable-next-line no-console
+      console.log("[shell-integration] command finished", {
+        command: block.command,
+        exitCode: block.exitCode,
+        outputLines: block.output.split("\n").length,
+        output: block.output,
+      });
     });
+
+    openTerminal(id, term.cols, term.rows)
+      .then(() => {
+        // Inject the shell-integration setup once the shell is ready.
+        writeTerminal(
+          id,
+          Array.from(encoder.encode(SHELL_INTEGRATION_SETUP))
+        ).catch(() => {});
+      })
+      .catch(() => {
+        if (!disposed)
+          term.write("\r\n\x1b[31m터미널을 열지 못했어요.\x1b[0m\r\n");
+      });
 
     // Keystrokes -> shell.
     const dataSub = term.onData((data) => {
@@ -157,6 +182,7 @@ export default function TerminalPane({ id }: { id: string }) {
       if (resizeTimer != null) clearTimeout(resizeTimer);
       if (flushTimerRef.current != null) clearTimeout(flushTimerRef.current);
       dataSub.dispose();
+      shellIntegration.dispose();
       outputSub.then((fn) => fn());
       closedSub.then((fn) => fn());
       closeTerminal(id).catch(() => {});
