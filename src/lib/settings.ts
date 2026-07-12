@@ -23,6 +23,8 @@ export interface LastConnection {
 export interface AppSettings {
   /** Show the bottom command-log bar (file ops as CLI commands). */
   commandLogEnabled: boolean;
+  /** Render matching terminal command output as GUI widgets (off = raw only). */
+  commandGuiEnabled: boolean;
   /** Show seconds (HH:MM:SS) in the status-bar clock. */
   clockShowSeconds: boolean;
   /** Last successful connection, for pre-filling the connect form. */
@@ -31,6 +33,7 @@ export interface AppSettings {
 
 const DEFAULTS: AppSettings = {
   commandLogEnabled: true,
+  commandGuiEnabled: true,
   clockShowSeconds: false,
   lastConnection: null,
 };

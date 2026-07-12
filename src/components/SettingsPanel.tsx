@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { getName, getVersion, getTauriVersion } from "@tauri-apps/api/app";
 import { useAppStore } from "../store";
 import { useSettings } from "../lib/settings";
+import { useCommandConfigs } from "../lib/commandConfigs";
+import { commandsDirPath, openCommandsDir } from "../api";
 
 /**
  * Full settings surface: a modal overlay covering the pane tiling, with a
@@ -17,6 +19,7 @@ interface Section {
 
 const SECTIONS: Section[] = [
   { id: "command-log", label: "명령어 로그", render: () => <CommandLogSection /> },
+  { id: "command-gui", label: "명령어 GUI", render: () => <CommandGuiSection /> },
   { id: "general", label: "일반", render: () => <GeneralSection /> },
   { id: "about", label: "정보", render: () => <AboutSection /> },
   // Future: { id: "shortcuts", label: "단축키", ... },
@@ -112,6 +115,96 @@ function CommandLogSection() {
           onChange={(v) => set("commandLogEnabled", v)}
         />
       </SettingRow>
+    </div>
+  );
+}
+
+function CommandGuiSection() {
+  const enabled = useSettings((s) => s.settings.commandGuiEnabled);
+  const set = useSettings((s) => s.set);
+  const configs = useCommandConfigs((s) => s.configs);
+  const reload = useCommandConfigs((s) => s.load);
+  const [dir, setDir] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
+
+  useEffect(() => {
+    commandsDirPath()
+      .then(setDir)
+      .catch(() => {});
+  }, []);
+
+  const doReload = async () => {
+    setReloading(true);
+    await reload();
+    setReloading(false);
+  };
+
+  return (
+    <div>
+      <SectionTitle>명령어 GUI</SectionTitle>
+      <SettingRow
+        label="명령어 결과를 GUI 위젯으로 표시"
+        description="터미널 명령 출력이 등록된 규칙과 맞으면 표·카드·목록으로 보여줍니다. 끄면 항상 원본 텍스트만."
+      >
+        <Toggle
+          checked={enabled}
+          onChange={(v) => set("commandGuiEnabled", v)}
+        />
+      </SettingRow>
+
+      <div className="mt-4 rounded-lg border border-ink-700/60 bg-ink-800/50 px-4 py-3">
+        <div className="text-sm text-slate-200">사용자 설정 폴더</div>
+        <div className="mt-1 break-all font-mono text-2xs text-slate-500">
+          {dir ?? "…"}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <button
+            onClick={() => openCommandsDir().catch(() => {})}
+            className="rounded-lg bg-sky-500/15 px-3 py-1 text-xs text-sky-200 hover:bg-sky-500/25"
+          >
+            폴더 열기
+          </button>
+          <button
+            onClick={doReload}
+            disabled={reloading}
+            className="rounded-lg border border-ink-700 px-3 py-1 text-xs text-slate-300 hover:bg-ink-700 disabled:opacity-50"
+          >
+            {reloading ? "불러오는 중…" : "다시 불러오기"}
+          </button>
+        </div>
+        <p className="mt-2 text-2xs leading-relaxed text-slate-500">
+          이 폴더에 TOML 파일을 추가·수정한 뒤 "다시 불러오기"를 누르세요. 같은
+          파일명은 기본 제공 설정을 덮어씁니다.
+        </p>
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-2 text-xs font-medium text-slate-400">
+          등록된 명령어 ({configs.length})
+        </div>
+        <ul className="flex flex-col gap-1">
+          {configs.map((c) => (
+            <li
+              key={c.name}
+              className="flex items-center gap-2 rounded-md border border-ink-700/50 bg-ink-900/40 px-3 py-1.5 text-xs"
+            >
+              <span className="font-mono text-slate-200">{c.name}</span>
+              <span className="text-slate-500">
+                {c.parser} → {c.render}
+              </span>
+              <span
+                className={`ml-auto rounded px-1.5 py-0.5 text-2xs ${
+                  c.source === "user"
+                    ? "bg-sky-500/15 text-sky-200"
+                    : "bg-ink-700 text-slate-400"
+                }`}
+              >
+                {c.source === "user" ? "사용자" : "기본"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

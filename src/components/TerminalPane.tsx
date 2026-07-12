@@ -17,6 +17,7 @@ import {
   SHELL_INTEGRATION_SETUP,
 } from "../lib/shellIntegration";
 import { matchCommand, useCommandConfigs } from "../lib/commandConfigs";
+import { useSettings } from "../lib/settings";
 import CommandWidgetPanel, {
   CommandResult,
 } from "./CommandWidgetPanel";
@@ -102,6 +103,7 @@ export default function TerminalPane({ id }: { id: string }) {
     // matches a config, drop a small inline "view as GUI" icon on its line
     // (a decoration) that opens the rendered widget in the panel below.
     const shellIntegration = attachShellIntegration(term, (block) => {
+      if (!useSettings.getState().settings.commandGuiEnabled) return;
       const config = matchCommand(
         useCommandConfigs.getState().configs,
         block.command
