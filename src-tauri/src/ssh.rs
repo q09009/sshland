@@ -78,6 +78,17 @@ pub struct FileEntry {
     pub permissions: String,
 }
 
+/// A remote text file's contents, decoded for the editor.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContent {
+    /// The file's text, decoded to UTF-8 for CodeMirror.
+    pub content: String,
+    /// The encoding the file was stored in (e.g. "UTF-8", "EUC-KR"). Echoed
+    /// back on save so we re-encode to the same bytes and don't change it.
+    pub encoding: String,
+}
+
 /// Progress update for an in-flight file transfer, streamed to the frontend
 /// as a `transfer-progress` event.
 #[derive(Serialize, Clone)]
@@ -149,12 +160,14 @@ pub enum Req {
     /// Read a remote text file's whole contents into memory (for the editor).
     ReadFile {
         path: String,
-        resp: oneshot::Sender<Result<String, String>>,
+        resp: oneshot::Sender<Result<FileContent, String>>,
     },
-    /// Overwrite a remote file with new text contents (from the editor).
+    /// Overwrite a remote file with new text contents (from the editor),
+    /// re-encoding to `encoding` (the file's original encoding).
     WriteFile {
         path: String,
         contents: String,
+        encoding: String,
         resp: oneshot::Sender<Result<(), String>>,
     },
     /// Open a new PTY shell channel on the existing connection.
@@ -499,12 +512,14 @@ fn emit_progress(app: &AppHandle, id: &str, transferred: u64, total: u64) {
     );
 }
 
-/// Read a remote file's whole contents into a UTF-8 string for the editor.
+/// Read a remote file's contents into UTF-8 text for the editor.
 ///
-/// Refuses anything too large ([`MAX_EDIT_SIZE`]) and anything that isn't valid
-/// UTF-8 text (binaries contain null bytes / invalid sequences), so a binary
-/// never reaches the editor even if the frontend's extension guess was wrong.
-fn read_file_contents(sftp: &Sftp, path: &str) -> Result<String, String> {
+/// Refuses anything too large ([`MAX_EDIT_SIZE`]) or truly binary (contains a
+/// null byte). Valid UTF-8 is the fast path; otherwise the encoding is guessed
+/// (chardetng) and transcoded to UTF-8 (encoding_rs). The original encoding is
+/// returned so a save re-encodes to the same bytes. A file that still can't be
+/// decoded cleanly is treated as binary (editing it could corrupt it on save).
+fn read_file_contents(sftp: &Sftp, path: &str) -> Result<FileContent, String> {
     let mut remote_file = sftp
         .open(Path::new(path))
         .map_err(|_| error::sftp_error("파일을 여는"))?;
@@ -523,16 +538,68 @@ fn read_file_contents(sftp: &Sftp, path: &str) -> Result<String, String> {
         return Err(error::file_too_large());
     }
 
-    String::from_utf8(bytes).map_err(|_| error::binary_file())
+    decode_text(&bytes)
 }
 
-/// Overwrite a remote file with new text (truncating any existing contents).
-fn write_file_contents(sftp: &Sftp, path: &str, contents: &str) -> Result<(), String> {
+/// Decode raw file bytes to UTF-8 text, detecting the encoding when needed.
+///
+/// A null byte, or content that can't be decoded cleanly, is reported as binary
+/// (editing it could corrupt it on save). Pure, so it can be unit-tested.
+fn decode_text(bytes: &[u8]) -> Result<FileContent, String> {
+    // A null byte means it's not text at all — never try to decode it.
+    if bytes.contains(&0) {
+        return Err(error::binary_file());
+    }
+
+    // Fast path: already UTF-8.
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return Ok(FileContent {
+            content: text.to_string(),
+            encoding: "UTF-8".to_string(),
+        });
+    }
+
+    // Otherwise guess the encoding and transcode to UTF-8.
+    let mut detector = chardetng::EncodingDetector::new();
+    detector.feed(bytes, true);
+    let encoding = detector.guess(None, true);
+    let (text, had_errors) = encoding.decode_without_bom_handling(bytes);
+    if had_errors {
+        // Couldn't decode cleanly → can't safely re-encode on save.
+        return Err(error::binary_file());
+    }
+    Ok(FileContent {
+        content: text.into_owned(),
+        encoding: encoding.name().to_string(),
+    })
+}
+
+/// Encode editor text back to the file's original encoding. Pure/testable.
+fn encode_text(contents: &str, encoding: &str) -> Vec<u8> {
+    if encoding.eq_ignore_ascii_case("UTF-8") {
+        return contents.as_bytes().to_vec();
+    }
+    match encoding_rs::Encoding::for_label(encoding.as_bytes()) {
+        Some(enc) => enc.encode(contents).0.into_owned(),
+        // Unknown label (shouldn't happen — it came from us): save as UTF-8.
+        None => contents.as_bytes().to_vec(),
+    }
+}
+
+/// Overwrite a remote file with new text (truncating any existing contents),
+/// re-encoding from UTF-8 to `encoding` (the file's original encoding).
+fn write_file_contents(
+    sftp: &Sftp,
+    path: &str,
+    contents: &str,
+    encoding: &str,
+) -> Result<(), String> {
+    let bytes = encode_text(contents, encoding);
     let mut remote_file = sftp
         .create(Path::new(path))
         .map_err(|_| error::sftp_error("파일을 저장하는"))?;
     remote_file
-        .write_all(contents.as_bytes())
+        .write_all(&bytes)
         .map_err(|_| error::sftp_error("파일을 저장하는"))?;
     Ok(())
 }
@@ -683,9 +750,10 @@ fn handle_req(
         Req::WriteFile {
             path,
             contents,
+            encoding,
             resp,
         } => {
-            let result = write_file_contents(sftp, &path, &contents);
+            let result = write_file_contents(sftp, &path, &contents, &encoding);
             send_and_check(sftp, app, result, resp)
         }
         Req::OpenTerminal {
@@ -1039,7 +1107,7 @@ pub async fn copy(
 pub async fn read_remote_file(
     state: State<'_, SessionManager>,
     path: String,
-) -> Result<String, String> {
+) -> Result<FileContent, String> {
     let (resp_tx, resp_rx) = oneshot::channel();
     state.send(Req::ReadFile {
         path,
@@ -1048,17 +1116,20 @@ pub async fn read_remote_file(
     resp_rx.await.map_err(|_| error::disconnected_error())?
 }
 
-/// Overwrite a remote file with new text (from the editor pane).
+/// Overwrite a remote file with new text (from the editor pane), re-encoding to
+/// the file's original `encoding`.
 #[tauri::command]
 pub async fn write_remote_file(
     state: State<'_, SessionManager>,
     path: String,
     contents: String,
+    encoding: String,
 ) -> Result<(), String> {
     let (resp_tx, resp_rx) = oneshot::channel();
     state.send(Req::WriteFile {
         path,
         contents,
+        encoding,
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?
@@ -1076,6 +1147,41 @@ pub async fn disconnect(state: State<'_, SessionManager>) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utf8_text_decodes_as_utf8() {
+        let fc = decode_text("안녕하세요 hello".as_bytes()).expect("utf-8 text");
+        assert_eq!(fc.content, "안녕하세요 hello");
+        assert_eq!(fc.encoding, "UTF-8");
+    }
+
+    #[test]
+    fn null_byte_is_binary() {
+        assert!(decode_text(b"abc\0def").is_err());
+    }
+
+    #[test]
+    fn euc_kr_round_trips() {
+        // A longer Korean sample so detection is reliable.
+        let text = "안녕하세요. 이것은 한국어로 작성된 설정 파일입니다. \
+                    서버 설정을 여기에 저장합니다. 인코딩 테스트 문장입니다.";
+        let (euc_bytes, _, had_errors) = encoding_rs::EUC_KR.encode(text);
+        assert!(!had_errors, "sample should be EUC-KR-encodable");
+
+        // Decode the non-UTF-8 bytes back to the original text.
+        let fc = decode_text(&euc_bytes).expect("should decode");
+        assert_eq!(fc.content, text);
+        assert_ne!(fc.encoding, "UTF-8");
+
+        // Re-encoding with the reported label reproduces the original bytes.
+        let out = encode_text(&fc.content, &fc.encoding);
+        assert_eq!(out, euc_bytes.to_vec());
+    }
+
+    #[test]
+    fn utf8_save_is_verbatim() {
+        assert_eq!(encode_text("hi 안녕", "UTF-8"), "hi 안녕".as_bytes());
+    }
 
     /// Smoke test against Rebex's public read-only SFTP test server.
     /// Ignored by default (needs network); run with:

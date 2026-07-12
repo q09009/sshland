@@ -79,17 +79,31 @@ export function copyPath(src: string, dst: string): Promise<void> {
   return invoke<void>("copy", { src, dst });
 }
 
-/**
- * Read a remote text file's whole contents (for the editor pane).
- * Rejects if the file is too large or isn't valid UTF-8 text.
- */
-export function readRemoteFile(path: string): Promise<string> {
-  return invoke<string>("read_remote_file", { path });
+/** A remote file's decoded text plus the encoding it was stored in. */
+export interface FileContent {
+  content: string;
+  /** e.g. "UTF-8", "EUC-KR" — pass back to writeRemoteFile to keep it. */
+  encoding: string;
 }
 
-/** Overwrite a remote file with new text contents (from the editor pane). */
-export function writeRemoteFile(path: string, contents: string): Promise<void> {
-  return invoke<void>("write_remote_file", { path, contents });
+/**
+ * Read a remote text file (for the editor pane). Non-UTF-8 files are decoded
+ * via their detected encoding; rejects only if too large or truly binary.
+ */
+export function readRemoteFile(path: string): Promise<FileContent> {
+  return invoke<FileContent>("read_remote_file", { path });
+}
+
+/**
+ * Overwrite a remote file with new text (from the editor pane), re-encoding to
+ * `encoding` (the value returned by readRemoteFile) so the file keeps it.
+ */
+export function writeRemoteFile(
+  path: string,
+  contents: string,
+  encoding: string
+): Promise<void> {
+  return invoke<void>("write_remote_file", { path, contents, encoding });
 }
 
 /** Progress event payload emitted during a transfer. */

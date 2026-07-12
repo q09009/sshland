@@ -63,12 +63,15 @@ export default function EditorPane({
   const baselineRef = useRef("");
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  // The file's original encoding, echoed back on save so it's preserved.
+  const encodingRef = useRef("UTF-8");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [encoding, setEncoding] = useState("UTF-8");
 
   const closePane = useAppStore((s) => s.closePane);
   const requestClose = useAppStore((s) => s.requestClose);
@@ -104,7 +107,7 @@ export default function EditorPane({
     setSaving(true);
     setSaveError(null);
     try {
-      await writeRemoteFile(filePath, content);
+      await writeRemoteFile(filePath, content, encodingRef.current);
       baselineRef.current = content;
       markDirty(false);
       // Record the save in the command-log bar (a descriptive line, since a
@@ -137,12 +140,14 @@ export default function EditorPane({
     markDirty(false);
 
     readRemoteFile(filePath)
-      .then((contents) => {
+      .then(({ content: contents, encoding: enc }) => {
         if (disposed) return;
         const host = hostRef.current;
         if (!host) return;
 
         baselineRef.current = contents;
+        encodingRef.current = enc;
+        setEncoding(enc);
         const language = languageForFile(filePath);
         const view = new EditorView({
           parent: host,
@@ -247,6 +252,14 @@ export default function EditorPane({
           <span className="shrink-0 rounded bg-ink-700 px-1.5 py-px text-2xs text-slate-400">
             {languageLabel(filePath)}
           </span>
+          {ready && encoding !== "UTF-8" && (
+            <span
+              className="shrink-0 rounded bg-amber-400/15 px-1.5 py-px text-2xs text-amber-400"
+              title={`이 파일은 ${encoding} 인코딩이에요. 저장할 때도 같은 인코딩으로 유지돼요.`}
+            >
+              {encoding}
+            </span>
+          )}
         </span>
         <span className="flex shrink-0 items-center gap-0.5">
           {ready && (

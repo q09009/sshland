@@ -26,3 +26,8 @@ ssh2 = "0.9"
 tokio = { version = "1", features = ["sync"] }
 # Native file-picker dialog (choosing a private key, and download targets).
 tauri-plugin-dialog = "2"
+# Text encoding for the editor: decode non-UTF-8 files (e.g. CP949/EUC-KR)
+# for editing and re-encode them to the same encoding on save. chardetng
+# guesses the encoding (the Firefox detector); encoding_rs does the transcode.
+encoding_rs = "0.8"
+chardetng = "0.1"
