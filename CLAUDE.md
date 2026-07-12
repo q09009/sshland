@@ -9,6 +9,8 @@
 - **UI**: 미니멀 다크 테마. 색/여백/폰트/radius 리터럴은 **디자인 토큰(`src/index.css`의 `:root`) 한 곳**에만 둔다 — 아래 "디자인 토큰" 섹션 참고. 컴포넌트에 hex/px 직접 박기 금지.
 - **파괴적 작업**(삭제 등)은 반드시 확인 다이얼로그를 거친다.
 - **비밀번호는 메모리에만**: 디스크 저장 금지, 로그 출력 금지 (secret을 담는 타입엔 `Debug` derive 금지).
+- **유저 설정은 선언적만, 코드 실행 금지**: 유저가 편집하는 설정 파일(명령어 GUI TOML 등)에 임의 JS/스크립트를 실행하는 구조는 절대 만들지 않는다 — 이 앱은 SSH 자격증명·서버 접근을 다루므로 서드파티 설정을 신뢰 없이 실행하면 안 된다. 파싱/렌더 규칙은 선언적 데이터로만 표현한다.
+- **틀려도 조용히 fallback**: 파싱/매칭 실패나 미등록 케이스는 에러로 취급하지 말고 원본(raw)으로 자연스럽게 되돌아간다. GUI 변환은 항상 원본과 토글 가능해야 한다.
 
 ## 아키텍처
 
@@ -152,7 +154,7 @@ src/
   components/ShortcutsHelp.tsx   우하단 단축키 도움말
 ```
 
-## 현재 상태 (2026-07-11 기준)
+## 현재 상태 (2026-07-12 기준)
 
 **Phase 1 — SSH 접속 + SFTP 파일관리자: 완료**
 접속 화면, 목록(3가지 보기모드), 경로이동/breadcrumb/숨김파일, 다운로드/업로드(드래그앤드롭)/이름변경/삭제/새폴더/복사, 연결끊김 감지.
@@ -180,10 +182,20 @@ pane와 분리된 GNOME식 상단 상태바(user@host / 연결상태 / 세션경
 - 파일관리자 pane 두 개가 상태를 공유해서 같이 움직이던 문제 (전역 상태 → pane별 로컬 상태)
 - 최초 진입 시 "불러오는 중..."에서 멈추는 문제 (React StrictMode 이중 실행 + `fsVersion` 가드가 불리언이라 생긴 경쟁 상태 → 값 비교 가드로 수정)
 
-**남은 작업: 없음.** 사용자가 명시적으로 요청한 항목은 모두 구현·검증 완료. 다음 세션은 새 기능 요청이나 버그 리포트를 기다리는 상태.
+**남은 작업:** 사용자가 명시적으로 요청한 항목은 모두 구현 완료. 다만 명령어 GUI(Phase 5)는 **실앱(실 SSH 서버) 확인이 남아 있고**(각 기본 명령의 아이콘→패널 동작, 마스터 토글 off 시 raw, 폴더 열기/다시 불러오기), 사용자 우선순위 대기 중인 **향후 항목**이 있다: 파일변경 watch(현재 다시불러오기 버튼), zsh/fish 셸 통합(현재 bash만), decoration 아이콘 위치 다듬기. 그 외엔 새 기능 요청·버그 리포트 대기 상태.
 
 ## 알아두면 좋은 것
 
 - 이 환경(Windows)에서 `create-tauri-app` CLI는 비대화형(non-TTY)에서 거부되어 프로젝트를 수동으로 스캐폴딩했다.
 - 빌드: `npm run build` (프론트), `cd src-tauri && cargo build` (백엔드). 실행: `npm run tauri dev` (PowerShell에서 `$env:Path`에 `~/.cargo/bin` 추가 필요할 수 있음).
 - React `<StrictMode>`가 켜져 있어(`src/main.tsx`) 개발 모드에서 마운트 이펙트가 두 번 실행된다 — 마운트 시 부수효과를 넣을 때 이 점을 반드시 고려할 것 (ref 기반 가드 사용, 불리언 "이미 마운트했나" 플래그 말고 **값 비교**로).
+
+### 작업 방식 & 검증 (이번까지 확립된 규칙)
+
+- **큰 기능은 단계로 쪼개 단계마다 "빌드 확인 → 논리 단위 커밋"**. 한 번에 다 만들지 말고, 먼저 대표 케이스 하나(예: 명령어 GUI는 `ps aux`)로 파이프라인 전체를 끝까지 검증한 뒤 나머지를 확장한다. 커밋 메시지 끝에 `Co-Authored-By: Claude ...` 유지.
+- **shell integration / PTY / xterm 같은 라이브러리 제약이 의심되는 부분은 임의로 우회하지 말고, 정공법이 되는지 먼저 프로토타입으로 확인**한다. (예: xterm decoration이 인터랙티브 멀티행 오버레이로 되는지 실제 xterm에 붙여보고 → rAF 의존/복잡성 확인 → "인라인 아이콘 + 아래 패널" 하이브리드로 결정.)
+- **이 개발 환경에선 실제 SSH 접속이 불가** → 서버가 필요한 부분(bash 마커 실제 emit, 실 명령 출력, 인라인 decoration 표시 등)은 사용자가 실앱에서 확인한다. 대신 **프론트 순수 로직은 브라우저에서 "실제 컴파일된 모듈"로 실측 검증**한다: `npm run dev`(vite)를 띄우고 브라우저에서 `import('/src/lib/xxx.ts')`로 실제 모듈을, `import('/node_modules/.vite/deps/@xterm_xterm.js?v=…')`·`react`/`react-dom_client`로 실제 xterm/React를 동적 import해서 합성 입력으로 파서·렌더·정렬·매칭을 검증했다(재타이핑한 복제본 말고 진짜 모듈). Rust는 `cargo test`로 설정 파싱 유닛 테스트.
+  - **주의(브라우저 검증 함정)**: ① `import('/src/store.ts?t=…')`처럼 캐시버스트를 붙이면 앱이 쓰는 zustand 싱글톤과 **다른 인스턴스**가 되어 `setState`가 안 먹힌다 — 앱 상태를 조작·관찰하려면 캐시버스트 없이 임포트. ② vite dep의 `@xterm/xterm`·`react-dom_client`는 `default`에 실제 export가 걸려 있다(`m.default.Terminal`, `rd.default.createRoot`). ③ decoration 등 rAF 기반 렌더는 백그라운드 탭에서 프레임이 안 돌아 검증 불가.
+- **xterm 버퍼 마커/decoration을 쓰려면 `Terminal({ allowProposedApi: true })`** 필요(proposed API).
+- Bash 툴로 `cd src-tauri` 하면 그 셸의 cwd가 유지되니, 프론트 명령(`npx tsc`/`npm run build`)은 **절대경로로 cwd를 루트로 되돌리고** 실행할 것(안 그러면 엉뚱한 폴더에서 돎).
+- 커밋 시 `LF will be replaced by CRLF` 경고는 Windows 줄바꿈 정규화 알림일 뿐 무해(레포엔 LF 저장).
