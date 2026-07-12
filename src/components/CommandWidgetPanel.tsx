@@ -3,8 +3,10 @@ import { CommandConfig } from "../api";
 import {
   ColumnsData,
   KeyValueData,
+  RegexData,
   parseColumns,
   parseKeyValue,
+  parseRegex,
 } from "../lib/parsers";
 
 /** A captured command whose output matched a config, ready to render. */
@@ -65,24 +67,74 @@ export default function CommandWidgetPanel({
   );
 }
 
-/** Route to the right widget by the config's render type; fall back to raw. */
+/**
+ * Parse with the config's `parser`, then render with its `render`. Only the
+ * natural pairings (columns→table, keyvalue→keyvalue-card, regex→list) draw a
+ * widget; anything else — including a parse that returned nothing — falls back
+ * to raw text so a bad/mismatched config is never a dead end.
+ */
 function WidgetBody({ result }: { result: CommandResult }) {
-  const { config, output } = result;
-  if (config.render === "table") {
-    const data = parseColumns(output);
-    if (data && data.rows.length > 0) {
-      return <TableWidget data={data} highlightColumn={config.highlightColumn} />;
-    }
-  }
-  if (config.render === "keyvalue-card") {
-    const data = parseKeyValue(output);
-    if (data) return <KeyValueCardWidget data={data} />;
-  }
-  // Anything we couldn't parse into the chosen widget: show raw text.
+  const widget = renderWidget(result.config, result.output);
   return (
-    <pre className="whitespace-pre font-mono text-xs text-slate-300">
-      {output}
-    </pre>
+    widget ?? (
+      <pre className="whitespace-pre font-mono text-xs text-slate-300">
+        {result.output}
+      </pre>
+    )
+  );
+}
+
+function renderWidget(
+  config: CommandConfig,
+  output: string
+): React.ReactElement | null {
+  switch (config.parser) {
+    case "columns": {
+      const data = parseColumns(output);
+      if (data && data.rows.length > 0 && config.render === "table") {
+        return (
+          <TableWidget data={data} highlightColumn={config.highlightColumn} />
+        );
+      }
+      return null;
+    }
+    case "keyvalue": {
+      const data = parseKeyValue(output);
+      if (data && config.render === "keyvalue-card") {
+        return <KeyValueCardWidget data={data} />;
+      }
+      return null;
+    }
+    case "regex": {
+      if (!config.capturePattern) return null;
+      const data = parseRegex(output, config.capturePattern);
+      if (data && config.render === "list") return <ListWidget data={data} />;
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+function ListWidget({ data }: { data: RegexData }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {data.items.map((item, i) => (
+        <li
+          key={i}
+          className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md border border-ink-700/50 bg-ink-900/40 px-3 py-1.5"
+        >
+          {Object.entries(item).map(([k, v]) => (
+            <span key={k} className="flex items-baseline gap-1">
+              <span className="text-2xs uppercase tracking-wide text-slate-500">
+                {k}
+              </span>
+              <span className="font-mono text-xs text-slate-200">{v}</span>
+            </span>
+          ))}
+        </li>
+      ))}
+    </ul>
   );
 }
 

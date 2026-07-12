@@ -13,6 +13,36 @@ export interface KeyValueData {
   pairs: { key: string; value: string }[];
 }
 
+export interface RegexData {
+  /** One object per matching line, keyed by the regex's named capture groups. */
+  items: Record<string, string>[];
+}
+
+/**
+ * `regex` parser: run a named-capture-group regex against each line and collect
+ * the groups. Lines that don't match are skipped. Returns null if the pattern
+ * is invalid or nothing matched (caller falls back to raw text).
+ */
+export function parseRegex(text: string, pattern: string): RegexData | null {
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern);
+  } catch {
+    return null;
+  }
+  const items: Record<string, string>[] = [];
+  for (const line of text.split("\n")) {
+    const m = line.match(re);
+    if (!m || !m.groups) continue;
+    const obj: Record<string, string> = {};
+    for (const [k, v] of Object.entries(m.groups)) {
+      if (v != null) obj[k] = v;
+    }
+    if (Object.keys(obj).length > 0) items.push(obj);
+  }
+  return items.length > 0 ? { items } : null;
+}
+
 /**
  * `keyvalue` parser: one key-value pair per line, split on the first `:` or on
  * a run of 2+ spaces (e.g. `systemctl status`, `free -h` style lines). Header
