@@ -12,7 +12,7 @@ export default function TilingShell() {
   const paneTree = useAppStore((s) => s.paneTree);
   const splitFocused = useAppStore((s) => s.splitFocused);
   const moveFocus = useAppStore((s) => s.moveFocus);
-  const closePane = useAppStore((s) => s.closePane);
+  const requestClose = useAppStore((s) => s.requestClose);
   const updateTransfer = useAppStore((s) => s.updateTransfer);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
 
@@ -32,7 +32,7 @@ export default function TilingShell() {
         } else if (e.code === "KeyW") {
           e.preventDefault();
           e.stopPropagation();
-          closePane(useAppStore.getState().focusedPaneId);
+          requestClose(useAppStore.getState().focusedPaneId);
         }
         return;
       }
@@ -54,7 +54,7 @@ export default function TilingShell() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [splitFocused, moveFocus, closePane]);
+  }, [splitFocused, moveFocus, requestClose]);
 
   // Transfer progress (shared across all panes).
   useEffect(() => {

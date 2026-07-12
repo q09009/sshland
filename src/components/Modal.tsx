@@ -58,6 +58,65 @@ export function ConfirmDialog({
   );
 }
 
+/**
+ * Three-way prompt shown when closing an editor with unsaved changes:
+ * save-and-close, discard-and-close, or cancel.
+ */
+export function UnsavedChangesDialog({
+  fileName,
+  saving,
+  onSave,
+  onDiscard,
+  onCancel,
+}: {
+  fileName: string;
+  saving?: boolean;
+  onSave: () => void;
+  onDiscard: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <Backdrop>
+      <h2 className="text-base font-semibold text-slate-100">
+        저장하지 않은 변경사항이 있어요
+      </h2>
+      <div className="mt-2 text-sm text-slate-300">
+        <span className="font-medium text-slate-100">{fileName}</span> 의 변경사항을
+        저장할까요? 저장하지 않으면 변경한 내용이 사라져요.
+      </div>
+      <div className="mt-6 flex justify-end gap-2">
+        <button
+          onClick={onCancel}
+          className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700"
+        >
+          취소
+        </button>
+        <button
+          onClick={onDiscard}
+          className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-300 hover:bg-red-500/20"
+        >
+          저장 안 함
+        </button>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          {saving ? "저장 중…" : "저장"}
+        </button>
+      </div>
+    </Backdrop>
+  );
+}
+
 /** A single-line text input dialog, used for rename / new folder. */
 export function PromptDialog({
   title,

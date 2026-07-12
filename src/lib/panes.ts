@@ -40,6 +40,12 @@ export function makeLeaf(content: PaneContent, filePath?: string): LeafNode {
   return { type: "leaf", id: newId(prefix), content, filePath };
 }
 
+/** Find a leaf by id anywhere in the tree, or null. */
+export function findLeaf(node: PaneNode, id: string): LeafNode | null {
+  if (node.type === "leaf") return node.id === id ? node : null;
+  return findLeaf(node.children[0], id) ?? findLeaf(node.children[1], id);
+}
+
 /** Find an existing editor leaf for `filePath`, so re-opening it reuses it. */
 export function findEditorLeaf(node: PaneNode, filePath: string): string | null {
   if (node.type === "leaf") {

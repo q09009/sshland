@@ -3,6 +3,7 @@ import {
   collectRects,
   Direction,
   findEditorLeaf,
+  findLeaf,
   findNeighbor,
   firstLeafId,
   makeLeaf,
@@ -135,6 +136,16 @@ interface AppState {
   moveFocus: (direction: Direction) => void;
   /** Close a pane; its sibling takes over the space. Last pane can't close. */
   closePane: (id: string) => void;
+  /**
+   * Request to close a pane. For an editor with unsaved changes this defers to
+   * a confirm dialog (via `closeRequest`); otherwise it closes immediately.
+   * Every close path (pane ✕, Alt+Shift+W) goes through here.
+   */
+  requestClose: (id: string) => void;
+  /** The editor pane awaiting an unsaved-changes decision, or null. */
+  closeRequest: string | null;
+  /** Dismiss the unsaved-changes dialog without closing. */
+  clearCloseRequest: () => void;
   /** Set the ratio (0..1) of a split node while dragging its divider. */
   setRatio: (splitId: string, ratio: number) => void;
   /** Switch a pane between the file manager and a terminal. */
@@ -172,7 +183,7 @@ interface AppState {
 // Placeholder tree until a connection seeds a real one.
 const initialLeaf = makeLeaf("file-manager");
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   screen: "connect",
   connection: null,
   connectNotice: null,
@@ -239,7 +250,11 @@ export const useAppStore = create<AppState>((set) => ({
         }
         focusedPaneId = best;
       }
-      return { paneTree, focusedPaneId };
+      return {
+        paneTree,
+        focusedPaneId,
+        closeRequest: s.closeRequest === id ? null : s.closeRequest,
+      };
     }),
   setRatio: (splitId, ratio) =>
     set((s) => ({ paneTree: updateRatio(s.paneTree, splitId, ratio) })),
@@ -257,6 +272,18 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   setPaneDirty: (id, isDirty) =>
     set((s) => ({ paneTree: setLeafDirty(s.paneTree, id, isDirty) })),
+
+  closeRequest: null,
+  requestClose: (id) => {
+    const s = get();
+    const leaf = findLeaf(s.paneTree, id);
+    if (leaf && leaf.content === "editor" && leaf.isDirty) {
+      set({ closeRequest: id });
+    } else {
+      s.closePane(id);
+    }
+  },
+  clearCloseRequest: () => set({ closeRequest: null }),
 
   enterFiles: (connection) => {
     // Start with a single full-screen file-manager pane.

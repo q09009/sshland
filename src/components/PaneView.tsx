@@ -141,7 +141,7 @@ function Leaf({ node }: { node: LeafNode }) {
 /** Slim per-pane title bar with content-switch and close controls. */
 function PaneHeader({ node }: { node: LeafNode }) {
   const setPaneContent = useAppStore((s) => s.setPaneContent);
-  const closePane = useAppStore((s) => s.closePane);
+  const requestClose = useAppStore((s) => s.requestClose);
   const canClose = useAppStore((s) => leafCount(s.paneTree) > 1);
   const isFm = node.content === "file-manager";
 
@@ -161,7 +161,7 @@ function PaneHeader({ node }: { node: LeafNode }) {
           ⇄
         </button>
         <button
-          onClick={() => closePane(node.id)}
+          onClick={() => requestClose(node.id)}
           disabled={!canClose}
           title="pane 닫기"
           className="rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-30 disabled:hover:bg-transparent"

@@ -19,6 +19,7 @@ import { download, readRemoteFile, writeRemoteFile } from "../api";
 import { useAppStore } from "../store";
 import { baseName } from "../lib/path";
 import { editorTheme } from "../lib/editorTheme";
+import { UnsavedChangesDialog } from "./Modal";
 
 /**
  * A lightweight text/code editor for one remote file, rendered with CodeMirror
@@ -50,6 +51,9 @@ export default function EditorPane({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const closePane = useAppStore((s) => s.closePane);
+  const requestClose = useAppStore((s) => s.requestClose);
+  const closeRequested = useAppStore((s) => s.closeRequest === id);
+  const clearCloseRequest = useAppStore((s) => s.clearCloseRequest);
   const setPaneDirty = useAppStore((s) => s.setPaneDirty);
   const startTransfer = useAppStore((s) => s.startTransfer);
   const finishTransfer = useAppStore((s) => s.finishTransfer);
@@ -70,9 +74,9 @@ export default function EditorPane({
 
   // Save the current contents back to the server. Held in a ref so the (once-
   // built) CodeMirror keymap always calls the latest version.
-  const doSave = useCallback(async () => {
+  const doSave = useCallback(async (): Promise<boolean> => {
     const view = viewRef.current;
-    if (!view || savingRef.current) return;
+    if (!view || savingRef.current) return false;
     const content = view.state.doc.toString();
     savingRef.current = true;
     setSaving(true);
@@ -81,8 +85,10 @@ export default function EditorPane({
       await writeRemoteFile(filePath, content);
       baselineRef.current = content;
       markDirty(false);
+      return true;
     } catch (err) {
       setSaveError(typeof err === "string" ? err : "저장하지 못했어요.");
+      return false;
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -198,7 +204,7 @@ export default function EditorPane({
             </button>
           )}
           <button
-            onClick={() => closePane(id)}
+            onClick={() => requestClose(id)}
             title="pane 닫기"
             className="rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300"
           >
@@ -206,6 +212,22 @@ export default function EditorPane({
           </button>
         </span>
       </div>
+      {closeRequested && (
+        <UnsavedChangesDialog
+          fileName={name}
+          saving={saving}
+          onSave={async () => {
+            const ok = await doSave();
+            clearCloseRequest();
+            if (ok) closePane(id);
+          }}
+          onDiscard={() => {
+            clearCloseRequest();
+            closePane(id);
+          }}
+          onCancel={clearCloseRequest}
+        />
+      )}
       {saveError && (
         <div className="shrink-0 bg-red-950/80 px-2 py-1 text-2xs text-red-300">
           {saveError}
