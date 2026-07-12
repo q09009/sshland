@@ -1,0 +1,6 @@
+# ps aux — running processes as a sortable table.
+# Single-quoted TOML strings are literal, so regex backslashes need no escaping.
+match = '^\s*ps\s+aux\s*$'
+parser = "columns"
+render = "table"
+highlight_column = "%CPU"

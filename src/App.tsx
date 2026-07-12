@@ -6,15 +6,18 @@ import SettingsPanel from "./components/SettingsPanel";
 import CommandLogBar from "./components/CommandLogBar";
 import { useAppStore } from "./store";
 import { useSettings } from "./lib/settings";
+import { useCommandConfigs } from "./lib/commandConfigs";
 
 function App() {
   const screen = useAppStore((s) => s.screen);
   const loadSettings = useSettings((s) => s.load);
+  const loadCommandConfigs = useCommandConfigs((s) => s.load);
 
-  // Load persisted settings once at startup.
+  // Load persisted settings and command-GUI configs once at startup.
   useEffect(() => {
     void loadSettings();
-  }, [loadSettings]);
+    void loadCommandConfigs();
+  }, [loadSettings, loadCommandConfigs]);
 
   if (screen === "connect") return <ConnectScreen />;
 

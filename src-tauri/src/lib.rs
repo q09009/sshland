@@ -1,3 +1,4 @@
+mod commands_config;
 mod error;
 mod settings;
 mod ssh;
@@ -24,7 +25,8 @@ pub fn run() {
             ssh::close_terminal,
             ssh::disconnect,
             settings::load_settings,
-            settings::save_settings
+            settings::save_settings,
+            commands_config::load_command_configs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

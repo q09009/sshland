@@ -134,3 +134,23 @@ export function loadSettings(): Promise<Record<string, unknown>> {
 export function saveSettings(settings: Record<string, unknown>): Promise<void> {
   return invoke<void>("save_settings", { settings });
 }
+
+/** A declarative command-GUI config (from a default or user TOML file). */
+export interface CommandConfig {
+  /** Filename stem; also the override key and settings-list label. */
+  name: string;
+  source: "default" | "user";
+  /** Regex matched against the whole command string. */
+  match: string;
+  parser: "columns" | "keyvalue" | "regex";
+  render: "table" | "keyvalue-card" | "list";
+  /** Named-capture regex applied per line (parser = "regex"). */
+  capturePattern?: string;
+  /** Column whose values get a color gradient (render = "table"). */
+  highlightColumn?: string;
+}
+
+/** Load + merge command-GUI configs (bundled defaults + user folder). */
+export function loadCommandConfigs(): Promise<CommandConfig[]> {
+  return invoke<CommandConfig[]>("load_command_configs");
+}
