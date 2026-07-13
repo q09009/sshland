@@ -8,6 +8,7 @@ import {
   Rect,
 } from "../lib/panes";
 import { useAppStore } from "../store";
+import { useSettings } from "../lib/settings";
 import FilesScreen from "../screens/FilesScreen";
 import TerminalPane from "./TerminalPane";
 import EditorPane from "./EditorPane";
@@ -146,6 +147,7 @@ function PaneHeader({ node }: { node: LeafNode }) {
   const setPaneContent = useAppStore((s) => s.setPaneContent);
   const requestClose = useAppStore((s) => s.requestClose);
   const canClose = useAppStore((s) => leafCount(s.paneTree) > 1);
+  const dashboardEnabled = useSettings((s) => s.settings.dashboardEnabled);
   const isFm = node.content === "file-manager";
   const isDashboard = node.content === "dashboard";
 
@@ -178,13 +180,15 @@ function PaneHeader({ node }: { node: LeafNode }) {
             >
               ⇄
             </button>
-            <button
-              onClick={() => setPaneContent(node.id, "dashboard")}
-              title="대시보드로 전환"
-              className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
-            >
-              📊
-            </button>
+            {dashboardEnabled && (
+              <button
+                onClick={() => setPaneContent(node.id, "dashboard")}
+                title="대시보드로 전환"
+                className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+              >
+                📊
+              </button>
+            )}
           </>
         )}
         <button

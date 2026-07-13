@@ -249,8 +249,11 @@ export interface DashboardWidgetConfig {
   /** One-line description shown in the picker. */
   description?: string;
   category: "monitoring" | "process-manager";
-  /** Default poll interval; the UI clamps user edits to a 2s minimum. */
-  refreshIntervalSeconds: number;
+  /**
+   * Suggested poll interval. Optional — when a widget omits it, the app's global
+   * default interval is used on add. The UI clamps user edits to a 2s minimum.
+   */
+  refreshIntervalSeconds?: number;
 }
 
 /** Load + merge dashboard-widget configs (bundled defaults + user folder). */

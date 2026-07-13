@@ -9,4 +9,4 @@ command = "ps aux --sort=-%cpu"
 parser = "columns"
 render = "table"
 category = "process-manager"
-refresh_interval_seconds = 5
+# No refresh_interval_seconds: uses the app's global default interval.

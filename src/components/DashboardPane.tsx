@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { useDashboardWidgetConfigs, findWidgetConfig } from "../lib/dashboardWidgetConfigs";
 import { useDashboardLayout } from "../lib/dashboardLayout";
+import { useSettings } from "../lib/settings";
 import WidgetCard from "./WidgetCard";
 import WidgetPicker from "./WidgetPicker";
-
-/** Fallback interval (seconds) if a picked widget declares nothing usable. */
-const FALLBACK_INTERVAL = 5;
 
 /**
  * A dashboard pane: a customizable, responsive grid of monitoring widget cards
@@ -22,6 +20,7 @@ export default function DashboardPane({ id }: { id: string }) {
   const configs = useDashboardWidgetConfigs((s) => s.configs);
   const widgets = useDashboardLayout((s) => s.widgets);
   const addWidget = useDashboardLayout((s) => s.addWidget);
+  const defaultInterval = useSettings((s) => s.settings.dashboardDefaultInterval);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   // Load the merged widget catalog once (idempotent in the store).
@@ -31,7 +30,8 @@ export default function DashboardPane({ id }: { id: string }) {
 
   const handlePick = (widgetId: string) => {
     const cfg = findWidgetConfig(configs, widgetId);
-    addWidget(widgetId, cfg?.refreshIntervalSeconds ?? FALLBACK_INTERVAL);
+    // The widget's own interval wins; otherwise the global default setting.
+    addWidget(widgetId, cfg?.refreshIntervalSeconds ?? defaultInterval);
     setPickerOpen(false);
   };
 

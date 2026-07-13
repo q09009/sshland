@@ -3,6 +3,8 @@ import { getName, getVersion, getTauriVersion } from "@tauri-apps/api/app";
 import { useAppStore } from "../store";
 import { useSettings } from "../lib/settings";
 import { useCommandConfigs } from "../lib/commandConfigs";
+import { useDashboardWidgetConfigs } from "../lib/dashboardWidgetConfigs";
+import { MIN_REFRESH_SECONDS, clampInterval } from "../lib/dashboardTypes";
 import { commandsDirPath, openCommandsDir } from "../api";
 
 /**
@@ -20,6 +22,7 @@ interface Section {
 const SECTIONS: Section[] = [
   { id: "command-log", label: "명령어 로그", render: () => <CommandLogSection /> },
   { id: "command-gui", label: "명령어 GUI", render: () => <CommandGuiSection /> },
+  { id: "dashboard", label: "대시보드", render: () => <DashboardSection /> },
   { id: "general", label: "일반", render: () => <GeneralSection /> },
   { id: "about", label: "정보", render: () => <AboutSection /> },
   // Future: { id: "shortcuts", label: "단축키", ... },
@@ -192,6 +195,89 @@ function CommandGuiSection() {
               <span className="text-slate-500">
                 {c.parser} → {c.render}
               </span>
+              <span
+                className={`ml-auto rounded px-1.5 py-0.5 text-2xs ${
+                  c.source === "user"
+                    ? "bg-sky-500/15 text-sky-200"
+                    : "bg-ink-700 text-slate-400"
+                }`}
+              >
+                {c.source === "user" ? "사용자" : "기본"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function DashboardSection() {
+  const enabled = useSettings((s) => s.settings.dashboardEnabled);
+  const defaultInterval = useSettings((s) => s.settings.dashboardDefaultInterval);
+  const set = useSettings((s) => s.set);
+  const configs = useDashboardWidgetConfigs((s) => s.configs);
+  const reload = useDashboardWidgetConfigs((s) => s.load);
+  const [intervalText, setIntervalText] = useState(String(defaultInterval));
+
+  useEffect(() => setIntervalText(String(defaultInterval)), [defaultInterval]);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const commitInterval = () => {
+    const n = Number.parseInt(intervalText, 10);
+    const clamped = Number.isNaN(n) ? defaultInterval : clampInterval(n);
+    set("dashboardDefaultInterval", clamped);
+    setIntervalText(String(clamped));
+  };
+
+  return (
+    <div>
+      <SectionTitle>대시보드</SectionTitle>
+      <SettingRow
+        label="대시보드 pane 사용"
+        description="pane 헤더의 📊 버튼으로 서버 상태 위젯 대시보드를 열 수 있게 합니다. 끄면 버튼이 숨겨집니다."
+      >
+        <Toggle
+          checked={enabled}
+          onChange={(v) => set("dashboardEnabled", v)}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="새 위젯 기본 새로고침 주기"
+        description="위젯을 추가할 때 쓰는 기본 주기(초)예요. 위젯이 자체 주기를 지정하면 그 값이 우선합니다. 주기가 짧을수록 서버에 명령이 더 자주 실행돼요."
+      >
+        <span className="flex items-center gap-1 text-sm text-slate-300">
+          <input
+            type="number"
+            min={MIN_REFRESH_SECONDS}
+            value={intervalText}
+            onChange={(e) => setIntervalText(e.target.value)}
+            onBlur={commitInterval}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+            className="w-16 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1 text-right text-slate-100 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+          />
+          <span className="text-slate-500">초</span>
+        </span>
+      </SettingRow>
+
+      <div className="mt-4">
+        <div className="mb-2 text-xs font-medium text-slate-400">
+          사용 가능한 위젯 ({configs.length})
+        </div>
+        <ul className="flex flex-col gap-1">
+          {configs.map((c) => (
+            <li
+              key={c.id}
+              className="flex items-center gap-2 rounded-md border border-ink-700/50 bg-ink-900/40 px-3 py-1.5 text-xs"
+            >
+              <span className="select-none">{c.icon ?? "📊"}</span>
+              <span className="text-slate-200">{c.label}</span>
+              <span className="text-slate-500">{c.render}</span>
               <span
                 className={`ml-auto rounded px-1.5 py-0.5 text-2xs ${
                   c.source === "user"

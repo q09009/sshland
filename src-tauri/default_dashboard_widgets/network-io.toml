@@ -9,4 +9,4 @@ parser = "columns"
 render = "table"
 highlight_column = "RX_BYTES"
 category = "monitoring"
-refresh_interval_seconds = 5
+# No refresh_interval_seconds: uses the app's global default interval.

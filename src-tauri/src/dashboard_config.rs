@@ -81,7 +81,9 @@ struct RawWidget {
     /// One-line description shown in the picker (optional).
     description: Option<String>,
     category: String,
-    refresh_interval_seconds: u64,
+    /// Suggested poll interval. Optional: when a widget omits it, the app's
+    /// global default interval (a setting) is used when the widget is added.
+    refresh_interval_seconds: Option<u64>,
 }
 
 /// A validated widget config sent to the frontend (camelCase JSON).
@@ -111,7 +113,8 @@ pub struct DashboardWidgetConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
     category: String,
-    refresh_interval_seconds: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refresh_interval_seconds: Option<u64>,
 }
 
 /// Parse + validate one TOML widget. Errors carry a reason for the log.
@@ -219,7 +222,20 @@ mod tests {
         assert_eq!(cfg.category, "monitoring");
         assert_eq!(cfg.value_field.as_deref(), Some("usage"));
         assert!(cfg.capture_pattern.is_some());
-        assert!(cfg.refresh_interval_seconds >= 2);
+    }
+
+    #[test]
+    fn refresh_interval_is_optional() {
+        // A widget may omit refresh_interval_seconds (falls back to the app's
+        // global default), or set its own (e.g. disk, which changes slowly).
+        let disk = include_str!("../default_dashboard_widgets/disk-usage.toml");
+        let cfg = parse_widget("disk-usage", "default", disk).expect("disk should parse");
+        assert_eq!(cfg.refresh_interval_seconds, Some(30));
+
+        let no_interval =
+            "id='a'\nlabel='A'\ncommand='true'\nparser='columns'\nrender='table'\ncategory='monitoring'";
+        let cfg = parse_widget("a", "user", no_interval).expect("omitting interval is allowed");
+        assert_eq!(cfg.refresh_interval_seconds, None);
     }
 
     #[test]

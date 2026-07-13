@@ -8,4 +8,4 @@ parser = "regex"
 capture_pattern = '(?<load_1m>[0-9.]+)\s+(?<load_5m>[0-9.]+)\s+(?<load_15m>[0-9.]+)'
 render = "list"
 category = "monitoring"
-refresh_interval_seconds = 5
+# No refresh_interval_seconds: uses the app's global default interval.

@@ -11,4 +11,4 @@ render = "gauge"
 value_field = "usage"
 unit = "%"
 category = "monitoring"
-refresh_interval_seconds = 5
+# No refresh_interval_seconds: uses the app's global default interval.
