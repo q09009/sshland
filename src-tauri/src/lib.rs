@@ -23,6 +23,8 @@ pub fn run() {
             ssh::delete,
             ssh::copy,
             ssh::poll_widget_command,
+            ssh::run_macro,
+            ssh::stop_macro,
             ssh::read_remote_file,
             ssh::write_remote_file,
             ssh::open_terminal,

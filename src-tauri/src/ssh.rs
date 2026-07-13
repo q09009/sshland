@@ -108,6 +108,24 @@ struct TerminalOutput {
     data: Vec<u8>,
 }
 
+/// A chunk of a macro run's combined stdout/stderr, streamed as a `macro-output`
+/// event. The frontend accumulates these and parses its own step sentinels out.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MacroOutput {
+    /// The run id the frontend supplied when starting the macro.
+    run_id: String,
+    data: Vec<u8>,
+}
+
+/// Signals that a macro run's exec channel has finished/closed, as a
+/// `macro-closed` event. Any steps still pending by now didn't run.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MacroClosed {
+    run_id: String,
+}
+
 /// A unit of work for the SSH worker thread.
 pub enum Req {
     /// Resolve a path to its absolute form (used to discover the home dir).
@@ -196,6 +214,18 @@ pub enum Req {
     ResizeTerminal { id: String, cols: u16, rows: u16 },
     /// Close a terminal's channel, leaving the SSH connection intact.
     CloseTerminal { id: String },
+    /// Run a macro: exec a pre-assembled script (steps joined with sentinel
+    /// echoes) over one non-PTY channel, registered for streaming polling. The
+    /// frontend parses its own sentinels out of the `macro-output` stream. Uses
+    /// a persistent-until-done exec channel (streamed), NOT the one-shot RunOnce
+    /// used by dashboard widgets, because steps share shell state (cd, exports).
+    RunMacro {
+        run_id: String,
+        script: String,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
+    /// Stop a running macro by closing its exec channel (ends the remote script).
+    StopMacro { run_id: String },
     /// Close the connection and stop the worker.
     Disconnect,
 }
@@ -256,8 +286,15 @@ fn reply_err(req: Req, msg: String) -> bool {
             let _ = resp.send(Err(msg));
             true
         }
-        // Fire-and-forget terminal messages have no reply channel.
-        Req::WriteTerminal { .. } | Req::ResizeTerminal { .. } | Req::CloseTerminal { .. } => true,
+        Req::RunMacro { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        // Fire-and-forget messages have no reply channel.
+        Req::WriteTerminal { .. }
+        | Req::ResizeTerminal { .. }
+        | Req::CloseTerminal { .. }
+        | Req::StopMacro { .. } => true,
         Req::Disconnect => false,
     }
 }
@@ -765,6 +802,7 @@ fn handle_req(
     sftp: &Sftp,
     app: &AppHandle,
     terminals: &mut HashMap<String, Channel>,
+    macros: &mut HashMap<String, Channel>,
 ) -> bool {
     match req {
         Req::Canonicalize { path, resp } => {
@@ -880,13 +918,39 @@ fn handle_req(
             }
             false
         }
+        Req::RunMacro {
+            run_id,
+            script,
+            resp,
+        } => {
+            match open_exec(session, &script) {
+                Ok(channel) => {
+                    macros.insert(run_id, channel);
+                    let _ = resp.send(Ok(()));
+                }
+                Err(msg) => {
+                    let _ = resp.send(Err(msg));
+                }
+            }
+            false
+        }
+        Req::StopMacro { run_id } => {
+            if let Some(mut ch) = macros.remove(&run_id) {
+                let _ = ch.close();
+            }
+            // The run is over (stopped); tell the frontend so it can finalize.
+            let _ = app.emit("macro-closed", MacroClosed { run_id });
+            false
+        }
         Req::Disconnect => true,
     }
 }
 
-/// Read whatever a terminal channel currently has buffered (non-blocking) and
-/// emit it. Returns `true` if the channel reached EOF / errored (closed).
-fn drain_terminal(app: &AppHandle, id: &str, channel: &mut Channel, buf: &mut [u8]) -> bool {
+/// Read whatever a channel currently has buffered (non-blocking), batching it
+/// into one `acc`. Returns `(bytes, closed)` — `closed` is true if the channel
+/// reached EOF / errored. Shared by terminal polling and macro-run polling so
+/// both use the exact same non-blocking read-and-batch mechanism.
+fn drain_channel(channel: &mut Channel, buf: &mut [u8]) -> (Vec<u8>, bool) {
     let mut acc: Vec<u8> = Vec::new();
     let mut closed = false;
     loop {
@@ -897,7 +961,7 @@ fn drain_terminal(app: &AppHandle, id: &str, channel: &mut Channel, buf: &mut [u
             }
             Ok(n) => {
                 acc.extend_from_slice(&buf[..n]);
-                // Bound per-cycle work so one gushing terminal can't starve others.
+                // Bound per-cycle work so one gushing channel can't starve others.
                 if acc.len() >= 256 * 1024 {
                     break;
                 }
@@ -909,16 +973,20 @@ fn drain_terminal(app: &AppHandle, id: &str, channel: &mut Channel, buf: &mut [u
             }
         }
     }
-    if !acc.is_empty() {
-        let _ = app.emit(
-            "terminal-output",
-            TerminalOutput {
-                id: id.to_string(),
-                data: acc,
-            },
-        );
-    }
-    closed
+    (acc, closed)
+}
+
+/// Open a non-PTY exec channel running `script`, for a macro run. Unlike a
+/// terminal this is headless (no `request_pty`/`shell`) — the whole script is
+/// exec'd at once and its output streamed back via polling.
+fn open_exec(session: &Session, script: &str) -> Result<Channel, String> {
+    let mut channel = session
+        .channel_session()
+        .map_err(|_| error::macro_run_failed())?;
+    channel
+        .exec(script)
+        .map_err(|_| error::macro_run_failed())?;
+    Ok(channel)
 }
 
 /// The worker thread body: owns the session, SFTP handle, and all terminal
@@ -940,6 +1008,9 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
     };
 
     let mut terminals: HashMap<String, Channel> = HashMap::new();
+    // Streaming exec channels for in-flight macro runs (keyed by run id). Polled
+    // with the same non-blocking read-and-batch mechanism as terminals.
+    let mut macros: HashMap<String, Channel> = HashMap::new();
     let mut buf = [0u8; TERM_BUF];
 
     'outer: loop {
@@ -947,7 +1018,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
         loop {
             match cmd_rx.try_recv() {
                 Ok(req) => {
-                    if handle_req(req, &session, &sftp, &app, &mut terminals) {
+                    if handle_req(req, &session, &sftp, &app, &mut terminals, &mut macros) {
                         break 'outer;
                     }
                 }
@@ -956,25 +1027,59 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
             }
         }
 
-        // 2. Poll terminals for output, batching each channel into one event.
-        if !terminals.is_empty() {
+        // 2. Poll terminals and macro runs for output, batching each channel into
+        //    one event. Both share one non-blocking window over the session.
+        if !terminals.is_empty() || !macros.is_empty() {
             session.set_blocking(false);
-            let mut closed: Vec<String> = Vec::new();
+
+            let mut closed_terms: Vec<String> = Vec::new();
             for (id, channel) in terminals.iter_mut() {
-                if drain_terminal(&app, id, channel, &mut buf) {
-                    closed.push(id.clone());
+                let (data, closed) = drain_channel(channel, &mut buf);
+                if !data.is_empty() {
+                    let _ = app.emit(
+                        "terminal-output",
+                        TerminalOutput {
+                            id: id.clone(),
+                            data,
+                        },
+                    );
+                }
+                if closed {
+                    closed_terms.push(id.clone());
                 }
             }
+
+            let mut closed_macros: Vec<String> = Vec::new();
+            for (run_id, channel) in macros.iter_mut() {
+                let (data, closed) = drain_channel(channel, &mut buf);
+                if !data.is_empty() {
+                    let _ = app.emit(
+                        "macro-output",
+                        MacroOutput {
+                            run_id: run_id.clone(),
+                            data,
+                        },
+                    );
+                }
+                if closed {
+                    closed_macros.push(run_id.clone());
+                }
+            }
+
             session.set_blocking(true);
-            for id in closed {
+            for id in closed_terms {
                 terminals.remove(&id);
                 let _ = app.emit("terminal-closed", id);
             }
+            for run_id in closed_macros {
+                macros.remove(&run_id);
+                let _ = app.emit("macro-closed", MacroClosed { run_id });
+            }
         }
 
-        // 3. Wait for the next command. Poll rapidly only while terminals live;
-        //    otherwise block so an idle connection uses no CPU.
-        let next = if terminals.is_empty() {
+        // 3. Wait for the next command. Poll rapidly only while a terminal or a
+        //    macro run is live; otherwise block so an idle connection uses no CPU.
+        let next = if terminals.is_empty() && macros.is_empty() {
             cmd_rx.recv().map_err(|_| ())
         } else {
             match cmd_rx.recv_timeout(TERMINAL_POLL) {
@@ -985,7 +1090,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
         };
         match next {
             Ok(req) => {
-                if handle_req(req, &session, &sftp, &app, &mut terminals) {
+                if handle_req(req, &session, &sftp, &app, &mut terminals, &mut macros) {
                     break 'outer;
                 }
             }
@@ -993,8 +1098,11 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
         }
     }
 
-    // Close all terminals, then the session.
+    // Close all terminal + macro channels, then the session.
     for (_, mut ch) in terminals.drain() {
+        let _ = ch.close();
+    }
+    for (_, mut ch) in macros.drain() {
         let _ = ch.close();
     }
     let _ = session.disconnect(None, "bye", None);
@@ -1215,6 +1323,31 @@ pub async fn poll_widget_command(
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Run a macro: exec the pre-assembled `script` over one non-PTY channel and
+/// stream its output back via `macro-output` events keyed by `run_id`. Resolves
+/// once the channel is open; per-step progress is derived from the stream.
+#[tauri::command]
+pub async fn run_macro(
+    state: State<'_, SessionManager>,
+    run_id: String,
+    script: String,
+) -> Result<(), String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::RunMacro {
+        run_id,
+        script,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Stop a running macro by closing its exec channel (ends the remote script).
+/// Fire-and-forget: a `macro-closed` event confirms it ended.
+#[tauri::command]
+pub async fn stop_macro(state: State<'_, SessionManager>, run_id: String) -> Result<(), String> {
+    state.send(Req::StopMacro { run_id })
 }
 
 /// Read a remote text file's contents (for the editor pane).
