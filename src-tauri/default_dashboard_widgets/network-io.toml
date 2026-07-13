@@ -1,0 +1,12 @@
+# Network I/O — per-interface cumulative received/transmitted bytes from
+# /proc/net/dev, shaped into a simple 3-column table by the widget's command.
+id = "network-io"
+label = "네트워크 I/O"
+icon = "🌐"
+description = "인터페이스별 누적 수신·송신 바이트예요."
+command = "echo 'IFACE RX_BYTES TX_BYTES'; awk -F '[: ]+' 'NR>2 {print $2, $3, $11}' /proc/net/dev"
+parser = "columns"
+render = "table"
+highlight_column = "RX_BYTES"
+category = "monitoring"
+refresh_interval_seconds = 5

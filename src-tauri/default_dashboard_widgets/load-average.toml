@@ -1,0 +1,11 @@
+# Load average (1 / 5 / 15 minute) read from /proc/loadavg as a labeled list.
+id = "load-average"
+label = "부하 평균"
+icon = "📈"
+description = "1·5·15분 시스템 부하 평균이에요."
+command = "cat /proc/loadavg"
+parser = "regex"
+capture_pattern = '(?<load_1m>[0-9.]+)\s+(?<load_5m>[0-9.]+)\s+(?<load_15m>[0-9.]+)'
+render = "list"
+category = "monitoring"
+refresh_interval_seconds = 5

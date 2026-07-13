@@ -1,0 +1,14 @@
+# Memory usage as a percentage (used / total), reduced to a single number by the
+# widget's own shell command so the gauge just renders a %.
+id = "mem-usage"
+label = "메모리 사용률"
+icon = "🧠"
+description = "전체 메모리 사용률을 게이지로 표시해요."
+command = "free | awk '/^Mem:/ {print $3/$2*100}'"
+parser = "regex"
+capture_pattern = '(?<usage>[0-9.]+)'
+render = "gauge"
+value_field = "usage"
+unit = "%"
+category = "monitoring"
+refresh_interval_seconds = 5

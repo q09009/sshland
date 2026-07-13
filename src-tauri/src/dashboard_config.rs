@@ -31,10 +31,28 @@ fn widgets_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Embedded read-only defaults: (filename stem, TOML source). Add more here as
 /// the bundled widget catalog grows.
-const DEFAULT_WIDGETS: &[(&str, &str)] = &[(
-    "cpu-usage",
-    include_str!("../default_dashboard_widgets/cpu-usage.toml"),
-)];
+const DEFAULT_WIDGETS: &[(&str, &str)] = &[
+    (
+        "cpu-usage",
+        include_str!("../default_dashboard_widgets/cpu-usage.toml"),
+    ),
+    (
+        "mem-usage",
+        include_str!("../default_dashboard_widgets/mem-usage.toml"),
+    ),
+    (
+        "disk-usage",
+        include_str!("../default_dashboard_widgets/disk-usage.toml"),
+    ),
+    (
+        "load-average",
+        include_str!("../default_dashboard_widgets/load-average.toml"),
+    ),
+    (
+        "network-io",
+        include_str!("../default_dashboard_widgets/network-io.toml"),
+    ),
+];
 
 const PARSERS: &[&str] = &["columns", "keyvalue", "regex"];
 const RENDERS: &[&str] = &["gauge", "table", "keyvalue-card", "list"];
