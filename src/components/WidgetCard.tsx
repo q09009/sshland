@@ -9,13 +9,10 @@ import {
   WidgetSize,
 } from "../lib/dashboardLayout";
 import { operationToCommandString } from "../lib/commandLog";
-import { dragReorder } from "../lib/reorder";
+import { ReorderItemProps } from "../lib/reorder";
 import { useAppStore } from "../store";
 import WidgetView from "./WidgetView";
 import { KillProcessDialog } from "./Modal";
-
-/** MIME type carrying a dragged card's index for grid reordering. */
-const DRAG_TYPE = "application/x-widget-index";
 
 /** Grid column span per card size. */
 const SPAN: Record<WidgetSize, number> = { small: 1, medium: 2, large: 3 };
@@ -37,10 +34,10 @@ const SIZE_LABEL: Record<WidgetSize, string> = {
  */
 export default function WidgetCard({
   instance,
-  index,
+  drag,
 }: {
   instance: DashboardWidgetInstance;
-  index: number;
+  drag: ReorderItemProps;
 }) {
   const configs = useDashboardWidgetConfigs((s) => s.configs);
   const config = useMemo(
@@ -51,7 +48,6 @@ export default function WidgetCard({
   const removeWidget = useDashboardLayout((s) => s.removeWidget);
   const setSize = useDashboardLayout((s) => s.setSize);
   const setRefreshInterval = useDashboardLayout((s) => s.setRefreshInterval);
-  const moveWidget = useDashboardLayout((s) => s.moveWidget);
 
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -106,9 +102,6 @@ export default function WidgetCard({
 
   const spanStyle = { gridColumn: `span ${SPAN[instance.size]}` };
 
-  // Drag-and-drop reorder (shared with the macro editor's step list).
-  const { handleProps, dropProps } = dragReorder(index, moveWidget, DRAG_TYPE);
-
   const cycleSize = () => {
     const i = WIDGET_SIZES.indexOf(instance.size);
     setSize(instance.instanceId, WIDGET_SIZES[(i + 1) % WIDGET_SIZES.length]);
@@ -146,13 +139,17 @@ export default function WidgetCard({
 
   return (
     <div
+      ref={drag.itemRef}
       style={spanStyle}
-      {...dropProps}
-      className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-ink-700/70 bg-ink-800"
+      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border bg-ink-800 ${
+        drag.dropTarget
+          ? "border-sky-500"
+          : "border-ink-700/70"
+      } ${drag.dragging ? "opacity-40" : ""}`}
     >
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-ink-700/60 px-1.5 text-xs text-slate-400">
         <span
-          {...handleProps}
+          onMouseDown={drag.onHandleMouseDown}
           title="드래그해서 위치 이동"
           className="cursor-grab select-none px-0.5 text-slate-500 hover:text-slate-300 active:cursor-grabbing"
         >

@@ -3,6 +3,7 @@ import { useDashboardWidgetConfigs, findWidgetConfig } from "../lib/dashboardWid
 import { useDashboardLayout } from "../lib/dashboardLayout";
 import { useSettings } from "../lib/settings";
 import { Macro, newMacro, useMacros } from "../lib/macros";
+import { useReorder } from "../lib/reorder";
 import WidgetCard from "./WidgetCard";
 import MacroCard from "./MacroCard";
 import WidgetPicker from "./WidgetPicker";
@@ -30,6 +31,9 @@ export default function DashboardPane({ id }: { id: string }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   // A brand-new macro being authored before it's saved + added to the grid.
   const [creating, setCreating] = useState<Macro | null>(null);
+
+  const moveWidget = useDashboardLayout((s) => s.moveWidget);
+  const { itemProps, isDragging } = useReorder(widgets.length, moveWidget);
 
   // Load the widget catalog + saved macros once (idempotent in the stores).
   useEffect(() => {
@@ -86,9 +90,9 @@ export default function DashboardPane({ id }: { id: string }) {
         >
           {widgets.map((w, i) =>
             w.source === "macro" ? (
-              <MacroCard key={w.instanceId} instance={w} index={i} />
+              <MacroCard key={w.instanceId} instance={w} drag={itemProps(i)} />
             ) : (
-              <WidgetCard key={w.instanceId} instance={w} index={i} />
+              <WidgetCard key={w.instanceId} instance={w} drag={itemProps(i)} />
             )
           )}
           <button
@@ -98,6 +102,13 @@ export default function DashboardPane({ id }: { id: string }) {
             ＋ 위젯 추가
           </button>
         </div>
+      )}
+
+      {/* Full-screen "grabbing" overlay while a card is being dragged, same
+          trick PaneView uses for divider dragging — keeps the cursor correct
+          and swallows stray hover/clicks over other cards mid-drag. */}
+      {isDragging && (
+        <div className="fixed inset-0 z-40" style={{ cursor: "grabbing" }} />
       )}
 
       {pickerOpen && (

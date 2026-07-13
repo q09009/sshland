@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import { Macro, MacroStep } from "../api";
 import { newMacroStep } from "../lib/macros";
-import { dragReorder, moveItem } from "../lib/reorder";
-
-const STEP_MIME = "application/x-macro-step-index";
+import { moveItem, useReorder } from "../lib/reorder";
 
 /**
  * Modal for creating or editing a macro: a name plus an ordered list of steps
@@ -35,6 +33,10 @@ export default function MacroEditor({
 
   const move = (from: number, to: number) =>
     setSteps((s) => moveItem(s, from, to));
+  const { itemProps: stepDrag, isDragging: stepsDragging } = useReorder(
+    steps.length,
+    move
+  );
 
   const setStep = (id: string, patch: Partial<MacroStep>) =>
     setSteps((s) => s.map((st) => (st.id === id ? { ...st, ...patch } : st)));
@@ -109,15 +111,17 @@ export default function MacroEditor({
           ) : (
             <ul className="flex flex-col gap-2">
               {steps.map((st, i) => {
-                const { handleProps, dropProps } = dragReorder(i, move, STEP_MIME);
+                const drag = stepDrag(i);
                 return (
                   <li
                     key={st.id}
-                    {...dropProps}
-                    className="flex items-start gap-2 rounded-lg border border-ink-700/60 bg-ink-900/40 p-2"
+                    ref={drag.itemRef}
+                    className={`flex items-start gap-2 rounded-lg border bg-ink-900/40 p-2 ${
+                      drag.dropTarget ? "border-sky-500" : "border-ink-700/60"
+                    } ${drag.dragging ? "opacity-40" : ""}`}
                   >
                     <span
-                      {...handleProps}
+                      onMouseDown={drag.onHandleMouseDown}
                       title="드래그해서 순서 변경"
                       className="mt-1.5 cursor-grab select-none px-0.5 text-slate-500 hover:text-slate-300 active:cursor-grabbing"
                     >
@@ -178,6 +182,10 @@ export default function MacroEditor({
           </button>
         </div>
       </div>
+
+      {stepsDragging && (
+        <div className="fixed inset-0 z-[60]" style={{ cursor: "grabbing" }} />
+      )}
     </div>
   );
 }
