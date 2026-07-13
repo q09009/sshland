@@ -69,6 +69,20 @@ Keyboard shortcuts (`src/components/TilingShell.tsx`, registered on the capture 
 - **The CodeMirror theme + all its panels/tooltip are themed dark from the design tokens** (`editorTheme` in `lib/editorTheme.ts`, read via `token`/`colorToken` like the xterm theme — CodeMirror themes are JS objects, not CSS classes). A small local `rgba()` helper builds translucent token colors for highlight overlays.
 - **Save in the command-log bar**: a save has no honest shell equivalent (`echo`/redirect would misrepresent it), so `operationToCommandString` renders a descriptive `(편집기로 저장) <path>` line (a new `save` case) instead of a fake command.
 
+### Dashboard pane (monitoring widgets) — the fourth pane type
+
+`src/components/DashboardPane.tsx`: a customizable grid of monitoring widgets that poll the server on a timer and render the output as GUIs (gauge/table/list/card). It's the fourth leaf type (`dashboard`, alongside `file-manager`/`terminal`/`editor`) and reuses all the existing tiling logic. It deliberately **reuses existing infrastructure rather than building parallel versions**: the same one-worker SSH model, the same declarative-config + parser pipeline as the Command GUI, the same pane tree, and the same data-driven settings panel.
+
+- **Polling shares the one SSH worker — no second channel.** A new `Req::RunOnce { command }` worker request (`ssh.rs`) runs a command over a **short-lived exec channel**, blockingly, inside the existing `worker_loop` — the same technique `copy` uses for `cp -r`, **not** the persistent-channel-per-PTY model terminals use. Each widget's frontend timer calls the `poll_widget_command` Tauri command, which sends one `RunOnce` and gets the raw stdout back. Because these one-shot execs share the worker thread with SFTP ops and terminal polling, the enforced **2-second minimum interval** (`MIN_REFRESH_SECONDS`) exists partly to avoid saturating the worker, not just to avoid spamming the server.
+- **Widget configs are a declarative config type parallel to (not merged with) Command GUI configs** (`src-tauri/src/dashboard_config.rs`, mirroring `commands_config.rs`): bundled defaults in `default_dashboard_widgets/*.toml` (embedded via `include_str!`) plus a user folder `<app_config_dir>/dashboard-widgets/`, merged with **user-wins-by-filename-stem** and the same **silent-skip-on-bad-file** behavior. A widget has a **fixed `command`** (no `match` — it's added explicitly from a picker and polled on a timer, not matched against typed input), the shared parser vocabulary (`columns`/`keyvalue`/`regex`), a render (`gauge`/`table`/`keyvalue-card`/`list`), optional `value_field`/`unit` (for gauge), optional `icon`/`description` (for the picker), a `category` (`monitoring`|`process-manager`), and an **optional** `refresh_interval_seconds` (when omitted, the app's global default-interval setting applies on add). `load_dashboard_widget_configs` returns the merged list; `lib/dashboardWidgetConfigs.ts` mirrors `lib/commandConfigs.ts`. The pure parsers in `lib/parsers.ts` are reused as-is.
+- **Renderers** (`components/WidgetView.tsx`): reuses the parsers, then renders. The **`gauge`** renderer is new — a linear percentage bar + big value label with conventional thresholds (green <70 / amber 70–90 / red >90) built from the design tokens (no hardcoded hex). A single `%` value comes from the widget's own shell command reducing e.g. `top`/`free` to one number (`100 - idle`, `used/total*100`) so the gauge stays a generic "read a number" renderer. A non-match (or empty parse) **falls back silently to raw text**, like everywhere else. `table`/`keyvalue-card`/`list` mirror the Command GUI panel's widgets, styled compactly for a card.
+- **Process manager** (`components/ProcessTable.tsx`, `category = "process-manager"`): projects `ps aux --sort=-%cpu` down to PID/CPU%/MEM%/name (reusing `parseColumns`, so the space-containing COMMAND survives), sortable by column, default sort by CPU descending. Each row has a **kill action** → the existing confirm-dialog pattern (`KillProcessDialog` in `Modal.tsx`, like `UnsavedChangesDialog`) showing PID + name, with a normal kill and a clearly-labeled **force kill (-9)**. On confirm, `killProcess` runs `kill [-9] <pid>` **reusing the same one-shot exec** (`poll_widget_command`/`RunOnce`) — the PID is validated numeric client-side so the built command can only ever be `kill [-9] <number>` (an injection like `12; rm -rf /` is rejected before invoke). A successful kill logs the real command via the existing `operationToCommandString`/`logCommand` path (a new `kill` case — a real working command, unlike the descriptive `save` case) and **immediately re-polls** that widget.
+- **The grid is NOT the Hyprland split tree** — it's a simple responsive `auto-fill` grid; each card has a size class (`small`/`medium`/`large` → column span). Empty state shows an "add widget" affordance; the picker (`WidgetPicker.tsx`) lists the merged catalog (icon/label/description). Cards can be removed (✕), reordered by **drag-and-drop** (a drag handle carries the index via `dataTransfer`), resized (size-cycle button), and have a **per-widget interval** input **clamped to ≥2s in the UI** (`clampInterval`, blur/Enter commit — actually blocked, not just documented).
+- **Timers are owned per-card and cleared on unmount.** `WidgetCard`'s polling `useEffect` returns `clearInterval`, so closing a dashboard pane — which unmounts every card — **stops all polling with no lingering `setInterval`** (verified in-browser: 2 cards → 2 intervals created → both cleared, 0 active, on unmount). A widget only exists (and polls) while its pane is a leaf in the tree, so there's no orphan polling — the same care given to closing terminal panes cleanly.
+- **Layout persists via the settings pattern.** The single shared layout (which widgets, order, sizes, intervals) is an `AppSettings.dashboardLayout` field (`lib/dashboardLayout.ts` persists on every mutation via `useSettings.set`; `setWidgets` seeds from loaded settings **without** re-persisting; `App.tsx` seeds after `loadSettings` resolves). It's global (not per-connection), so it survives an app restart and a reconnect. The shared types + pure helpers live in a leaf module `lib/dashboardTypes.ts` to avoid a settings↔layout import cycle.
+- **Settings** (`SettingsPanel.tsx`, "대시보드" section, one more entry in the data-driven `SECTIONS`): a global **enable/disable toggle** for the dashboard pane type (off hides the 📊 entry point in the pane header) and a **default refresh interval** used when adding new widgets (with a note that shorter intervals mean more frequent server commands), plus a read-only catalog list.
+- **Entry point:** the shared `PaneHeader` (file-manager/terminal) gets a **📊 button** that switches that pane to a dashboard; the dashboard header has a 📁 button to switch back. (Gated on the enable setting.)
+
 ### OS drag-in upload (local → server)
 
 OS file drops do **not** arrive via the standard browser `ondrop` — they only come through Tauri's native `getCurrentWebview().onDragDropEvent(...)` event (subscribed once on mount in `FilesScreen.tsx`). `dragDropEnabled` must be at its `tauri.conf.json` default of `true` for the event to fire at all.
@@ -130,6 +144,7 @@ Every color/typography/radius literal lives in exactly **one place — `:root` i
 src-tauri/src/
   ssh.rs      SSH/SFTP session manager + worker loop + every Tauri command (connect, list_dir,
               download, upload, rename, mkdir, create_file (new empty file), delete, copy,
+              poll_widget_command (Req::RunOnce one-shot exec, for dashboard polling + process kill),
               read_remote_file/write_remote_file (in-memory editor read/write),
               open/write/resize/close_terminal, disconnect)
   settings.rs Settings persistence commands (load_settings/save_settings) — reads/writes a JSON
@@ -137,6 +152,9 @@ src-tauri/src/
   commands_config.rs  Command-GUI config loader (load_command_configs: scans/merges/validates
               embedded defaults + the user folder, commands_dir_path/open_commands_dir) — uses the toml crate
   default_commands/*.toml  Bundled default command rules (ps-aux/systemctl-status/df-h/du-sh/free-h/ip-addr), embedded via include_str!
+  dashboard_config.rs  Dashboard-widget config loader (load_dashboard_widget_configs/dashboard_widgets_dir_path:
+              scans/merges/validates embedded defaults + user folder, override-by-filename) — mirrors commands_config.rs
+  default_dashboard_widgets/*.toml  Bundled widget rules (cpu-usage/mem-usage/disk-usage/load-average/network-io/process-manager), embedded via include_str!
   error.rs    Converts technical errors → friendly Korean messages (centrally managed)
   lib.rs      Tauri Builder setup, command registration
 
@@ -153,7 +171,10 @@ src/
   lib/editorTheme.ts     CodeMirror dark theme + HighlightStyle, built from the design tokens (editorTheme/editorHighlight)
   lib/shellIntegration.ts  OSC 133 shell-boundary detection (setup injection + command/output/exit capture) — a base layer independent of command parsing
   lib/commandConfigs.ts   Command-GUI config zustand store (load) + pure matchCommand
-  lib/parsers.ts          columns/keyvalue/regex parsers (pure; return null → raw on mismatch)
+  lib/parsers.ts          columns/keyvalue/regex parsers (pure; return null → raw on mismatch) + leadingNumber
+  lib/dashboardWidgetConfigs.ts  Dashboard-widget config zustand store (load) + pure findWidgetConfig
+  lib/dashboardTypes.ts   Shared dashboard types + pure helpers (WidgetSize/DashboardWidgetInstance/clampInterval) — leaf module, no store imports (breaks the settings↔layout cycle)
+  lib/dashboardLayout.ts  Dashboard layout zustand store (widget instances: add/remove/move/resize/setInterval; persists each mutation into settings)
   lib/settings.ts        Settings zustand store (AppSettings type + defaults + load/set, auto-persists on change)
   lib/theme.ts           Helper for reading :root design tokens from JS (token/colorToken) — for xterm, which can't use CSS classes
   index.css              Design-token :root definitions (single source for color/typography/radius) + global styles
@@ -163,21 +184,26 @@ src/
   components/StatusBar.tsx    Top GNOME-style status bar (user@host / connection status / session elapsed / local clock / settings icon) — all computed locally, no server calls
   components/CommandLogBar.tsx  Bottom command-log bar (latest line + click for a history popup, toggleable via settings)
   components/CommandWidgetPanel.tsx  Command-GUI widget panel (parses via parser → renders via render as table/card/list, with a raw toggle) — below the terminal pane
-  components/SettingsPanel.tsx  Settings modal (category sidebar + sections, extended via the data-driven SECTIONS array; currently Command Log/Command GUI/General/About)
+  components/SettingsPanel.tsx  Settings modal (category sidebar + sections, extended via the data-driven SECTIONS array; currently Command Log/Command GUI/Dashboard/General/About)
   components/TilingShell.tsx  Pane-tree root + global shortcuts + global event listeners (transfer progress/connection lost)
-  components/PaneView.tsx     Pane tree → flat absolute-position renderer + divider dragging
+  components/PaneView.tsx     Pane tree → flat absolute-position renderer + divider dragging (📊 dashboard entry-point button in PaneHeader)
   components/TerminalPane.tsx xterm.js terminal (PTY connection, render throttling, shell integration + command-GUI inline icon + panel)
   components/EditorPane.tsx   CodeMirror 6 editor pane (in-memory SFTP read/write, dirty tracking + save, own header, syntax highlighting, search/brackets/autocomplete)
+  components/DashboardPane.tsx   Dashboard pane (responsive widget grid, empty state, add-widget picker, DnD reorder) — the fourth pane type
+  components/WidgetCard.tsx   One dashboard widget card (owns its poll timer + cleanup, inline per-card error, interval/size/remove controls, kill orchestration)
+  components/WidgetView.tsx   Renders a widget's output by parser+render (gauge + reused table/keyvalue-card/list); silent raw fallback
+  components/ProcessTable.tsx Process-manager table (ps aux → PID/CPU%/MEM%/name, sortable, default CPU-desc, per-row kill button)
+  components/WidgetPicker.tsx Widget catalog picker modal (icon/label/description)
   components/FileView.tsx     Three view modes — list/details/large icons (selection, drag-start, right-click support)
   components/Menu.tsx         Menu-bar dropdown (File/Edit/View)
   components/ContextMenu.tsx  Right-click context menu
-  components/Modal.tsx        Confirm dialog / prompt dialog / unsaved-changes dialog (저장·저장 안 함·취소)
+  components/Modal.tsx        Confirm dialog / prompt dialog / unsaved-changes dialog / kill-process dialog (저장·저장 안 함·취소 / 종료·강제 종료)
   components/DragLayer.tsx    Ghost label that follows the cursor while dragging
   components/TransfersPanel.tsx  Upload/download progress panel (finished cards/batches auto-fade after 3s; errors are dismissed manually)
   components/ShortcutsHelp.tsx   Bottom-right shortcuts help
 ```
 
-## Current Status (as of 2026-07-12)
+## Current Status (as of 2026-07-13)
 
 **Phase 1 — SSH connect + SFTP file manager: done**
 Connect screen, listing (3 view modes), path navigation/breadcrumbs/hidden files, download/upload (drag-and-drop)/rename/delete/new folder/copy, disconnect detection.
@@ -197,6 +223,9 @@ Shell-integration (OSC 133) boundary detection → declarative TOML config loade
 **Phase 6 — Editor pane (CodeMirror 6): done (all 8 steps)**
 `read_remote_file`/`write_remote_file` (in-memory SFTP, no temp file) → CodeMirror base load/display → third `editor` leaf type + double-click open (text/binary/size gating) → save (Ctrl+S/button) + dirty tracking → unsaved-changes close guard → extension-based syntax highlighting → search/replace + bracket matching/auto-close + autocomplete → save event in the command-log bar. See the "Editor pane" architecture section above. Pure frontend logic (binary classification, pane-tree open/reuse/close-guard, dirty detection, language detection + token colors, save-string formatting) verified in-browser against the real compiled modules; **needs real-SSH confirmation in the app**: the actual load/save round-trip and its command-log line, the binary/oversized download-instead flow, and **bracket auto-close** (CodeMirror's real input path can't be driven headlessly, same limit as the xterm decoration).
 
+**Phase 7 — Dashboard pane (monitoring widgets): done (all 10 steps)**
+`Req::RunOnce`/`poll_widget_command` (one-shot exec sharing the worker) → fourth `dashboard` leaf type + flat rendering → declarative widget TOML loader (defaults + user, override) + `gauge` renderer + CPU widget → widget grid (add/remove/DnD-reorder/resize + picker + interval clamped ≥2s) → rest of the catalog (memory/disk/load/network) → process-manager table (sortable, CPU-desc) → per-row kill (confirm dialog + one-shot exec + immediate re-poll + command-log `kill` case) → layout persistence via `AppSettings.dashboardLayout` → "대시보드" settings section (enable toggle + default interval). See the "Dashboard pane" architecture section above. Pure/logic verified in-browser against the real compiled modules: pane-tree treats `dashboard` like any leaf; gauge value-extraction + threshold colors + raw fallback; all catalog parsers/renderers on representative output; layout reducers + clamp; persistence wiring (each mutation persists, seeding doesn't); process projection + default sort; kill command strings + PID-injection rejection + kill-button wiring; settings toggle flips; **and timer cleanup — 2 cards → 2 intervals → both cleared on unmount (no lingering `setInterval`)**. **Needs real-SSH confirmation in the app**: each widget's actual command output parsing (awk field positions in `top`/`free`/`/proc/net/dev` vary by distro — a parse miss falls back to raw), the gauge/table values against a live server, the kill round-trip, and that concurrent widget polling doesn't visibly degrade terminal responsiveness when a terminal + dashboard are open in split panes.
+
 **Additional improvements (from user feedback, done):**
 - Cleaned up the toolbar into a file-manager menu bar (File/Edit/View), single selection, right-click on empty space (new folder/paste), right-click on a file (copy/download/rename/delete)
 - In-app drag to move a file/folder icon into another folder or another pane (via SFTP rename)
@@ -209,7 +238,7 @@ Shell-integration (OSC 133) boundary detection → declarative TOML config loade
 - Two file-manager panes used to share state and move together (fixed by switching from global state to per-pane local state)
 - Getting stuck on "Loading…" on first entry (caused by React StrictMode's double-invoke plus a boolean `fsVersion` guard race condition — fixed with a value-comparison guard)
 
-**Remaining work:** every item the user explicitly requested has been implemented. However, the Command GUI (Phase 5) still needs **verification in the real app against a real SSH server** (each default command's icon→panel behavior, raw-only when the master toggle is off, open-folder/reload), and there are **future items** awaiting the user's priority call: file-change watching (currently a reload button), zsh/fish shell integration (currently bash only), fine-tuning the decoration icon's position. Otherwise, awaiting new feature requests or bug reports.
+**Remaining work:** every item the user explicitly requested has been implemented. However, both the Command GUI (Phase 5) and the Dashboard pane (Phase 7) still need **verification in the real app against a real SSH server** — for the Dashboard: each bundled widget's command actually parsing on the target distro (awk field positions in `top`/`free`/`/proc/net/dev` vary; a miss falls back to raw), the gauge/table values, the kill round-trip, and that concurrent polling doesn't degrade terminal responsiveness with a terminal + dashboard split. **Future items** awaiting the user's priority call: file-change watching for both config folders (currently a reload button; the dashboard-widget folder has no reload button in-app yet), zsh/fish shell integration (currently bash only), fine-tuning the Command-GUI decoration icon's position, and dynamic-import code-splitting for the widget/language bundles. Otherwise, awaiting new feature requests or bug reports.
 
 ## Good to Know
 
