@@ -14,10 +14,15 @@ export type WidgetSize = "small" | "medium" | "large";
  */
 export interface DashboardWidgetInstance {
   instanceId: string;
-  /** References DashboardWidgetConfig.id in the merged catalog. */
+  /**
+   * References a config id: a DashboardWidgetConfig id when `source` is
+   * "widget" (a monitoring/process widget), or a Macro id when "macro".
+   */
   widgetId: string;
+  /** Where widgetId resolves. Absent (older layouts) means "widget". */
+  source?: "widget" | "macro";
   size: WidgetSize;
-  /** Poll interval in seconds; never below MIN_REFRESH_SECONDS. */
+  /** Poll interval in seconds (widget source only); never below MIN_REFRESH_SECONDS. */
   refreshIntervalSeconds: number;
 }
 

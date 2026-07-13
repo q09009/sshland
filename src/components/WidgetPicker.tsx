@@ -1,19 +1,25 @@
 import { useEffect } from "react";
 import { useDashboardWidgetConfigs } from "../lib/dashboardWidgetConfigs";
+import { useMacros } from "../lib/macros";
 
 /**
- * Modal listing the merged widget catalog (bundled defaults + user folder).
- * Picking an entry adds it to the dashboard and closes. Closes on Esc, backdrop
- * click, or ✕. An empty catalog just shows a hint (never an error).
+ * Modal for adding a card to the dashboard. Two categories: the merged monitoring
+ * widget catalog (bundled defaults + user folder) and Macros (a "create new"
+ * entry plus every saved macro). Closes on Esc, backdrop click, or ✕.
  */
 export default function WidgetPicker({
   onPick,
+  onPickMacro,
+  onCreateMacro,
   onClose,
 }: {
   onPick: (widgetId: string) => void;
+  onPickMacro: (macroId: string) => void;
+  onCreateMacro: () => void;
   onClose: () => void;
 }) {
   const configs = useDashboardWidgetConfigs((s) => s.configs);
+  const macros = useMacros((s) => s.macros);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -43,12 +49,13 @@ export default function WidgetPicker({
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-2">
+          <Category label="모니터링" />
           {configs.length === 0 ? (
-            <p className="px-3 py-8 text-center text-sm text-slate-500">
+            <p className="px-3 py-4 text-center text-2xs text-slate-500">
               추가할 수 있는 위젯이 없어요.
             </p>
           ) : (
-            <ul className="flex flex-col gap-1">
+            <ul className="mb-2 flex flex-col gap-1">
               {configs.map((c) => (
                 <li key={c.id}>
                   <button
@@ -73,8 +80,47 @@ export default function WidgetPicker({
               ))}
             </ul>
           )}
+
+          <Category label="매크로" />
+          <ul className="flex flex-col gap-1">
+            <li>
+              <button
+                onClick={onCreateMacro}
+                className="flex w-full items-center gap-3 rounded-lg border border-dashed border-ink-700 px-3 py-2.5 text-left text-sky-200 hover:bg-sky-500/10"
+              >
+                <span className="text-xl leading-none select-none">＋</span>
+                <span className="text-sm">새 매크로 만들기</span>
+              </button>
+            </li>
+            {macros.map((m) => (
+              <li key={m.id}>
+                <button
+                  onClick={() => onPickMacro(m.id)}
+                  className="flex w-full items-start gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left hover:border-ink-700 hover:bg-ink-700/40"
+                >
+                  <span className="mt-0.5 text-xl leading-none select-none">⚙</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-slate-100">
+                      {m.name}
+                    </span>
+                    <span className="mt-0.5 block text-2xs text-slate-500">
+                      {m.steps.length}단계
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Category({ label }: { label: string }) {
+  return (
+    <div className="px-3 pb-1 pt-2 text-2xs font-medium uppercase tracking-wide text-slate-500">
+      {label}
     </div>
   );
 }

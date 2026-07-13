@@ -26,6 +26,8 @@ interface DashboardLayoutState {
   setWidgets: (widgets: DashboardWidgetInstance[]) => void;
   /** Append a widget instance for `widgetId` with the given default interval. */
   addWidget: (widgetId: string, refreshIntervalSeconds: number) => void;
+  /** Append a macro-backed widget instance referencing a saved macro by id. */
+  addMacroWidget: (macroId: string) => void;
   /** Remove a widget instance by its instanceId. */
   removeWidget: (instanceId: string) => void;
   /** Move the instance at `from` to index `to` (drag reorder). */
@@ -72,8 +74,22 @@ export const useDashboardLayout = create<DashboardLayoutState>((set, get) => {
         {
           instanceId: crypto.randomUUID(),
           widgetId,
+          source: "widget",
           size: "medium",
           refreshIntervalSeconds: clampInterval(refreshIntervalSeconds),
+        },
+      ]),
+    addMacroWidget: (macroId) =>
+      mutate((widgets) => [
+        ...widgets,
+        {
+          instanceId: crypto.randomUUID(),
+          widgetId: macroId,
+          source: "macro",
+          size: "medium",
+          // Macros run on demand, not on a timer; interval is unused but kept
+          // for a uniform instance shape.
+          refreshIntervalSeconds: MIN_REFRESH_SECONDS,
         },
       ]),
     removeWidget: (instanceId) =>
