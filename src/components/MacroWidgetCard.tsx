@@ -7,6 +7,7 @@ import {
   buildMacroScript,
   makeRunToken,
   parseMacroStream,
+  stripSentinels,
 } from "../lib/macroRun";
 
 /** Initial (idle) per-step state: everything pending, no output. */
@@ -46,6 +47,11 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // The full raw stream for the live view below the step list — explicit React
+  // state (not just the textRef accumulator) so it re-renders on every chunk
+  // without depending on parseMacroStream/steps at all.
+  const [rawOutput, setRawOutput] = useState("");
+  const rawViewRef = useRef<HTMLPreElement>(null);
 
   const runIdRef = useRef<string | null>(null);
   const tokenRef = useRef<string>("");
@@ -53,6 +59,12 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
   const decoderRef = useRef<TextDecoder>(new TextDecoder());
   const stepsRef = useRef(macro.steps);
   stepsRef.current = macro.steps;
+
+  // Auto-scroll the live view to the bottom as new output streams in.
+  useEffect(() => {
+    const el = rawViewRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [rawOutput]);
 
   // Reset the display when the macro's steps change (e.g. it was edited).
   const stepSig = macro.steps.map((s) => s.id).join(",");
@@ -69,10 +81,12 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
         new Uint8Array(e.payload.data),
         { stream: true }
       );
+      setRawOutput(textRef.current);
       setSteps(parseMacroStream(textRef.current, stepsRef.current, tokenRef.current, false));
     });
     const closeSub = listen<MacroClosed>("macro-closed", (e) => {
       if (e.payload.runId !== runIdRef.current) return;
+      setRawOutput(textRef.current);
       setSteps(parseMacroStream(textRef.current, stepsRef.current, tokenRef.current, true));
       setRunning(false);
       setStopping(false);
@@ -94,6 +108,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
     decoderRef.current = new TextDecoder();
     setError(null);
     setExpanded(new Set());
+    setRawOutput(""); // clear the live view for the new run
     // First step shows as running immediately.
     setSteps(parseMacroStream("", macro.steps, token, false));
     setRunning(true);
@@ -119,6 +134,10 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
       setStopping(false);
     }
   };
+
+  // The live view hides the internal sentinel markers — the user only cares
+  // about their commands' actual output, not our bookkeeping.
+  const liveText = stripSentinels(rawOutput, tokenRef.current);
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -189,6 +208,25 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
             );
           })}
         </ul>
+      )}
+
+      {/* Live view of the whole run's raw combined stream, separate from each
+          step's retrospective expandable output: this answers "what's
+          happening right now", the per-step expand answers "what did step N
+          produce". Only shown once a run has started (cleared at the next
+          run's start). */}
+      {(running || rawOutput.trim() !== "") && (
+        <div className="mt-2 flex shrink-0 flex-col overflow-hidden rounded border border-ink-700/40">
+          <div className="border-b border-ink-700/40 bg-ink-800 px-2 py-0.5 text-2xs uppercase tracking-wide text-slate-500">
+            실시간 출력
+          </div>
+          <pre
+            ref={rawViewRef}
+            className="max-h-28 overflow-auto whitespace-pre-wrap break-words bg-ink-900 px-2 py-1 font-mono text-2xs text-slate-400"
+          >
+            {liveText.trim() === "" ? "…" : liveText}
+          </pre>
+        </div>
       )}
     </div>
   );

@@ -73,6 +73,20 @@ export function buildExportScript(macro: Macro): string {
   return lines.join("\n");
 }
 
+/**
+ * Strip this run's sentinel marker lines from raw output, for display in the
+ * live view. The markers are purely internal bookkeeping (see buildMacroScript
+ * / parseMacroStream) and would look like confusing noise to the user, who
+ * only cares about their commands' actual output.
+ */
+export function stripSentinels(text: string, token: string): string {
+  const re = new RegExp(
+    `${SENTINEL_PREFIX}${token}___[0-9a-zA-Z-]+___\\d+___\\r?\\n?`,
+    "g"
+  );
+  return text.replace(re, "");
+}
+
 interface Marker {
   stepId: string;
   exitCode: number;
