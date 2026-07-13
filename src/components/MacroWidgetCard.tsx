@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Macro, MacroClosed, MacroOutput, runMacro } from "../api";
+import { Macro, MacroClosed, MacroOutput, runMacro, stopMacro } from "../api";
 import {
   MacroStepState,
   MacroStepStatus,
@@ -43,6 +43,7 @@ const STATUS_CLASS: Record<MacroStepStatus, string> = {
 export default function MacroWidgetCard({ macro }: { macro: Macro }) {
   const [steps, setSteps] = useState<MacroStepState[]>(() => idleSteps(macro));
   const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -74,6 +75,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
       if (e.payload.runId !== runIdRef.current) return;
       setSteps(parseMacroStream(textRef.current, stepsRef.current, tokenRef.current, true));
       setRunning(false);
+      setStopping(false);
       runIdRef.current = null;
     });
     return () => {
@@ -104,6 +106,20 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
     }
   };
 
+  // Stop closes the exec channel, which ends the remote script; the resulting
+  // `macro-closed` event finalizes the display (in-flight step → skipped).
+  const stop = async () => {
+    const runId = runIdRef.current;
+    if (!runId || stopping) return;
+    setStopping(true);
+    try {
+      await stopMacro(runId);
+    } catch {
+      // If the stop call itself fails, let the run finish on its own.
+      setStopping(false);
+    }
+  };
+
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -124,6 +140,15 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
         >
           {running ? "실행 중…" : "▶ 실행"}
         </button>
+        {running && (
+          <button
+            onClick={stop}
+            disabled={stopping}
+            className="rounded-md border border-red-500/40 px-2.5 py-1 text-2xs font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-40"
+          >
+            {stopping ? "중지 중…" : "■ 중지"}
+          </button>
+        )}
         {error && <span className="truncate text-2xs text-red-300">{error}</span>}
       </div>
 
