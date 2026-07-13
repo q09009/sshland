@@ -11,6 +11,7 @@ import { useAppStore } from "../store";
 import FilesScreen from "../screens/FilesScreen";
 import TerminalPane from "./TerminalPane";
 import EditorPane from "./EditorPane";
+import DashboardPane from "./DashboardPane";
 
 /**
  * Renders the pane tree as a FLAT list of absolutely-positioned leaves plus
@@ -130,6 +131,8 @@ function Leaf({ node }: { node: LeafNode }) {
           <FilesScreen />
         ) : node.content === "editor" ? (
           <EditorPane id={node.id} filePath={node.filePath ?? ""} />
+        ) : node.content === "dashboard" ? (
+          <DashboardPane id={node.id} />
         ) : (
           <TerminalPane id={node.id} />
         )}
@@ -144,22 +147,46 @@ function PaneHeader({ node }: { node: LeafNode }) {
   const requestClose = useAppStore((s) => s.requestClose);
   const canClose = useAppStore((s) => leafCount(s.paneTree) > 1);
   const isFm = node.content === "file-manager";
+  const isDashboard = node.content === "dashboard";
+
+  const label = isFm
+    ? "📁 파일관리자"
+    : isDashboard
+      ? "📊 대시보드"
+      : "❯_ 터미널";
 
   return (
     <div className="flex h-7 shrink-0 items-center justify-between border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
-      <span className="select-none">
-        {isFm ? "📁 파일관리자" : "❯_ 터미널"}
-      </span>
+      <span className="select-none">{label}</span>
       <span className="flex items-center gap-0.5">
-        <button
-          onClick={() =>
-            setPaneContent(node.id, isFm ? "terminal" : "file-manager")
-          }
-          title={isFm ? "터미널로 전환" : "파일관리자로 전환"}
-          className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
-        >
-          ⇄
-        </button>
+        {isDashboard ? (
+          <button
+            onClick={() => setPaneContent(node.id, "file-manager")}
+            title="파일관리자로 전환"
+            className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+          >
+            📁
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={() =>
+                setPaneContent(node.id, isFm ? "terminal" : "file-manager")
+              }
+              title={isFm ? "터미널로 전환" : "파일관리자로 전환"}
+              className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+            >
+              ⇄
+            </button>
+            <button
+              onClick={() => setPaneContent(node.id, "dashboard")}
+              title="대시보드로 전환"
+              className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+            >
+              📊
+            </button>
+          </>
+        )}
         <button
           onClick={() => requestClose(node.id)}
           disabled={!canClose}

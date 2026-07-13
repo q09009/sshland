@@ -3,7 +3,11 @@
 // A pane is either a `leaf` (an actual file-manager or terminal view) or a
 // `split` with exactly two children laid out horizontally or vertically.
 
-export type PaneContent = "file-manager" | "terminal" | "editor";
+export type PaneContent =
+  | "file-manager"
+  | "terminal"
+  | "editor"
+  | "dashboard";
 export type SplitDirection = "horizontal" | "vertical";
 
 export interface LeafNode {
@@ -36,7 +40,13 @@ export function newId(prefix = "pane"): string {
 
 export function makeLeaf(content: PaneContent, filePath?: string): LeafNode {
   const prefix =
-    content === "terminal" ? "term" : content === "editor" ? "ed" : "fm";
+    content === "terminal"
+      ? "term"
+      : content === "editor"
+        ? "ed"
+        : content === "dashboard"
+          ? "dash"
+          : "fm";
   return { type: "leaf", id: newId(prefix), content, filePath };
 }
 
