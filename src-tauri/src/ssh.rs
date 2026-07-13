@@ -976,15 +976,36 @@ fn drain_channel(channel: &mut Channel, buf: &mut [u8]) -> (Vec<u8>, bool) {
     (acc, closed)
 }
 
+/// Wrap a macro's step-sentinel script so it runs backgrounded under `setsid`
+/// (making the backgrounded shell its own process group leader, so its PID
+/// doubles as its process group id), with that PID reported back as a sentinel
+/// line before any step output begins.
+///
+/// This matters for Stop: a plain exec channel has no PTY/line-discipline to
+/// turn a client-side interrupt into SIGINT, so closing the channel alone does
+/// not signal the remote process — the frontend instead sends an explicit
+/// `kill -TERM -<pid>` (process-GROUP target, so children a step spawns are
+/// signaled too, not just the orphaned parent shell) through a one-shot exec,
+/// the same mechanism already used for dashboard widget polling and the
+/// process manager's kill action. Pure (no I/O) so it's directly testable.
+fn wrap_macro_script(script: &str) -> String {
+    format!(
+        "setsid bash -c {} &\nMACRO_PID=$!\necho \"___SSHLAND_PID___${{MACRO_PID}}___\"\nwait \"$MACRO_PID\"\n",
+        shell_quote(script)
+    )
+}
+
 /// Open a non-PTY exec channel running `script`, for a macro run. Unlike a
 /// terminal this is headless (no `request_pty`/`shell`) — the whole script is
-/// exec'd at once and its output streamed back via polling.
+/// exec'd at once (wrapped via [`wrap_macro_script`]) and its output streamed
+/// back via polling.
 fn open_exec(session: &Session, script: &str) -> Result<Channel, String> {
+    let wrapped = wrap_macro_script(script);
     let mut channel = session
         .channel_session()
         .map_err(|_| error::macro_run_failed())?;
     channel
-        .exec(script)
+        .exec(&wrapped)
         .map_err(|_| error::macro_run_failed())?;
     Ok(channel)
 }
@@ -1429,6 +1450,26 @@ mod tests {
     #[test]
     fn utf8_save_is_verbatim() {
         assert_eq!(encode_text("hi 안녕", "UTF-8"), "hi 안녕".as_bytes());
+    }
+
+    #[test]
+    fn wrap_macro_script_backgrounds_under_setsid_and_reports_pid() {
+        let wrapped = wrap_macro_script("echo hi");
+        assert!(wrapped.starts_with("setsid bash -c 'echo hi' &\n"));
+        assert!(wrapped.contains("MACRO_PID=$!"));
+        assert!(wrapped.contains("echo \"___SSHLAND_PID___${MACRO_PID}___\""));
+        assert!(wrapped.contains("wait \"$MACRO_PID\""));
+    }
+
+    #[test]
+    fn wrap_macro_script_safely_quotes_a_script_containing_single_quotes() {
+        // A macro step's command is user-authored and may contain single
+        // quotes (e.g. `echo 'hello world'`); the wrapper must not let that
+        // break out of its own `bash -c '...'` quoting.
+        let script = "echo 'hello world'\ncd /tmp";
+        let wrapped = wrap_macro_script(script);
+        // shell_quote's escaping: each ' becomes '\''
+        assert!(wrapped.contains("'echo '\\''hello world'\\''\ncd /tmp' &"));
     }
 
     /// Smoke test against Rebex's public read-only SFTP test server.

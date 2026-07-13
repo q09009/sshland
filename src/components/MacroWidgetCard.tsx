@@ -1,14 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Macro, MacroClosed, MacroOutput, runMacro, stopMacro } from "../api";
+import {
+  Macro,
+  MacroClosed,
+  MacroOutput,
+  isProcessGroupAlive,
+  killProcessGroup,
+  runMacro,
+  stopMacro,
+} from "../api";
 import {
   MacroStepState,
   MacroStepStatus,
   buildMacroScript,
+  extractMacroPid,
   makeRunToken,
   parseMacroStream,
   stripSentinels,
 } from "../lib/macroRun";
+
+/** How long to wait after SIGTERM before escalating to SIGKILL. */
+const STOP_GRACE_MS = 2000;
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** Initial (idle) per-step state: everything pending, no output. */
 function idleSteps(macro: Macro): MacroStepState[] {
@@ -26,6 +42,7 @@ const STATUS_ICON: Record<MacroStepStatus, string> = {
   success: "✓",
   failed: "✗",
   skipped: "⊘",
+  stopped: "■",
 };
 const STATUS_CLASS: Record<MacroStepStatus, string> = {
   pending: "text-slate-500",
@@ -33,6 +50,7 @@ const STATUS_CLASS: Record<MacroStepStatus, string> = {
   success: "text-emerald-400",
   failed: "text-red-400",
   skipped: "text-slate-600",
+  stopped: "text-amber-400",
 };
 
 /**
@@ -59,6 +77,14 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
   const decoderRef = useRef<TextDecoder>(new TextDecoder());
   const stepsRef = useRef(macro.steps);
   stepsRef.current = macro.steps;
+  // The run's process group id (== the setsid-backgrounded shell's PID), once
+  // its sentinel has arrived — needed by Stop to actually signal the remote
+  // process (see api.ts's killProcessGroup for why closing the channel alone
+  // doesn't do that).
+  const macroPidRef = useRef<string | null>(null);
+  // Distinguishes a user-initiated Stop from a natural close (clean finish or
+  // stop-on-error), so leftover pending steps are marked "stopped" vs "skipped".
+  const stoppedByUserRef = useRef(false);
 
   // Auto-scroll the live view to the bottom as new output streams in.
   useEffect(() => {
@@ -81,13 +107,24 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
         new Uint8Array(e.payload.data),
         { stream: true }
       );
+      if (!macroPidRef.current) {
+        macroPidRef.current = extractMacroPid(textRef.current);
+      }
       setRawOutput(textRef.current);
       setSteps(parseMacroStream(textRef.current, stepsRef.current, tokenRef.current, false));
     });
     const closeSub = listen<MacroClosed>("macro-closed", (e) => {
       if (e.payload.runId !== runIdRef.current) return;
       setRawOutput(textRef.current);
-      setSteps(parseMacroStream(textRef.current, stepsRef.current, tokenRef.current, true));
+      setSteps(
+        parseMacroStream(
+          textRef.current,
+          stepsRef.current,
+          tokenRef.current,
+          true,
+          stoppedByUserRef.current
+        )
+      );
       setRunning(false);
       setStopping(false);
       runIdRef.current = null;
@@ -106,6 +143,8 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
     tokenRef.current = token;
     textRef.current = "";
     decoderRef.current = new TextDecoder();
+    macroPidRef.current = null;
+    stoppedByUserRef.current = false;
     setError(null);
     setExpanded(new Set());
     setRawOutput(""); // clear the live view for the new run
@@ -121,12 +160,32 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
     }
   };
 
-  // Stop closes the exec channel, which ends the remote script; the resulting
-  // `macro-closed` event finalizes the display (in-flight step → skipped).
+  // Stop actually TERMINATES the remote process: a plain exec channel has no
+  // PTY/line-discipline, so closing it alone never signals the remote side —
+  // it would just keep running orphaned. Instead: send SIGTERM to the run's
+  // whole process group, give it a grace period, escalate to SIGKILL if it's
+  // still alive, then close/abandon the streaming channel. The resulting
+  // `macro-closed` event finalizes the display (in-flight/pending steps →
+  // "stopped", via stoppedByUserRef).
   const stop = async () => {
     const runId = runIdRef.current;
     if (!runId || stopping) return;
     setStopping(true);
+    stoppedByUserRef.current = true;
+
+    const pid = macroPidRef.current;
+    if (pid) {
+      try {
+        await killProcessGroup(pid, false);
+        await wait(STOP_GRACE_MS);
+        if (await isProcessGroupAlive(pid)) {
+          await killProcessGroup(pid, true);
+        }
+      } catch {
+        // Best-effort: fall through to closing the channel regardless.
+      }
+    }
+
     try {
       await stopMacro(runId);
     } catch {

@@ -21,7 +21,8 @@ export type MacroStepStatus =
   | "running"
   | "success"
   | "failed"
-  | "skipped";
+  | "skipped"
+  | "stopped";
 
 export interface MacroStepState {
   stepId: string;
@@ -33,10 +34,24 @@ export interface MacroStepState {
 }
 
 const SENTINEL_PREFIX = "___SSHLAND_STEP_";
+/** Echoed once, before any step output, by the run's setsid-backgrounded
+ *  wrapper (see ssh.rs's wrap_macro_script) — reports the process group id
+ *  Stop later signals to actually terminate the remote process. */
+const PID_SENTINEL_RE = /___SSHLAND_PID___(\d+)___\r?\n?/;
 
 /** A short, unique per-run token so a step's own output can't fake a sentinel. */
 export function makeRunToken(): string {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 10);
+}
+
+/**
+ * Pull the run's process-group id out of the accumulated stream, once the
+ * setsid wrapper's PID sentinel has arrived (it's always the very first thing
+ * echoed, before step 1 runs). Returns null until then.
+ */
+export function extractMacroPid(text: string): string | null {
+  const m = text.match(PID_SENTINEL_RE);
+  return m ? m[1] : null;
 }
 
 /**
@@ -74,17 +89,18 @@ export function buildExportScript(macro: Macro): string {
 }
 
 /**
- * Strip this run's sentinel marker lines from raw output, for display in the
- * live view. The markers are purely internal bookkeeping (see buildMacroScript
- * / parseMacroStream) and would look like confusing noise to the user, who
- * only cares about their commands' actual output.
+ * Strip this run's sentinel marker lines (step markers and the PID marker)
+ * from raw output, for display in the live view. The markers are purely
+ * internal bookkeeping (see buildMacroScript / wrap_macro_script /
+ * parseMacroStream) and would look like confusing noise to the user, who only
+ * cares about their commands' actual output.
  */
 export function stripSentinels(text: string, token: string): string {
-  const re = new RegExp(
+  const stepRe = new RegExp(
     `${SENTINEL_PREFIX}${token}___[0-9a-zA-Z-]+___\\d+___\\r?\\n?`,
     "g"
   );
-  return text.replace(re, "");
+  return text.replace(PID_SENTINEL_RE, "").replace(stepRe, "");
 }
 
 interface Marker {
@@ -109,14 +125,21 @@ function trimEdges(s: string): string {
  * - The first step without a sentinel → running (while the run is open), output
  *   = the trailing text; later steps stay pending.
  * - Once the run is closed, any step still without a sentinel → skipped (it
- *   never ran, because an earlier step failed / the run was stopped).
+ *   never ran, because an earlier step failed) — or, if `stopped` is set
+ *   (the user hit Stop rather than a step failing on its own), "stopped"
+ *   instead, and the interrupted step's partial output (if any) is kept.
  */
 export function parseMacroStream(
   fullOutput: string,
   steps: { id: string }[],
   token: string,
-  closed: boolean
+  closed: boolean,
+  stopped = false
 ): MacroStepState[] {
+  // The PID sentinel always precedes step 1's output; strip it so it can't be
+  // mistaken for part of any step's captured output.
+  const text = fullOutput.replace(PID_SENTINEL_RE, "");
+
   const result: MacroStepState[] = steps.map((s) => ({
     stepId: s.id,
     status: "pending",
@@ -131,7 +154,7 @@ export function parseMacroStream(
   );
   const markers: Marker[] = [];
   let m: RegExpExecArray | null;
-  while ((m = re.exec(fullOutput)) !== null) {
+  while ((m = re.exec(text)) !== null) {
     markers.push({
       stepId: m[1],
       exitCode: Number.parseInt(m[2], 10),
@@ -144,18 +167,24 @@ export function parseMacroStream(
   for (const mk of markers) {
     const idx = indexOfStep.get(mk.stepId);
     if (idx != null) {
-      result[idx].output = trimEdges(fullOutput.slice(segStart, mk.start));
+      result[idx].output = trimEdges(text.slice(segStart, mk.start));
       result[idx].status = mk.exitCode === 0 ? "success" : "failed";
       result[idx].exitCode = mk.exitCode;
     }
     segStart = mk.end;
   }
 
-  const trailing = trimEdges(fullOutput.slice(segStart));
+  const trailing = trimEdges(text.slice(segStart));
   let assignedRunning = false;
   for (const step of result) {
     if (step.status !== "pending") continue;
-    if (closed) {
+    if (stopped) {
+      step.status = "stopped";
+      if (!assignedRunning) {
+        step.output = trailing;
+        assignedRunning = true;
+      }
+    } else if (closed) {
       step.status = "skipped";
     } else if (!assignedRunning) {
       step.status = "running";

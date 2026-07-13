@@ -107,6 +107,39 @@ export function killProcess(pid: string, force: boolean): Promise<string> {
   return invoke<string>("poll_widget_command", { command });
 }
 
+/**
+ * Kill a whole process GROUP by its group id (== the group leader's PID, since
+ * a macro run backgrounds its shell via `setsid` — see ssh.rs's
+ * wrap_macro_script — which makes the PID double as the PGID). Used to stop a
+ * running macro: a plain (non-PTY) exec channel has no line discipline to turn
+ * a client-side interrupt into SIGINT, so actually terminating the remote
+ * process(es) requires sending a real signal via a one-shot exec instead —
+ * reuses the same poll_widget_command mechanism as killProcess, just targeting
+ * the group (a negative id) so children a step spawns (e.g. `sleep 100`) are
+ * signaled too, not just the orphaned parent shell. The id is validated
+ * numeric (same as killProcess) so the built command can only ever be
+ * `kill [-9] -<number>`.
+ */
+export function killProcessGroup(pgid: string, force: boolean): Promise<string> {
+  if (!/^\d+$/.test(pgid)) {
+    return Promise.reject("잘못된 프로세스 번호예요.");
+  }
+  const command = `kill ${force ? "-9 " : ""}-${pgid}`;
+  return invoke<string>("poll_widget_command", { command });
+}
+
+/**
+ * Check whether a process group is still alive: `kill -0` sends no signal but
+ * succeeds (silently) if the group still exists. Used to decide whether Stop
+ * needs to escalate to a force kill after a short grace period.
+ */
+export function isProcessGroupAlive(pgid: string): Promise<boolean> {
+  if (!/^\d+$/.test(pgid)) return Promise.resolve(false);
+  return invoke<string>("poll_widget_command", { command: `kill -0 -${pgid}` })
+    .then(() => true)
+    .catch(() => false);
+}
+
 /** A remote file's decoded text plus the encoding it was stored in. */
 export interface FileContent {
   content: string;
