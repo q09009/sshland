@@ -9,6 +9,7 @@ import {
   parseKeyValue,
   parseRegex,
 } from "../lib/parsers";
+import ProcessTable from "./ProcessTable";
 
 /**
  * Renders one dashboard widget's raw command output as a GUI body, using the
@@ -68,6 +69,13 @@ function renderWidget(
   if (config.render === "gauge") {
     const value = gaugeValue(config, output);
     return value != null ? <Gauge value={value} unit={config.unit} /> : null;
+  }
+  // Process-manager widgets use a dedicated table (subset columns, CPU sort,
+  // and a per-row kill action) instead of the generic table renderer.
+  if (config.category === "process-manager" && config.parser === "columns") {
+    const data = parseColumns(output);
+    if (data && data.rows.length > 0) return <ProcessTable data={data} />;
+    return null;
   }
   switch (config.parser) {
     case "columns": {

@@ -1,0 +1,12 @@
+# Process manager — processes sorted by CPU, shown as PID / CPU% / MEM% / name,
+# with a per-row kill action. Category `process-manager` routes to the dedicated
+# table renderer; the raw command is a plain `ps aux` sorted by CPU.
+id = "process-manager"
+label = "프로세스 관리자"
+icon = "📋"
+description = "CPU 사용량 순으로 프로세스를 보고 종료할 수 있어요."
+command = "ps aux --sort=-%cpu"
+parser = "columns"
+render = "table"
+category = "process-manager"
+refresh_interval_seconds = 5

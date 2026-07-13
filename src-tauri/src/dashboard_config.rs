@@ -52,6 +52,10 @@ const DEFAULT_WIDGETS: &[(&str, &str)] = &[
         "network-io",
         include_str!("../default_dashboard_widgets/network-io.toml"),
     ),
+    (
+        "process-manager",
+        include_str!("../default_dashboard_widgets/process-manager.toml"),
+    ),
 ];
 
 const PARSERS: &[&str] = &["columns", "keyvalue", "regex"];
