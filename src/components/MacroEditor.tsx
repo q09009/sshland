@@ -1,0 +1,183 @@
+import { useEffect, useState } from "react";
+import { Macro, MacroStep } from "../api";
+import { newMacroStep } from "../lib/macros";
+import { dragReorder, moveItem } from "../lib/reorder";
+
+const STEP_MIME = "application/x-macro-step-index";
+
+/**
+ * Modal for creating or editing a macro: a name plus an ordered list of steps
+ * (a short label + a single-line shell command each), with add / remove / drag-
+ * reorder (reusing the same DnD reorder as the dashboard grid).
+ *
+ * v1 limitation: one single-line command per step — no multi-line bodies,
+ * heredocs, or loops (a step is one command string). Documented as future work.
+ */
+export default function MacroEditor({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: Macro;
+  onSave: (mac: Macro) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initial.name);
+  const [steps, setSteps] = useState<MacroStep[]>(initial.steps);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  const move = (from: number, to: number) =>
+    setSteps((s) => moveItem(s, from, to));
+
+  const setStep = (id: string, patch: Partial<MacroStep>) =>
+    setSteps((s) => s.map((st) => (st.id === id ? { ...st, ...patch } : st)));
+
+  const removeStep = (id: string) =>
+    setSteps((s) => s.filter((st) => st.id !== id));
+
+  const addStep = () => setSteps((s) => [...s, newMacroStep()]);
+
+  const canSave =
+    name.trim() !== "" && steps.some((s) => s.command.trim() !== "");
+
+  const save = () => {
+    if (!canSave) return;
+    // Drop blank steps; keep order and ids. Default a label from the command.
+    const cleaned = steps
+      .filter((s) => s.command.trim() !== "")
+      .map((s) => ({
+        ...s,
+        label: s.label.trim() || s.command.trim(),
+        command: s.command.trim(),
+      }));
+    onSave({ ...initial, name: name.trim(), steps: cleaned });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      onMouseDown={onCancel}
+    >
+      <div
+        className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-800 shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-ink-700/60 px-4 py-3">
+          <h2 className="text-base font-semibold text-slate-100">
+            {initial.steps.length || initial.name ? "매크로 편집" : "새 매크로"}
+          </h2>
+          <button
+            onClick={onCancel}
+            className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
+            aria-label="닫기"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          <label className="block text-xs text-slate-400">이름</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="예: 서비스 재시작"
+            spellCheck={false}
+            className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+          />
+
+          <div className="mt-4 mb-1 flex items-center justify-between">
+            <span className="text-xs text-slate-400">단계 (순서대로 실행)</span>
+            <button
+              onClick={addStep}
+              className="rounded-md bg-sky-500/15 px-2 py-1 text-2xs text-sky-200 hover:bg-sky-500/25"
+            >
+              ＋ 단계 추가
+            </button>
+          </div>
+
+          {steps.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-6 text-center text-2xs text-slate-500">
+              아직 단계가 없어요. "단계 추가"로 명령을 하나씩 넣으세요.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {steps.map((st, i) => {
+                const { handleProps, dropProps } = dragReorder(i, move, STEP_MIME);
+                return (
+                  <li
+                    key={st.id}
+                    {...dropProps}
+                    className="flex items-start gap-2 rounded-lg border border-ink-700/60 bg-ink-900/40 p-2"
+                  >
+                    <span
+                      {...handleProps}
+                      title="드래그해서 순서 변경"
+                      className="mt-1.5 cursor-grab select-none px-0.5 text-slate-500 hover:text-slate-300 active:cursor-grabbing"
+                    >
+                      ⠿
+                    </span>
+                    <span className="mt-1.5 w-4 shrink-0 text-center text-2xs text-slate-600">
+                      {i + 1}
+                    </span>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <input
+                        value={st.label}
+                        onChange={(e) => setStep(st.id, { label: e.target.value })}
+                        placeholder="설명 (선택) — 예: 서버로 이동"
+                        spellCheck={false}
+                        className="w-full rounded border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-slate-200 placeholder-slate-600 focus:border-sky-600 focus:outline-none"
+                      />
+                      <input
+                        value={st.command}
+                        onChange={(e) => setStep(st.id, { command: e.target.value })}
+                        placeholder="명령 — 예: cd /var/www && git pull"
+                        spellCheck={false}
+                        className="w-full rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-sky-600 focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={() => removeStep(st.id)}
+                      title="단계 삭제"
+                      className="mt-1 rounded px-1.5 py-0.5 text-slate-500 hover:bg-red-500/20 hover:text-red-300"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <p className="mt-3 text-2xs leading-relaxed text-slate-600">
+            각 단계는 한 줄 명령이에요. 여러 줄 스크립트·반복문·heredoc은 아직
+            지원하지 않아요. 단계는 한 셸에서 순서대로 실행되므로 cd·환경변수가
+            다음 단계로 이어져요.
+          </p>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-ink-700/60 px-4 py-3">
+          <button
+            onClick={onCancel}
+            className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700"
+          >
+            취소
+          </button>
+          <button
+            onClick={save}
+            disabled={!canSave}
+            className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+          >
+            저장
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

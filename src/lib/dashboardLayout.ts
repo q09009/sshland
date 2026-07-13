@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useSettings } from "./settings";
+import { moveItem } from "./reorder";
 import {
   clampInterval,
   DashboardWidgetInstance,
@@ -77,22 +78,7 @@ export const useDashboardLayout = create<DashboardLayoutState>((set, get) => {
       ]),
     removeWidget: (instanceId) =>
       mutate((widgets) => widgets.filter((w) => w.instanceId !== instanceId)),
-    moveWidget: (from, to) =>
-      mutate((widgets) => {
-        if (
-          from === to ||
-          from < 0 ||
-          to < 0 ||
-          from >= widgets.length ||
-          to >= widgets.length
-        ) {
-          return widgets;
-        }
-        const next = [...widgets];
-        const [moved] = next.splice(from, 1);
-        next.splice(to, 0, moved);
-        return next;
-      }),
+    moveWidget: (from, to) => mutate((widgets) => moveItem(widgets, from, to)),
     setSize: (instanceId, size) =>
       mutate((widgets) =>
         widgets.map((w) =>

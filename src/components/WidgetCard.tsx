@@ -9,6 +9,7 @@ import {
   WidgetSize,
 } from "../lib/dashboardLayout";
 import { operationToCommandString } from "../lib/commandLog";
+import { dragReorder } from "../lib/reorder";
 import { useAppStore } from "../store";
 import WidgetView from "./WidgetView";
 import { KillProcessDialog } from "./Modal";
@@ -105,21 +106,8 @@ export default function WidgetCard({
 
   const spanStyle = { gridColumn: `span ${SPAN[instance.size]}` };
 
-  // --- drag-and-drop reorder ---
-  const onDragStart = (e: React.DragEvent) => {
-    e.dataTransfer.setData(DRAG_TYPE, String(index));
-    e.dataTransfer.effectAllowed = "move";
-  };
-  const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes(DRAG_TYPE)) e.preventDefault();
-  };
-  const onDrop = (e: React.DragEvent) => {
-    const raw = e.dataTransfer.getData(DRAG_TYPE);
-    if (raw === "") return;
-    e.preventDefault();
-    const from = Number.parseInt(raw, 10);
-    if (!Number.isNaN(from)) moveWidget(from, index);
-  };
+  // Drag-and-drop reorder (shared with the macro editor's step list).
+  const { handleProps, dropProps } = dragReorder(index, moveWidget, DRAG_TYPE);
 
   const cycleSize = () => {
     const i = WIDGET_SIZES.indexOf(instance.size);
@@ -159,14 +147,12 @@ export default function WidgetCard({
   return (
     <div
       style={spanStyle}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
+      {...dropProps}
       className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-ink-700/70 bg-ink-800"
     >
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-ink-700/60 px-1.5 text-xs text-slate-400">
         <span
-          draggable
-          onDragStart={onDragStart}
+          {...handleProps}
           title="드래그해서 위치 이동"
           className="cursor-grab select-none px-0.5 text-slate-500 hover:text-slate-300 active:cursor-grabbing"
         >
