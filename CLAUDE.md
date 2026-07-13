@@ -83,6 +83,19 @@ Keyboard shortcuts (`src/components/TilingShell.tsx`, registered on the capture 
 - **Settings** (`SettingsPanel.tsx`, "대시보드" section, one more entry in the data-driven `SECTIONS`): a global **enable/disable toggle** for the dashboard pane type (off hides the 📊 entry point in the pane header) and a **default refresh interval** used when adding new widgets (with a note that shorter intervals mean more frequent server commands), plus a read-only catalog list.
 - **Entry point:** the shared `PaneHeader` (file-manager/terminal) gets a **📊 button** that switches that pane to a dashboard; the dashboard header has a 📁 button to switch back. (Gated on the enable setting.)
 
+### Macros (user-authored multi-step scripts) — run from the dashboard
+
+A macro is a user-authored, ordered list of shell steps (`{ id, name, steps: [{ id, label, command }] }`) run sequentially against the connected server with live per-step progress, managed as a **fifth dashboard widget category** (`macro`, alongside `monitoring`/`process-manager`).
+
+- **Trust level — NOT the "declarative-only" rule.** The core "user configs are declarative only, never executed as code" principle is about the Command GUI's untrusted parse/render TOML. Macros are the opposite by design: they are shell commands the user deliberately writes to run on their **own** connected server — the same trust level as typing into a terminal pane. A macro genuinely running real commands is the whole point, so there's **no** code-execution sandboxing here beyond what the terminal itself already has.
+- **Storage: one JSON file per macro** (`src-tauri/src/macros.rs`, `<app_config_dir>/macros/*.json`), so a macro is trivially portable (copy one file). Entirely user-authored — no bundled-defaults side. `list_macros` (silent-skip bad files) / `save_macro` (`<id>.json`; the id is validated as a safe slug so it can't escape the folder) / `delete_macro` / `macros_dir_path`. Friendly errors via `error.rs`. Frontend `lib/macros.ts` store mirrors `settings.ts`/`commandConfigs.ts` (load/save/remove + cache).
+- **Execution reuses the terminal's streaming, NOT `RunOnce`.** Macro steps share shell state (`cd`, exports) across steps, so the one-shot `RunOnce` (a fresh exec per command, for dashboard widgets) is the wrong fit. Instead a new `Req::RunMacro` execs the whole frontend-assembled script over **one non-PTY channel** (`open_exec`: `channel_session` + `exec`, no `request_pty`/`shell`) and registers it in a `macro_channels` map polled every loop cycle. `cd`/exports persist because the entire script runs in a single shell process. Polling **reuses the terminal batching exactly**: `drain_terminal` was refactored into a pure `drain_channel(channel, buf) -> (bytes, closed)`; terminals emit `terminal-output`, macro runs emit `macro-output { runId, data }`, both under one non-blocking window; the worker blocks on `recv` only when **both** maps are empty. On channel EOF (or `StopMacro` closing it) a `macro-closed { runId }` event fires.
+- **Sentinel parsing (`lib/macroRun.ts`, pure).** `buildMacroScript` joins the steps into one script with `exec 2>&1` (merge stderr→stdout) and, after each step, a unique per-run-token sentinel `echo "___SSHLAND_STEP_<token>___<stepId>___${__rc}___"`. **Stop-on-error is baked into the script** (a non-zero step `exit`s the run — safe by default). `parseMacroStream` re-derives per-step status/output from the accumulated stream (same "read markers out of a stream" idea as `shellIntegration.ts`'s OSC 133, but simpler since we control the sentinel format and the channel is headless): a step with a sentinel → success/failed with the text since the previous sentinel; the first un-sentineled step → running (while open); once closed, remaining un-sentineled steps → skipped. `buildExportScript` is a separate assembler for the "export to server" artifact (see below).
+- **Macro card + editor.** `MacroWidgetCard` runs a macro **on demand** (a Run button; **no poll timer** unlike monitoring widgets), streams progress via `macro-output`/`macro-closed` listeners (a streaming `TextDecoder` so multi-byte chars survive chunk splits), and shows the step list with a per-step status icon (pending/running/success/failed/skipped) + expandable captured output, plus a **stop** action (`stop_macro` closes the channel → ends the remote script). `MacroCard` is the grid frame (drag/size/remove + edit ✎ + export ⬆), reusing the shared `lib/reorder.ts` (`moveItem` + `dragReorder`, extracted so the widget grid and the macro editor share **one** DnD-reorder implementation). `MacroEditor` (modal) authors a macro: name + ordered steps (label + single-line command) with add/remove/drag-reorder. **v1 limitation:** one single-line command per step — no multi-line bodies / heredocs / loops.
+- **Dashboard integration.** A dashboard card carries a `source` (`"widget"` | `"macro"`; absent = widget, for older layouts). `DashboardPane` renders `MacroCard` vs `WidgetCard` by source; `addMacroWidget` appends a `source:"macro"` instance referencing a saved macro by id (persisted in the shared `AppSettings.dashboardLayout` like any card). The `WidgetPicker` gains a **매크로 category**: a "새 매크로 만들기" entry (opens the editor; on save the macro is persisted **and** added to the grid) plus every saved macro (addable like a built-in widget).
+- **Macros are not written to the command-log bar** — mirroring the existing rule that terminal-typed input never lands there either (a macro is the same kind of thing: commands run directly against the shell, not a file-manager operation).
+- **Export to server as `.sh`** (secondary): the card's ⬆ opens a `PromptDialog` (reusing the new-file/rename prompt) defaulting to `<home>/<slug>.sh`, then `buildExportScript` assembles a real standalone script (`#!/bin/bash` + a `# <label>` comment above each step + one command per line, **no** sentinels) written via the existing `write_remote_file` (arbitrary text + path — no new backend). A transient inline toast confirms success.
+
 ### OS drag-in upload (local → server)
 
 OS file drops do **not** arrive via the standard browser `ondrop` — they only come through Tauri's native `getCurrentWebview().onDragDropEvent(...)` event (subscribed once on mount in `FilesScreen.tsx`). `dragDropEnabled` must be at its `tauri.conf.json` default of `true` for the event to fire at all.
@@ -145,6 +158,7 @@ src-tauri/src/
   ssh.rs      SSH/SFTP session manager + worker loop + every Tauri command (connect, list_dir,
               download, upload, rename, mkdir, create_file (new empty file), delete, copy,
               poll_widget_command (Req::RunOnce one-shot exec, for dashboard polling + process kill),
+              run_macro/stop_macro (Req::RunMacro streaming exec channel, macro-output/macro-closed events),
               read_remote_file/write_remote_file (in-memory editor read/write),
               open/write/resize/close_terminal, disconnect)
   settings.rs Settings persistence commands (load_settings/save_settings) — reads/writes a JSON
@@ -155,6 +169,8 @@ src-tauri/src/
   dashboard_config.rs  Dashboard-widget config loader (load_dashboard_widget_configs/dashboard_widgets_dir_path:
               scans/merges/validates embedded defaults + user folder, override-by-filename) — mirrors commands_config.rs
   default_dashboard_widgets/*.toml  Bundled widget rules (cpu-usage/mem-usage/disk-usage/load-average/network-io/process-manager), embedded via include_str!
+  macros.rs   User-authored macro storage (list_macros/save_macro/delete_macro/macros_dir_path: one JSON
+              file per macro in <app_config_dir>/macros/, safe-slug id, silent-skip bad files) — no bundled defaults
   error.rs    Converts technical errors → friendly Korean messages (centrally managed)
   lib.rs      Tauri Builder setup, command registration
 
@@ -173,8 +189,11 @@ src/
   lib/commandConfigs.ts   Command-GUI config zustand store (load) + pure matchCommand
   lib/parsers.ts          columns/keyvalue/regex parsers (pure; return null → raw on mismatch) + leadingNumber
   lib/dashboardWidgetConfigs.ts  Dashboard-widget config zustand store (load) + pure findWidgetConfig
-  lib/dashboardTypes.ts   Shared dashboard types + pure helpers (WidgetSize/DashboardWidgetInstance/clampInterval) — leaf module, no store imports (breaks the settings↔layout cycle)
-  lib/dashboardLayout.ts  Dashboard layout zustand store (widget instances: add/remove/move/resize/setInterval; persists each mutation into settings)
+  lib/dashboardTypes.ts   Shared dashboard types + pure helpers (WidgetSize/DashboardWidgetInstance incl. source/clampInterval) — leaf module, no store imports (breaks the settings↔layout cycle)
+  lib/dashboardLayout.ts  Dashboard layout zustand store (widget instances: add/addMacroWidget/remove/move/resize/setInterval; persists each mutation into settings)
+  lib/macros.ts          Macro storage zustand store (load/save/remove + cache) + pure findMacro/newMacro/newMacroStep
+  lib/macroRun.ts        Pure macro run helpers: buildMacroScript (sentinels + stop-on-error), parseMacroStream (per-step status/output), buildExportScript (.sh artifact), makeRunToken
+  lib/reorder.ts         Shared DnD list reorder (moveItem pure + dragReorder handler) — used by the widget grid AND the macro editor
   lib/settings.ts        Settings zustand store (AppSettings type + defaults + load/set, auto-persists on change)
   lib/theme.ts           Helper for reading :root design tokens from JS (token/colorToken) — for xterm, which can't use CSS classes
   index.css              Design-token :root definitions (single source for color/typography/radius) + global styles
@@ -189,21 +208,24 @@ src/
   components/PaneView.tsx     Pane tree → flat absolute-position renderer + divider dragging (📊 dashboard entry-point button in PaneHeader)
   components/TerminalPane.tsx xterm.js terminal (PTY connection, render throttling, shell integration + command-GUI inline icon + panel)
   components/EditorPane.tsx   CodeMirror 6 editor pane (in-memory SFTP read/write, dirty tracking + save, own header, syntax highlighting, search/brackets/autocomplete)
-  components/DashboardPane.tsx   Dashboard pane (responsive widget grid, empty state, add-widget picker, DnD reorder) — the fourth pane type
+  components/DashboardPane.tsx   Dashboard pane (responsive card grid, empty state, add-widget picker, DnD reorder, macro create/edit flows) — the fourth pane type
   components/WidgetCard.tsx   One dashboard widget card (owns its poll timer + cleanup, inline per-card error, interval/size/remove controls, kill orchestration)
   components/WidgetView.tsx   Renders a widget's output by parser+render (gauge + reused table/keyvalue-card/list); silent raw fallback
   components/ProcessTable.tsx Process-manager table (ps aux → PID/CPU%/MEM%/name, sortable, default CPU-desc, per-row kill button)
-  components/WidgetPicker.tsx Widget catalog picker modal (icon/label/description)
+  components/WidgetPicker.tsx Widget catalog picker modal (모니터링 category + 매크로 category: create-new + saved macros)
+  components/MacroCard.tsx    Grid frame for a macro widget (drag/size/remove + edit + export to .sh; body = MacroWidgetCard) — references a saved macro by id
+  components/MacroWidgetCard.tsx  Macro runner card body (Run/Stop on demand, no poll timer; per-step status icons + expandable output; streams macro-output/closed)
+  components/MacroEditor.tsx  Macro editor modal (name + ordered steps with add/remove/drag-reorder; single-line commands only in v1)
   components/FileView.tsx     Three view modes — list/details/large icons (selection, drag-start, right-click support)
   components/Menu.tsx         Menu-bar dropdown (File/Edit/View)
   components/ContextMenu.tsx  Right-click context menu
-  components/Modal.tsx        Confirm dialog / prompt dialog / unsaved-changes dialog / kill-process dialog (저장·저장 안 함·취소 / 종료·강제 종료)
+  components/Modal.tsx        Confirm / prompt / unsaved-changes / kill-process dialogs (저장·저장 안 함·취소 / 종료·강제 종료); prompt reused for macro export path
   components/DragLayer.tsx    Ghost label that follows the cursor while dragging
   components/TransfersPanel.tsx  Upload/download progress panel (finished cards/batches auto-fade after 3s; errors are dismissed manually)
   components/ShortcutsHelp.tsx   Bottom-right shortcuts help
 ```
 
-## Current Status (as of 2026-07-13)
+## Current Status (as of 2026-07-14)
 
 **Phase 1 — SSH connect + SFTP file manager: done**
 Connect screen, listing (3 view modes), path navigation/breadcrumbs/hidden files, download/upload (drag-and-drop)/rename/delete/new folder/copy, disconnect detection.
@@ -226,6 +248,9 @@ Shell-integration (OSC 133) boundary detection → declarative TOML config loade
 **Phase 7 — Dashboard pane (monitoring widgets): done (all 10 steps)**
 `Req::RunOnce`/`poll_widget_command` (one-shot exec sharing the worker) → fourth `dashboard` leaf type + flat rendering → declarative widget TOML loader (defaults + user, override) + `gauge` renderer + CPU widget → widget grid (add/remove/DnD-reorder/resize + picker + interval clamped ≥2s) → rest of the catalog (memory/disk/load/network) → process-manager table (sortable, CPU-desc) → per-row kill (confirm dialog + one-shot exec + immediate re-poll + command-log `kill` case) → layout persistence via `AppSettings.dashboardLayout` → "대시보드" settings section (enable toggle + default interval). See the "Dashboard pane" architecture section above. Pure/logic verified in-browser against the real compiled modules: pane-tree treats `dashboard` like any leaf; gauge value-extraction + threshold colors + raw fallback; all catalog parsers/renderers on representative output; layout reducers + clamp; persistence wiring (each mutation persists, seeding doesn't); process projection + default sort; kill command strings + PID-injection rejection + kill-button wiring; settings toggle flips; **and timer cleanup — 2 cards → 2 intervals → both cleared on unmount (no lingering `setInterval`)**. **Needs real-SSH confirmation in the app**: each widget's actual command output parsing (awk field positions in `top`/`free`/`/proc/net/dev` vary by distro — a parse miss falls back to raw), the gauge/table values against a live server, the kill round-trip, and that concurrent widget polling doesn't visibly degrade terminal responsiveness when a terminal + dashboard are open in split panes.
 
+**Phase 8 — Macros (user-authored multi-step scripts): done (all 7 steps)**
+Macro storage (`macros.rs` one-JSON-file-per-macro + `lib/macros.ts`) → `Req::RunMacro` streaming exec channel reusing the terminal's poll-and-batch (`drain_channel`) + `macro-output`/`macro-closed` events → sentinel parsing (`buildMacroScript`/`parseMacroStream`) + live-progress `MacroWidgetCard` → stop-on-error (baked into the script) + manual stop (`stop_macro`) → `MacroEditor` (name + steps, add/remove/drag-reorder) → dashboard integration (`source:"macro"` cards, 매크로 picker category, create/edit flows) → export to server as `.sh` (`buildExportScript` + `write_remote_file`). See the "Macros" architecture section above. A macro is the same trust level as typing into a terminal (the "declarative-only" rule does not apply). The DnD reorder is extracted to `lib/reorder.ts` and shared with the widget grid. Pure/logic verified in-browser against the real compiled modules: macros JSON round-trip + safe-slug id (cargo tests); script sentinel format + stop-on-error; `parseMacroStream` incremental transitions (running→success→next) + full-run attribution + mid-failure skip; editor add/remove/save (blank steps dropped, real interaction); dashboard `source` routing (MacroCard vs WidgetCard) + picker categories + `addMacroWidget` tagging; and the export script (shebang + label comments, no sentinels) + default `<home>/<slug>.sh` path. **Needs real-SSH confirmation in the app**: the actual multi-step run (sentinel markers streaming back, `cd`/exports persisting across steps), stop-on-error against a live failing command, the manual stop actually terminating the remote script, and the `.sh` write landing on the server.
+
 **Additional improvements (from user feedback, done):**
 - Cleaned up the toolbar into a file-manager menu bar (File/Edit/View), single selection, right-click on empty space (new folder/paste), right-click on a file (copy/download/rename/delete)
 - In-app drag to move a file/folder icon into another folder or another pane (via SFTP rename)
@@ -238,7 +263,7 @@ Shell-integration (OSC 133) boundary detection → declarative TOML config loade
 - Two file-manager panes used to share state and move together (fixed by switching from global state to per-pane local state)
 - Getting stuck on "Loading…" on first entry (caused by React StrictMode's double-invoke plus a boolean `fsVersion` guard race condition — fixed with a value-comparison guard)
 
-**Remaining work:** every item the user explicitly requested has been implemented. However, both the Command GUI (Phase 5) and the Dashboard pane (Phase 7) still need **verification in the real app against a real SSH server** — for the Dashboard: each bundled widget's command actually parsing on the target distro (awk field positions in `top`/`free`/`/proc/net/dev` vary; a miss falls back to raw), the gauge/table values, the kill round-trip, and that concurrent polling doesn't degrade terminal responsiveness with a terminal + dashboard split. **Future items** awaiting the user's priority call: file-change watching for both config folders (currently a reload button; the dashboard-widget folder has no reload button in-app yet), zsh/fish shell integration (currently bash only), fine-tuning the Command-GUI decoration icon's position, and dynamic-import code-splitting for the widget/language bundles. Otherwise, awaiting new feature requests or bug reports.
+**Remaining work:** every item the user explicitly requested has been implemented. The Command GUI (Phase 5), Dashboard pane (Phase 7), and Macros (Phase 8) still need **verification in the real app against a real SSH server** — for the Dashboard: each bundled widget's command actually parsing on the target distro (awk field positions in `top`/`free`/`/proc/net/dev` vary; a miss falls back to raw), the gauge/table values, the kill round-trip, and that concurrent polling doesn't degrade terminal responsiveness with a terminal + dashboard split; for Macros: the multi-step run (sentinels streaming, `cd`/exports persisting), stop-on-error against a live failing command, the manual stop terminating the remote script, and the `.sh` export write. **Future items** awaiting the user's priority call: file-change watching for the config folders (currently reload buttons / none for macros), zsh/fish shell integration (currently bash only), fine-tuning the Command-GUI decoration icon's position, multi-line/heredoc macro step bodies (v1 is single-line per step), and dynamic-import code-splitting for the widget/language bundles. Otherwise, awaiting new feature requests or bug reports.
 
 ## Good to Know
 
