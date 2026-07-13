@@ -54,6 +54,10 @@ struct RawWidget {
     value_field: Option<String>,
     /// For `gauge`: a unit suffix shown after the number (e.g. "%").
     unit: Option<String>,
+    /// Emoji shown next to the widget in the picker (optional).
+    icon: Option<String>,
+    /// One-line description shown in the picker (optional).
+    description: Option<String>,
     category: String,
     refresh_interval_seconds: u64,
 }
@@ -80,6 +84,10 @@ pub struct DashboardWidgetConfig {
     value_field: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     unit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     category: String,
     refresh_interval_seconds: u64,
 }
@@ -114,6 +122,8 @@ fn parse_widget(name: &str, source: &str, text: &str) -> Result<DashboardWidgetC
         highlight_column: raw.highlight_column,
         value_field: raw.value_field,
         unit: raw.unit,
+        icon: raw.icon,
+        description: raw.description,
         category: raw.category,
         refresh_interval_seconds: raw.refresh_interval_seconds,
     })

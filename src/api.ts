@@ -230,6 +230,10 @@ export interface DashboardWidgetConfig {
   valueField?: string;
   /** Unit suffix shown after a gauge's number (e.g. "%"). */
   unit?: string;
+  /** Emoji shown next to the widget in the picker. */
+  icon?: string;
+  /** One-line description shown in the picker. */
+  description?: string;
   category: "monitoring" | "process-manager";
   /** Default poll interval; the UI clamps user edits to a 2s minimum. */
   refreshIntervalSeconds: number;

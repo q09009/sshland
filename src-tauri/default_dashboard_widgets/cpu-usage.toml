@@ -2,6 +2,8 @@
 # single number by the widget's own shell command so the gauge just renders a %.
 id = "cpu-usage"
 label = "CPU 사용률"
+icon = "🖥️"
+description = "전체 CPU 사용률을 게이지로 표시해요."
 command = "top -bn1 | grep '%Cpu' | head -1 | awk '{print 100 - $8}'"
 parser = "regex"
 capture_pattern = '(?<usage>[0-9.]+)'
