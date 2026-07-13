@@ -7,15 +7,21 @@ import CommandLogBar from "./components/CommandLogBar";
 import { useAppStore } from "./store";
 import { useSettings } from "./lib/settings";
 import { useCommandConfigs } from "./lib/commandConfigs";
+import { useDashboardLayout } from "./lib/dashboardLayout";
 
 function App() {
   const screen = useAppStore((s) => s.screen);
   const loadSettings = useSettings((s) => s.load);
   const loadCommandConfigs = useCommandConfigs((s) => s.load);
 
-  // Load persisted settings and command-GUI configs once at startup.
+  // Load persisted settings and command-GUI configs once at startup, then seed
+  // the dashboard layout from the loaded settings (so it survives a restart).
   useEffect(() => {
-    void loadSettings();
+    void loadSettings().then(() => {
+      useDashboardLayout
+        .getState()
+        .setWidgets(useSettings.getState().settings.dashboardLayout);
+    });
     void loadCommandConfigs();
   }, [loadSettings, loadCommandConfigs]);
 

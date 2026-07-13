@@ -1,36 +1,22 @@
 import { create } from "zustand";
+import { useSettings } from "./settings";
+import {
+  clampInterval,
+  DashboardWidgetInstance,
+  MIN_REFRESH_SECONDS,
+  WIDGET_SIZES,
+  WidgetSize,
+} from "./dashboardTypes";
 
-/** Card size class within the dashboard grid. */
-export type WidgetSize = "small" | "medium" | "large";
-
-/**
- * One placed widget on the dashboard: a reference to a widget config (by its
- * stable `widgetId`) plus per-instance display settings. Multiple instances of
- * the same widget are allowed, so each has its own `instanceId`.
- */
-export interface DashboardWidgetInstance {
-  instanceId: string;
-  /** References DashboardWidgetConfig.id in the merged catalog. */
-  widgetId: string;
-  size: WidgetSize;
-  /** Poll interval in seconds; never below MIN_REFRESH_SECONDS. */
-  refreshIntervalSeconds: number;
-}
-
-/**
- * The smallest allowed poll interval. Enforced here (clamp) as well as in the
- * UI input so a widget can never hammer the server / worker faster than this.
- */
-export const MIN_REFRESH_SECONDS = 2;
-
-/** Order the size classes cycle through when the size button is clicked. */
-export const WIDGET_SIZES: WidgetSize[] = ["small", "medium", "large"];
-
-/** Clamp a requested interval to the enforced minimum (and to an integer). */
-export function clampInterval(seconds: number): number {
-  if (!Number.isFinite(seconds)) return MIN_REFRESH_SECONDS;
-  return Math.max(MIN_REFRESH_SECONDS, Math.round(seconds));
-}
+// Re-exported so existing imports (`from "./dashboardLayout"`) keep working; the
+// definitions live in the leaf `dashboardTypes` module to avoid an import cycle
+// with the settings store.
+export {
+  clampInterval,
+  MIN_REFRESH_SECONDS,
+  WIDGET_SIZES,
+};
+export type { DashboardWidgetInstance, WidgetSize };
 
 interface DashboardLayoutState {
   /** The single shared dashboard layout (persisted in a later step). */
@@ -49,59 +35,77 @@ interface DashboardLayoutState {
   setRefreshInterval: (instanceId: string, seconds: number) => void;
 }
 
-export const useDashboardLayout = create<DashboardLayoutState>((set) => ({
-  widgets: [],
-  setWidgets: (widgets) =>
-    set({
-      widgets: widgets.map((w) => ({
-        ...w,
-        refreshIntervalSeconds: clampInterval(w.refreshIntervalSeconds),
-      })),
-    }),
-  addWidget: (widgetId, refreshIntervalSeconds) =>
-    set((s) => ({
-      widgets: [
-        ...s.widgets,
+/**
+ * Persist the current layout into the settings blob (which saves to disk). Kept
+ * out of `setWidgets` so seeding the store from just-loaded settings doesn't
+ * immediately write the same data back.
+ */
+function persist(widgets: DashboardWidgetInstance[]) {
+  useSettings.getState().set("dashboardLayout", widgets);
+}
+
+export const useDashboardLayout = create<DashboardLayoutState>((set, get) => {
+  /** Apply a transform to the widget list, then persist the result. */
+  const mutate = (
+    fn: (widgets: DashboardWidgetInstance[]) => DashboardWidgetInstance[]
+  ) => {
+    const widgets = fn(get().widgets);
+    set({ widgets });
+    persist(widgets);
+  };
+
+  return {
+    widgets: [],
+    // Seeding from persisted settings — does NOT persist (avoids a redundant
+    // write of the value we just loaded).
+    setWidgets: (widgets) =>
+      set({
+        widgets: widgets.map((w) => ({
+          ...w,
+          refreshIntervalSeconds: clampInterval(w.refreshIntervalSeconds),
+        })),
+      }),
+    addWidget: (widgetId, refreshIntervalSeconds) =>
+      mutate((widgets) => [
+        ...widgets,
         {
           instanceId: crypto.randomUUID(),
           widgetId,
           size: "medium",
           refreshIntervalSeconds: clampInterval(refreshIntervalSeconds),
         },
-      ],
-    })),
-  removeWidget: (instanceId) =>
-    set((s) => ({
-      widgets: s.widgets.filter((w) => w.instanceId !== instanceId),
-    })),
-  moveWidget: (from, to) =>
-    set((s) => {
-      if (
-        from === to ||
-        from < 0 ||
-        to < 0 ||
-        from >= s.widgets.length ||
-        to >= s.widgets.length
-      ) {
-        return {};
-      }
-      const widgets = [...s.widgets];
-      const [moved] = widgets.splice(from, 1);
-      widgets.splice(to, 0, moved);
-      return { widgets };
-    }),
-  setSize: (instanceId, size) =>
-    set((s) => ({
-      widgets: s.widgets.map((w) =>
-        w.instanceId === instanceId ? { ...w, size } : w
+      ]),
+    removeWidget: (instanceId) =>
+      mutate((widgets) => widgets.filter((w) => w.instanceId !== instanceId)),
+    moveWidget: (from, to) =>
+      mutate((widgets) => {
+        if (
+          from === to ||
+          from < 0 ||
+          to < 0 ||
+          from >= widgets.length ||
+          to >= widgets.length
+        ) {
+          return widgets;
+        }
+        const next = [...widgets];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return next;
+      }),
+    setSize: (instanceId, size) =>
+      mutate((widgets) =>
+        widgets.map((w) =>
+          w.instanceId === instanceId ? { ...w, size } : w
+        )
       ),
-    })),
-  setRefreshInterval: (instanceId, seconds) =>
-    set((s) => ({
-      widgets: s.widgets.map((w) =>
-        w.instanceId === instanceId
-          ? { ...w, refreshIntervalSeconds: clampInterval(seconds) }
-          : w
+    setRefreshInterval: (instanceId, seconds) =>
+      mutate((widgets) =>
+        widgets.map((w) =>
+          w.instanceId === instanceId
+            ? { ...w, refreshIntervalSeconds: clampInterval(seconds) }
+            : w
+        )
       ),
-    })),
-}));
+  };
+});

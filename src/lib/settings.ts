@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { loadSettings, saveSettings } from "../api";
+// Imported from the leaf types module (no store/component imports) so there is
+// no cycle with the dashboard layout store, which imports this module to persist.
+import type { DashboardWidgetInstance } from "./dashboardTypes";
 
 /**
  * The most recent SSH connection, remembered to pre-fill the connect form.
@@ -27,6 +30,12 @@ export interface AppSettings {
   commandGuiEnabled: boolean;
   /** Show seconds (HH:MM:SS) in the status-bar clock. */
   clockShowSeconds: boolean;
+  /** Enable the dashboard pane type (its 📊 entry point + polling). */
+  dashboardEnabled: boolean;
+  /** Default poll interval (seconds) used when adding a new dashboard widget. */
+  dashboardDefaultInterval: number;
+  /** The single shared dashboard layout (which widgets, order, sizes, intervals). */
+  dashboardLayout: DashboardWidgetInstance[];
   /** Last successful connection, for pre-filling the connect form. */
   lastConnection: LastConnection | null;
 }
@@ -35,6 +44,9 @@ const DEFAULTS: AppSettings = {
   commandLogEnabled: true,
   commandGuiEnabled: true,
   clockShowSeconds: false,
+  dashboardEnabled: true,
+  dashboardDefaultInterval: 5,
+  dashboardLayout: [],
   lastConnection: null,
 };
 
