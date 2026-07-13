@@ -24,11 +24,14 @@ import ProcessTable from "./ProcessTable";
 export default function WidgetView({
   config,
   output,
+  onKill,
 }: {
   config: DashboardWidgetConfig;
   output: string;
+  /** Kill request from a process-manager row (card orchestrates confirm+exec). */
+  onKill?: (pid: string, name: string) => void;
 }) {
-  const body = renderWidget(config, output);
+  const body = renderWidget(config, output, onKill);
   return (
     body ?? (
       <pre className="max-h-full overflow-auto whitespace-pre font-mono text-2xs text-slate-300">
@@ -64,7 +67,8 @@ function gaugeValue(
 
 function renderWidget(
   config: DashboardWidgetConfig,
-  output: string
+  output: string,
+  onKill?: (pid: string, name: string) => void
 ): React.ReactElement | null {
   if (config.render === "gauge") {
     const value = gaugeValue(config, output);
@@ -74,7 +78,8 @@ function renderWidget(
   // and a per-row kill action) instead of the generic table renderer.
   if (config.category === "process-manager" && config.parser === "columns") {
     const data = parseColumns(output);
-    if (data && data.rows.length > 0) return <ProcessTable data={data} />;
+    if (data && data.rows.length > 0)
+      return <ProcessTable data={data} onKill={onKill} />;
     return null;
   }
   switch (config.parser) {

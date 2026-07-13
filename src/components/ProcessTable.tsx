@@ -39,7 +39,14 @@ export function toProcessRows(data: ColumnsData): ProcessRow[] | null {
     .filter((p) => p.pid !== "");
 }
 
-export default function ProcessTable({ data }: { data: ColumnsData }) {
+export default function ProcessTable({
+  data,
+  onKill,
+}: {
+  data: ColumnsData;
+  /** Ask to kill a process; the card orchestrates the confirm + exec + re-poll. */
+  onKill?: (pid: string, name: string) => void;
+}) {
   const rows = useMemo(() => toProcessRows(data), [data]);
   // Default: highest CPU first.
   const [sort, setSort] = useState<Sort>({ col: "cpu", dir: -1 });
@@ -71,6 +78,7 @@ export default function ProcessTable({ data }: { data: ColumnsData }) {
           <Th col="cpu" label="CPU%" sort={sort} onClick={toggle} />
           <Th col="mem" label="MEM%" sort={sort} onClick={toggle} />
           <Th col="command" label="명령" sort={sort} onClick={toggle} wide />
+          {onKill && <th className="border-b border-ink-700 px-1.5 py-1" />}
         </tr>
       </thead>
       <tbody>
@@ -91,6 +99,17 @@ export default function ProcessTable({ data }: { data: ColumnsData }) {
             >
               {p.command}
             </td>
+            {onKill && (
+              <td className="px-1 py-0.5 text-right">
+                <button
+                  onClick={() => onKill(p.pid, p.command)}
+                  title="프로세스 종료"
+                  className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-red-500/20 hover:text-red-300"
+                >
+                  ✕
+                </button>
+              </td>
+            )}
           </tr>
         ))}
       </tbody>

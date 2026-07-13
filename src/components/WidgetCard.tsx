@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { pollWidgetCommand } from "../api";
+import { killProcess, pollWidgetCommand } from "../api";
 import { findWidgetConfig, useDashboardWidgetConfigs } from "../lib/dashboardWidgetConfigs";
 import {
   DashboardWidgetInstance,
@@ -8,7 +8,10 @@ import {
   WIDGET_SIZES,
   WidgetSize,
 } from "../lib/dashboardLayout";
+import { operationToCommandString } from "../lib/commandLog";
+import { useAppStore } from "../store";
 import WidgetView from "./WidgetView";
+import { KillProcessDialog } from "./Modal";
 
 /** MIME type carrying a dragged card's index for grid reordering. */
 const DRAG_TYPE = "application/x-widget-index";
@@ -52,6 +55,13 @@ export default function WidgetCard({
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Process-manager kill flow: which process is pending a confirm, and whether
+  // the kill exec is in flight.
+  const [killTarget, setKillTarget] = useState<{ pid: string; name: string } | null>(null);
+  const [killing, setKilling] = useState(false);
+  const connection = useAppStore((s) => s.connection);
+  const logCommand = useAppStore((s) => s.logCommand);
 
   // Keep the latest poll behaviour in a ref so the interval effect only depends
   // on the command + interval (not on every state change).
@@ -114,6 +124,36 @@ export default function WidgetCard({
   const cycleSize = () => {
     const i = WIDGET_SIZES.indexOf(instance.size);
     setSize(instance.instanceId, WIDGET_SIZES[(i + 1) % WIDGET_SIZES.length]);
+  };
+
+  // Send the kill, log the real command, and re-poll immediately on success so
+  // the process list reflects the change without waiting for the next tick.
+  const doKill = (force: boolean) => {
+    if (!killTarget) return;
+    const { pid } = killTarget;
+    setKilling(true);
+    killProcess(pid, force)
+      .then(() => {
+        if (connection) {
+          logCommand(
+            operationToCommandString(
+              { type: "kill", pid, force },
+              { user: connection.username, host: connection.host }
+            )
+          );
+        }
+        setKillTarget(null);
+        pollRef.current();
+      })
+      .catch((e) => {
+        if (mounted.current) {
+          setError(typeof e === "string" ? e : "프로세스를 종료하지 못했어요.");
+        }
+        setKillTarget(null);
+      })
+      .finally(() => {
+        if (mounted.current) setKilling(false);
+      });
   };
 
   return (
@@ -179,9 +219,24 @@ export default function WidgetCard({
         ) : output == null ? (
           <CardMessage tone="muted">불러오는 중…</CardMessage>
         ) : (
-          <WidgetView config={config} output={output} />
+          <WidgetView
+            config={config}
+            output={output}
+            onKill={(pid, name) => setKillTarget({ pid, name })}
+          />
         )}
       </div>
+
+      {killTarget && (
+        <KillProcessDialog
+          pid={killTarget.pid}
+          name={killTarget.name}
+          busy={killing}
+          onKill={() => doKill(false)}
+          onForceKill={() => doKill(true)}
+          onCancel={() => setKillTarget(null)}
+        />
+      )}
     </div>
   );
 }

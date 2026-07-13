@@ -21,7 +21,8 @@ export type FileOperation =
   | { type: "newfile"; path: string }
   | { type: "move"; from: string; to: string }
   | { type: "copy"; from: string; to: string }
-  | { type: "save"; path: string };
+  | { type: "save"; path: string }
+  | { type: "kill"; pid: string; force: boolean };
 
 /** Last path segment, handling both `/` and `\` separators. */
 function baseName(p: string): string {
@@ -70,5 +71,9 @@ export function operationToCommandString(
       // Saving edits has no single natural shell equivalent (echo/redirect
       // would be misleading), so show a plain descriptive line instead.
       return `(편집기로 저장) ${shellArg(op.path)}`;
+    case "kill":
+      // A real, working command (unlike `save`): the dashboard process manager
+      // runs exactly this over a one-shot exec.
+      return `kill ${op.force ? "-9 " : ""}${op.pid}`;
   }
 }

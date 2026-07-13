@@ -93,6 +93,20 @@ export function pollWidgetCommand(command: string): Promise<string> {
   return invoke<string>("poll_widget_command", { command });
 }
 
+/**
+ * Kill a process by PID (the dashboard process manager's row action). Reuses the
+ * one-shot exec (poll_widget_command / Req::RunOnce) rather than a second worker
+ * request. The PID is validated numeric here so the built command can never be
+ * anything but `kill [-9] <number>`.
+ */
+export function killProcess(pid: string, force: boolean): Promise<string> {
+  if (!/^\d+$/.test(pid)) {
+    return Promise.reject("잘못된 프로세스 번호예요.");
+  }
+  const command = `kill ${force ? "-9 " : ""}${pid}`;
+  return invoke<string>("poll_widget_command", { command });
+}
+
 /** A remote file's decoded text plus the encoding it was stored in. */
 export interface FileContent {
   content: string;

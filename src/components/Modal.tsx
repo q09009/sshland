@@ -117,6 +117,74 @@ export function UnsavedChangesDialog({
   );
 }
 
+/**
+ * Confirmation shown before killing a process from the dashboard process
+ * manager. Offers a normal kill and a clearly-labeled force kill (-9); both are
+ * destructive, so this always precedes sending any signal (like file deletion).
+ */
+export function KillProcessDialog({
+  pid,
+  name,
+  busy,
+  onKill,
+  onForceKill,
+  onCancel,
+}: {
+  pid: string;
+  name: string;
+  busy?: boolean;
+  onKill: () => void;
+  onForceKill: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <Backdrop>
+      <h2 className="text-base font-semibold text-slate-100">
+        프로세스를 종료할까요?
+      </h2>
+      <div className="mt-2 text-sm text-slate-300">
+        <span className="font-mono text-slate-100">PID {pid}</span>
+        <span className="mx-1 text-slate-500">·</span>
+        <span className="break-all font-mono text-slate-100">{name}</span>
+        <p className="mt-2 text-slate-400">
+          먼저 정상 종료를 시도해보고, 응답이 없을 때만 강제 종료(-9)를 쓰는 걸
+          권장해요.
+        </p>
+      </div>
+      <div className="mt-6 flex justify-end gap-2">
+        <button
+          onClick={onCancel}
+          className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700"
+        >
+          취소
+        </button>
+        <button
+          onClick={onForceKill}
+          disabled={busy}
+          className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+        >
+          강제 종료 (-9)
+        </button>
+        <button
+          onClick={onKill}
+          disabled={busy}
+          className="rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+        >
+          {busy ? "종료 중…" : "종료"}
+        </button>
+      </div>
+    </Backdrop>
+  );
+}
+
 /** A single-line text input dialog, used for rename / new folder. */
 export function PromptDialog({
   title,
