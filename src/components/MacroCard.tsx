@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { writeRemoteFile } from "../api";
 import {
   DashboardWidgetInstance,
   useDashboardLayout,
@@ -6,9 +7,12 @@ import {
   WidgetSize,
 } from "../lib/dashboardLayout";
 import { findMacro, useMacros } from "../lib/macros";
+import { buildExportScript } from "../lib/macroRun";
 import { dragReorder } from "../lib/reorder";
+import { useAppStore } from "../store";
 import MacroWidgetCard from "./MacroWidgetCard";
 import MacroEditor from "./MacroEditor";
+import { PromptDialog } from "./Modal";
 
 /** MIME type carrying a dragged card's index (shared grid; same as WidgetCard). */
 const DRAG_TYPE = "application/x-widget-index";
@@ -36,8 +40,37 @@ export default function MacroCard({
   const setSize = useDashboardLayout((s) => s.setSize);
   const moveWidget = useDashboardLayout((s) => s.moveWidget);
   const removeWidget = useDashboardLayout((s) => s.removeWidget);
+  const home = useAppStore((s) => s.connection?.home ?? "");
 
   const [editing, setEditing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Auto-dismiss the export confirmation after a few seconds.
+  useEffect(() => {
+    if (!toast) return;
+    const h = window.setTimeout(() => setToast(null), 4000);
+    return () => window.clearTimeout(h);
+  }, [toast]);
+
+  const defaultExportPath = () => {
+    const slug = (macro?.name.trim() || "macro").replace(/\s+/g, "_");
+    if (!home) return `${slug}.sh`;
+    return home.endsWith("/") ? `${home}${slug}.sh` : `${home}/${slug}.sh`;
+  };
+
+  const doExport = (path: string) => {
+    if (!macro) return;
+    setExporting(false);
+    writeRemoteFile(path, buildExportScript(macro), "UTF-8")
+      .then(() => setToast({ ok: true, text: `내보냈어요: ${path}` }))
+      .catch((e) =>
+        setToast({
+          ok: false,
+          text: typeof e === "string" ? e : "내보내지 못했어요.",
+        })
+      );
+  };
 
   const { handleProps, dropProps } = dragReorder(index, moveWidget, DRAG_TYPE);
   const cycleSize = () => {
@@ -64,13 +97,22 @@ export default function MacroCard({
         </span>
         <span className="ml-auto flex items-center gap-0.5">
           {macro && (
-            <button
-              onClick={() => setEditing(true)}
-              title="매크로 편집"
-              className="rounded px-1 py-0.5 hover:bg-ink-700 hover:text-slate-100"
-            >
-              ✎
-            </button>
+            <>
+              <button
+                onClick={() => setExporting(true)}
+                title="서버로 .sh 내보내기"
+                className="rounded px-1 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+              >
+                ⬆
+              </button>
+              <button
+                onClick={() => setEditing(true)}
+                title="매크로 편집"
+                className="rounded px-1 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+              >
+                ✎
+              </button>
+            </>
           )}
           <button
             onClick={cycleSize}
@@ -88,6 +130,19 @@ export default function MacroCard({
           </button>
         </span>
       </div>
+
+      {toast && (
+        <div
+          className={`shrink-0 truncate px-2 py-1 text-2xs ${
+            toast.ok
+              ? "bg-emerald-500/15 text-emerald-300"
+              : "bg-red-500/15 text-red-300"
+          }`}
+          title={toast.text}
+        >
+          {toast.text}
+        </div>
+      )}
 
       <div
         className="min-h-0 flex-1 overflow-auto p-2.5"
@@ -110,6 +165,17 @@ export default function MacroCard({
             setEditing(false);
           }}
           onCancel={() => setEditing(false)}
+        />
+      )}
+
+      {exporting && macro && (
+        <PromptDialog
+          title="서버로 .sh 내보내기"
+          initialValue={defaultExportPath()}
+          placeholder="예: /home/user/deploy.sh"
+          confirmLabel="내보내기"
+          onConfirm={doExport}
+          onCancel={() => setExporting(false)}
         />
       )}
     </div>

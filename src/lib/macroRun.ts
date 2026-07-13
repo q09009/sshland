@@ -55,6 +55,24 @@ export function buildMacroScript(macro: Macro, token: string): string {
   return lines.join("\n") + "\n";
 }
 
+/**
+ * Assemble a macro as a real, standalone shell script for "export to server":
+ * a `#!/bin/bash` shebang, a `# <label>` comment above each step, and one raw
+ * command per line. Unlike buildMacroScript this has NO sentinel echoes or
+ * `exec 2>&1` — those are only for the app's own run-time progress tracking, not
+ * wanted in a script the user keeps and runs themselves.
+ */
+export function buildExportScript(macro: Macro): string {
+  const lines = ["#!/bin/bash", "", `# ${macro.name}`, ""];
+  for (const step of macro.steps) {
+    const label = step.label.trim();
+    if (label) lines.push(`# ${label}`);
+    lines.push(step.command);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
 interface Marker {
   stepId: string;
   exitCode: number;
