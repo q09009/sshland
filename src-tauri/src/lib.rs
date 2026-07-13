@@ -1,6 +1,7 @@
 mod commands_config;
 mod dashboard_config;
 mod error;
+mod macros;
 mod settings;
 mod ssh;
 
@@ -35,7 +36,11 @@ pub fn run() {
             commands_config::commands_dir_path,
             commands_config::open_commands_dir,
             dashboard_config::load_dashboard_widget_configs,
-            dashboard_config::dashboard_widgets_dir_path
+            dashboard_config::dashboard_widgets_dir_path,
+            macros::list_macros,
+            macros::save_macro,
+            macros::delete_macro,
+            macros::macros_dir_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

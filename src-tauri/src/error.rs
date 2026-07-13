@@ -82,3 +82,23 @@ pub fn already_exists() -> String {
 pub fn command_failed() -> String {
     "명령을 실행하지 못했어요. 잠시 후 다시 시도해주세요.".into()
 }
+
+/// Shown when a macro can't be saved to the macros folder.
+pub fn macro_save_failed() -> String {
+    "매크로를 저장하지 못했어요.".into()
+}
+
+/// Shown when a macro file can't be deleted.
+pub fn macro_delete_failed() -> String {
+    "매크로를 삭제하지 못했어요.".into()
+}
+
+/// Shown when the macros folder can't be located or created.
+pub fn macro_folder_failed() -> String {
+    "매크로 폴더를 준비하지 못했어요.".into()
+}
+
+/// Shown when a macro can't be run (its exec channel failed to open).
+pub fn macro_run_failed() -> String {
+    "매크로를 실행하지 못했어요.".into()
+}

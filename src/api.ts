@@ -265,3 +265,62 @@ export function loadDashboardWidgetConfigs(): Promise<DashboardWidgetConfig[]> {
 export function dashboardWidgetsDirPath(): Promise<string> {
   return invoke<string>("dashboard_widgets_dir_path");
 }
+
+/** One step of a macro: a short label plus the shell command to run. */
+export interface MacroStep {
+  id: string;
+  label: string;
+  command: string;
+}
+
+/** A user-authored macro: a named, ordered list of shell steps. */
+export interface Macro {
+  id: string;
+  name: string;
+  steps: MacroStep[];
+}
+
+/** Load every saved macro (one JSON file per macro in the macros folder). */
+export function listMacros(): Promise<Macro[]> {
+  return invoke<Macro[]>("list_macros");
+}
+
+/** Save (create or overwrite) one macro as `<id>.json`. */
+export function saveMacro(mac: Macro): Promise<void> {
+  return invoke<void>("save_macro", { mac });
+}
+
+/** Delete one macro file by id. */
+export function deleteMacro(id: string): Promise<void> {
+  return invoke<void>("delete_macro", { id });
+}
+
+/** Absolute path of the user macro folder (created if missing). */
+export function macrosDirPath(): Promise<string> {
+  return invoke<string>("macros_dir_path");
+}
+
+/**
+ * Run a macro: the frontend-assembled `script` (all steps joined with sentinel
+ * echoes) is exec'd over one non-PTY channel, streaming `macro-output` events
+ * keyed by `runId`. Resolves once the channel is open; progress arrives as events.
+ */
+export function runMacro(runId: string, script: string): Promise<void> {
+  return invoke<void>("run_macro", { runId, script });
+}
+
+/** Stop a running macro by closing its exec channel (terminates the script). */
+export function stopMacro(runId: string): Promise<void> {
+  return invoke<void>("stop_macro", { runId });
+}
+
+/** Payload of a `macro-output` event: a chunk of the run's combined stdout/stderr. */
+export interface MacroOutput {
+  runId: string;
+  data: number[];
+}
+
+/** Payload of a `macro-closed` event: the run's exec channel has finished. */
+export interface MacroClosed {
+  runId: string;
+}
