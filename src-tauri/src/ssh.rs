@@ -162,6 +162,14 @@ pub enum Req {
         dst: String,
         resp: oneshot::Sender<Result<(), String>>,
     },
+    /// Run a single command over a short-lived exec channel and return its
+    /// stdout. Used by dashboard widgets polling on a timer and by the process
+    /// manager's kill action — one-shot execs sharing the worker, never a
+    /// persistent channel like a PTY terminal.
+    RunOnce {
+        command: String,
+        resp: oneshot::Sender<Result<String, String>>,
+    },
     /// Read a remote text file's whole contents into memory (for the editor).
     ReadFile {
         path: String,
@@ -229,6 +237,10 @@ fn reply_err(req: Req, msg: String) -> bool {
             true
         }
         Req::Copy { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::RunOnce { resp, .. } => {
             let _ = resp.send(Err(msg));
             true
         }
@@ -698,6 +710,35 @@ fn exec_copy(session: &Session, src: &str, dst: &str) -> Result<(), String> {
     }
 }
 
+/// Run one command over a short-lived exec channel and return its stdout.
+///
+/// Same one-shot exec-channel technique as [`exec_copy`], but the output is
+/// captured for a dashboard widget to parse. On a non-zero exit we still return
+/// stdout if the command produced any (many tools print useful data and exit
+/// non-zero); only a truly empty failure surfaces an error so the widget can
+/// show an inline message. A dead connection is detected by the caller's
+/// `send_and_check`.
+fn exec_capture(session: &Session, command: &str) -> Result<String, String> {
+    let mut channel = session
+        .channel_session()
+        .map_err(|_| error::command_failed())?;
+    channel
+        .exec(command)
+        .map_err(|_| error::command_failed())?;
+
+    let mut out = String::new();
+    let _ = channel.read_to_string(&mut out);
+    let mut err = String::new();
+    let _ = channel.stderr().read_to_string(&mut err);
+    let _ = channel.wait_close();
+
+    match channel.exit_status() {
+        Ok(0) => Ok(out),
+        _ if !out.trim().is_empty() => Ok(out),
+        _ => Err(error::command_failed()),
+    }
+}
+
 /// Open a new PTY shell channel on the existing session.
 fn open_shell(session: &Session, cols: u16, rows: u16) -> Result<Channel, String> {
     let mut channel = session
@@ -785,6 +826,10 @@ fn handle_req(
         }
         Req::Copy { src, dst, resp } => {
             let result = exec_copy(session, &src, &dst);
+            send_and_check(sftp, app, result, resp)
+        }
+        Req::RunOnce { command, resp } => {
+            let result = exec_capture(session, &command);
             send_and_check(sftp, app, result, resp)
         }
         Req::ReadFile { path, resp } => {
@@ -1151,6 +1196,22 @@ pub async fn copy(
     state.send(Req::Copy {
         src,
         dst,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Run a single command over a one-shot exec channel and return its stdout.
+/// Used by dashboard widgets (polling on a timer) and the process-manager kill
+/// action. Shares the existing worker thread — no dedicated channel.
+#[tauri::command]
+pub async fn poll_widget_command(
+    state: State<'_, SessionManager>,
+    command: String,
+) -> Result<String, String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::RunOnce {
+        command,
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?

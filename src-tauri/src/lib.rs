@@ -20,6 +20,7 @@ pub fn run() {
             ssh::create_file,
             ssh::delete,
             ssh::copy,
+            ssh::poll_widget_command,
             ssh::read_remote_file,
             ssh::write_remote_file,
             ssh::open_terminal,

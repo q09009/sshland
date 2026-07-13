@@ -77,3 +77,8 @@ pub fn binary_file() -> String {
 pub fn already_exists() -> String {
     "같은 이름이 이미 있어요. 다른 이름을 써주세요.".into()
 }
+
+/// Shown when a dashboard widget's command (or a process kill) fails to run.
+pub fn command_failed() -> String {
+    "명령을 실행하지 못했어요. 잠시 후 다시 시도해주세요.".into()
+}

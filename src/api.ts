@@ -84,6 +84,15 @@ export function copyPath(src: string, dst: string): Promise<void> {
   return invoke<void>("copy", { src, dst });
 }
 
+/**
+ * Run a single command once over a short-lived exec channel and resolve with
+ * its raw stdout. Used by dashboard widgets (polled on a timer) and the process
+ * manager's kill action — shares the existing SSH worker, no dedicated channel.
+ */
+export function pollWidgetCommand(command: string): Promise<string> {
+  return invoke<string>("poll_widget_command", { command });
+}
+
 /** A remote file's decoded text plus the encoding it was stored in. */
 export interface FileContent {
   content: string;
