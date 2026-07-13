@@ -18,6 +18,14 @@ export interface RegexData {
   items: Record<string, string>[];
 }
 
+/** Leading numeric value of a string, e.g. "25%" → 25, "1.2G" → 1.2, "eth0" → null. */
+export function leadingNumber(s: string): number | null {
+  const t = s.trim();
+  if (!/^[+-]?[\d.]/.test(t)) return null;
+  const n = Number.parseFloat(t);
+  return Number.isNaN(n) ? null : n;
+}
+
 /**
  * `regex` parser: run a named-capture-group regex against each line and collect
  * the groups. Lines that don't match are skipped. Returns null if the pattern

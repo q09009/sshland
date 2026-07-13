@@ -205,3 +205,42 @@ export function commandsDirPath(): Promise<string> {
 export function openCommandsDir(): Promise<void> {
   return invoke<void>("open_commands_dir");
 }
+
+/**
+ * A declarative dashboard-widget config (from a default or user TOML file).
+ * Parallel to CommandConfig but polled on a timer (fixed `command`, no `match`).
+ */
+export interface DashboardWidgetConfig {
+  /** Filename stem; the override key and settings-list label. */
+  name: string;
+  source: "default" | "user";
+  /** Stable widget id referenced by a persisted dashboard layout. */
+  id: string;
+  /** Human-friendly title shown on the card and in the picker. */
+  label: string;
+  /** The command run on each poll (one-shot exec). */
+  command: string;
+  parser: "columns" | "keyvalue" | "regex";
+  render: "gauge" | "table" | "keyvalue-card" | "list";
+  /** Named-capture regex applied per line (parser = "regex"). */
+  capturePattern?: string;
+  /** Column whose values get a color gradient (render = "table"). */
+  highlightColumn?: string;
+  /** Which parsed field holds the numeric percentage (render = "gauge"). */
+  valueField?: string;
+  /** Unit suffix shown after a gauge's number (e.g. "%"). */
+  unit?: string;
+  category: "monitoring" | "process-manager";
+  /** Default poll interval; the UI clamps user edits to a 2s minimum. */
+  refreshIntervalSeconds: number;
+}
+
+/** Load + merge dashboard-widget configs (bundled defaults + user folder). */
+export function loadDashboardWidgetConfigs(): Promise<DashboardWidgetConfig[]> {
+  return invoke<DashboardWidgetConfig[]>("load_dashboard_widget_configs");
+}
+
+/** Absolute path of the user dashboard-widget folder (created if missing). */
+export function dashboardWidgetsDirPath(): Promise<string> {
+  return invoke<string>("dashboard_widgets_dir_path");
+}

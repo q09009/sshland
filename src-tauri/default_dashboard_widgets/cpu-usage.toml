@@ -1,0 +1,12 @@
+# CPU usage as a percentage (100 - idle), read from `top` and reduced to a
+# single number by the widget's own shell command so the gauge just renders a %.
+id = "cpu-usage"
+label = "CPU 사용률"
+command = "top -bn1 | grep '%Cpu' | head -1 | awk '{print 100 - $8}'"
+parser = "regex"
+capture_pattern = '(?<usage>[0-9.]+)'
+render = "gauge"
+value_field = "usage"
+unit = "%"
+category = "monitoring"
+refresh_interval_seconds = 5
