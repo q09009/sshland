@@ -38,7 +38,7 @@ import { useAppStore } from "../store";
 import { operationToCommandString } from "../lib/commandLog";
 import { baseName } from "../lib/path";
 import { editorTheme, editorHighlight } from "../lib/editorTheme";
-import { languageLabel } from "../lib/languages";
+import { languageLabel, loadLanguageForFile } from "../lib/languages";
 import { UnsavedChangesDialog } from "./Modal";
 
 /**
@@ -205,6 +205,18 @@ export default function EditorPane({
         });
         viewRef.current = view;
         setLoading(false);
+
+        // Load the language grammar in the background and swap it into the
+        // compartment once it resolves — the file is already visible as plain
+        // text. Guard against a stale result: if this effect was torn down (a
+        // different file opened in the meantime), or this view was replaced,
+        // don't reconfigure — the late import must not clobber the new file.
+        void loadLanguageForFile(filePath).then((language) => {
+          if (disposed || viewRef.current !== view || !language) return;
+          view.dispatch({
+            effects: langCompartmentRef.current.reconfigure(language),
+          });
+        });
       })
       .catch((e: unknown) => {
         if (disposed) return;
