@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -38,7 +38,7 @@ import { useAppStore } from "../store";
 import { operationToCommandString } from "../lib/commandLog";
 import { baseName } from "../lib/path";
 import { editorTheme, editorHighlight } from "../lib/editorTheme";
-import { languageForFile, languageLabel } from "../lib/languages";
+import { languageLabel } from "../lib/languages";
 import { UnsavedChangesDialog } from "./Modal";
 
 /**
@@ -59,6 +59,10 @@ export default function EditorPane({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // The language-highlighting extension lives in a Compartment so it can be
+  // swapped in at runtime once the (dynamically-imported) grammar resolves —
+  // the file opens as plain text immediately and highlighting pops in after.
+  const langCompartmentRef = useRef(new Compartment());
   // The last saved/loaded contents; the doc is "dirty" when it differs.
   const baselineRef = useRef("");
   const dirtyRef = useRef(false);
@@ -148,7 +152,6 @@ export default function EditorPane({
         baselineRef.current = contents;
         encodingRef.current = enc;
         setEncoding(enc);
-        const language = languageForFile(filePath);
         const view = new EditorView({
           parent: host,
           state: EditorState.create({
@@ -165,7 +168,8 @@ export default function EditorPane({
               autocompletion(),
               highlightSelectionMatches(),
               syntaxHighlighting(editorHighlight()),
-              ...(language ? [language] : []),
+              // Starts empty (plain text); reconfigured once the grammar loads.
+              langCompartmentRef.current.of([]),
               // Ctrl/Cmd+S saves; listed first so it wins over any default.
               keymap.of([
                 {
