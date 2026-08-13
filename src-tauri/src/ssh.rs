@@ -24,6 +24,11 @@ use crate::error;
 
 /// How often the worker polls terminal channels for output while any are open.
 const TERMINAL_POLL: Duration = Duration::from_millis(15);
+/// SSH-level keepalive interval. `set_keepalive` only configures libssh2;
+/// `keepalive_send` still has to be called by the worker at this cadence.
+const KEEPALIVE_INTERVAL_SECS: u32 = 30;
+const KEEPALIVE_INTERVAL: Duration =
+    Duration::from_secs(KEEPALIVE_INTERVAL_SECS as u64);
 /// Read buffer size for terminal output.
 const TERM_BUF: usize = 32 * 1024;
 /// Largest file the editor will open in-memory. Bigger files are refused so a
@@ -376,8 +381,9 @@ fn establish_session(params: ConnectParams) -> Result<Session, String> {
         return Err(error::auth_error());
     }
 
-    // Enable keepalives so we can probe whether the link is still alive.
-    session.set_keepalive(true, 30);
+    // Configure SSH keepalives. The worker calls `keepalive_send` periodically;
+    // configuration alone does not put keepalive packets on the wire.
+    session.set_keepalive(true, KEEPALIVE_INTERVAL_SECS);
     Ok(session)
 }
 
@@ -976,6 +982,20 @@ fn drain_channel(channel: &mut Channel, buf: &mut [u8]) -> (Vec<u8>, bool) {
     (acc, closed)
 }
 
+/// How long the worker may sleep before it must service streaming channels or
+/// send the next SSH keepalive. An idle worker still wakes for keepalives, while
+/// a live terminal/macro keeps the existing fast polling cadence.
+fn worker_wait_timeout(
+    has_streaming_channels: bool,
+    until_keepalive: Duration,
+) -> Duration {
+    if has_streaming_channels {
+        TERMINAL_POLL.min(until_keepalive)
+    } else {
+        until_keepalive
+    }
+}
+
 /// Wrap a macro's step-sentinel script so it runs backgrounded under `setsid`
 /// (making the backgrounded shell its own process group leader, so its PID
 /// doubles as its process group id), with that PID reported back as a sentinel
@@ -1033,6 +1053,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
     // with the same non-blocking read-and-batch mechanism as terminals.
     let mut macros: HashMap<String, Channel> = HashMap::new();
     let mut buf = [0u8; TERM_BUF];
+    let mut next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
 
     'outer: loop {
         // 1. Handle every command that's already queued (blocking mode).
@@ -1088,6 +1109,18 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
             }
 
             session.set_blocking(true);
+
+            // EOF can mean a normal shell exit, but it is also how libssh2 may
+            // surface a dead transport. Probe immediately so a dropped SSH
+            // connection is not left looking like only one terminal ended until
+            // the user happens to perform a later SFTP operation.
+            if (!closed_terms.is_empty() || !closed_macros.is_empty())
+                && sftp.realpath(Path::new(".")).is_err()
+            {
+                let _ = app.emit("connection-lost", ());
+                break 'outer;
+            }
+
             for id in closed_terms {
                 terminals.remove(&id);
                 let _ = app.emit("terminal-closed", id);
@@ -1098,24 +1131,43 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
             }
         }
 
-        // 3. Wait for the next command. Poll rapidly only while a terminal or a
-        //    macro run is live; otherwise block so an idle connection uses no CPU.
-        let next = if terminals.is_empty() && macros.is_empty() {
-            cmd_rx.recv().map_err(|_| ())
-        } else {
-            match cmd_rx.recv_timeout(TERMINAL_POLL) {
-                Ok(req) => Ok(req),
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break 'outer,
+        // 3. Actually send SSH keepalives. `set_keepalive` above only stores the
+        //    policy in libssh2; without this call an otherwise idle connection
+        //    can still be reaped by the server, NAT, VPN, or firewall.
+        if Instant::now() >= next_keepalive {
+            match session.keepalive_send() {
+                Ok(seconds_to_next) => {
+                    // libssh2 reports when it needs to be called again. Clamp a
+                    // zero result to avoid a busy loop on unusual servers.
+                    next_keepalive =
+                        Instant::now() + Duration::from_secs(u64::from(seconds_to_next.max(1)));
+                }
+                Err(_) => {
+                    // Avoid declaring a disconnect for a keepalive-specific
+                    // failure if a real SFTP round-trip still succeeds.
+                    if sftp.realpath(Path::new(".")).is_err() {
+                        let _ = app.emit("connection-lost", ());
+                        break 'outer;
+                    }
+                    next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
+                }
             }
-        };
-        match next {
+        }
+
+        // 4. Wait for the next request, terminal poll, or keepalive deadline.
+        // Idle connections wake only for a keepalive, so CPU usage remains
+        // effectively zero without leaving the transport completely silent.
+        let has_streaming_channels = !terminals.is_empty() || !macros.is_empty();
+        let until_keepalive = next_keepalive.saturating_duration_since(Instant::now());
+        let wait = worker_wait_timeout(has_streaming_channels, until_keepalive);
+        match cmd_rx.recv_timeout(wait) {
             Ok(req) => {
                 if handle_req(req, &session, &sftp, &app, &mut terminals, &mut macros) {
                     break 'outer;
                 }
             }
-            Err(_) => break 'outer,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break 'outer,
         }
     }
 
@@ -1470,6 +1522,24 @@ mod tests {
         let wrapped = wrap_macro_script(script);
         // shell_quote's escaping: each ' becomes '\''
         assert!(wrapped.contains("'echo '\\''hello world'\\''\ncd /tmp' &"));
+    }
+
+    #[test]
+    fn idle_worker_waits_only_until_the_next_keepalive() {
+        let until_keepalive = Duration::from_secs(12);
+        assert_eq!(worker_wait_timeout(false, until_keepalive), until_keepalive);
+    }
+
+    #[test]
+    fn streaming_worker_keeps_the_fast_terminal_poll() {
+        assert_eq!(
+            worker_wait_timeout(true, Duration::from_secs(12)),
+            TERMINAL_POLL
+        );
+        assert_eq!(
+            worker_wait_timeout(true, Duration::from_millis(5)),
+            Duration::from_millis(5)
+        );
     }
 
     /// Smoke test against Rebex's public read-only SFTP test server.

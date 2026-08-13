@@ -20,8 +20,9 @@ The `ssh2` crate (built against the WinCNG backend on Windows, so no OpenSSL/Per
 
 - The frontend (Tauri async commands) sends requests over a `std::sync::mpsc::Sender<Req>` and receives replies via `tokio::sync::oneshot`.
 - The worker runs a **cooperative polling loop**:
-  - With no terminals open, it blocks on `cmd_rx.recv()` (0% CPU).
+  - With no terminals open, it blocks on `cmd_rx.recv_timeout()` until either a request arrives or the next 30-second SSH keepalive is due (effectively 0% CPU). `Session::set_keepalive` only configures libssh2, so the worker explicitly calls `keepalive_send()`; otherwise an idle connection can still be removed by the server/NAT/VPN.
   - With at least one terminal open, the session switches to non-blocking mode and polls every channel roughly every 15ms (`TERMINAL_POLL`), batching each channel's output into a single `terminal-output` event.
+  - A terminal EOF/read error is followed immediately by an SFTP `realpath(".")` probe: a live connection emits only `terminal-closed` (normal shell exit), while a failed probe emits `connection-lost` immediately instead of waiting for the next file operation.
 - SFTP operations (list/download/upload/rename/delete/copy/mkdir) are handled blockingly inside this same worker.
 - Disconnect detection: when any operation fails, a cheap `sftp.realpath(".")` round-trip confirms whether the connection is truly dead → if so, emits a `connection-lost` event and the worker exits.
 - `copy` runs **server-side `cp -r` over an exec channel** so data never passes through the client (not a download-then-reupload over SFTP).
