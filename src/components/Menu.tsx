@@ -9,7 +9,13 @@ export type DropItem =
       danger?: boolean;
       shortcut?: string;
     }
-  | { type: "check"; label: string; checked: boolean; onClick: () => void }
+  | {
+      type: "check";
+      label: string;
+      checked: boolean;
+      onClick: () => void;
+      disabled?: boolean;
+    }
   | { type: "separator" };
 
 /** A menu-bar dropdown: a label button that opens a list of items. */
@@ -55,6 +61,7 @@ export default function Menu({
             ) : item.type === "check" ? (
               <Row
                 key={i}
+                disabled={item.disabled}
                 onClick={() => {
                   item.onClick();
                   setOpen(false);

@@ -74,6 +74,9 @@ export default function EditorPane({
   // swapped in at runtime once the (dynamically-imported) grammar resolves —
   // the file opens as plain text immediately and highlighting pops in after.
   const langCompartmentRef = useRef(new Compartment());
+  const wrapCompartmentRef = useRef(new Compartment());
+  const fontCompartmentRef = useRef(new Compartment());
+  const positionRef = useRef<HTMLSpanElement>(null);
   // The last saved/loaded contents; the doc is "dirty" when it differs.
   const baselineRef = useRef("");
   const dirtyRef = useRef(false);
@@ -87,6 +90,9 @@ export default function EditorPane({
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [encoding, setEncoding] = useState("UTF-8");
+  const [lineEnding, setLineEnding] = useState("LF");
+  const [wordWrap, setWordWrap] = useState(false);
+  const [fontSize, setFontSize] = useState(13);
 
   const closePane = useAppStore((s) => s.closePane);
   const requestClose = useAppStore((s) => s.requestClose);
@@ -148,6 +154,47 @@ export default function EditorPane({
   const saveRef = useRef(doSave);
   saveRef.current = doSave;
 
+  const updateCursorStatus = useCallback((state: EditorState) => {
+    const head = state.selection.main.head;
+    const line = state.doc.lineAt(head);
+    const selected = state.selection.ranges.reduce(
+      (total, range) => total + range.to - range.from,
+      0
+    );
+    if (positionRef.current) {
+      positionRef.current.textContent = `${line.number}줄, ${
+        head - line.from + 1
+      }열${selected > 0 ? ` (${selected}자 선택)` : ""}`;
+    }
+  }, []);
+
+  const toggleWordWrap = useCallback(() => {
+    setWordWrap((current) => {
+      const next = !current;
+      viewRef.current?.dispatch({
+        effects: wrapCompartmentRef.current.reconfigure(
+          next ? EditorView.lineWrapping : []
+        ),
+      });
+      return next;
+    });
+  }, []);
+
+  const changeFontSize = useCallback((amount: number | "reset") => {
+    setFontSize((current) => {
+      const next =
+        amount === "reset"
+          ? 13
+          : Math.min(20, Math.max(10, current + amount));
+      viewRef.current?.dispatch({
+        effects: fontCompartmentRef.current.reconfigure(
+          EditorView.theme({ "&": { fontSize: `${next}px` } })
+        ),
+      });
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     let disposed = false;
     setLoading(true);
@@ -163,6 +210,12 @@ export default function EditorPane({
         baselineRef.current = contents;
         encodingRef.current = enc;
         setEncoding(enc);
+        const separator = contents.includes("\r\n")
+          ? "\r\n"
+          : contents.includes("\r")
+            ? "\r"
+            : "\n";
+        setLineEnding(separator === "\r\n" ? "CRLF" : separator === "\r" ? "CR" : "LF");
         const view = new EditorView({
           parent: host,
           state: EditorState.create({
@@ -179,8 +232,15 @@ export default function EditorPane({
               autocompletion(),
               highlightSelectionMatches(),
               syntaxHighlighting(editorHighlight()),
+              EditorState.lineSeparator.of(separator),
               // Starts empty (plain text); reconfigured once the grammar loads.
               langCompartmentRef.current.of([]),
+              wrapCompartmentRef.current.of(
+                wordWrap ? EditorView.lineWrapping : []
+              ),
+              fontCompartmentRef.current.of(
+                EditorView.theme({ "&": { fontSize: `${fontSize}px` } })
+              ),
               // Ctrl/Cmd+S saves; listed first so it wins over any default.
               keymap.of([
                 {
@@ -192,6 +252,38 @@ export default function EditorPane({
                   },
                 },
                 { key: "Mod-g", preventDefault: true, run: gotoLine },
+                {
+                  key: "Alt-z",
+                  preventDefault: true,
+                  run: () => {
+                    toggleWordWrap();
+                    return true;
+                  },
+                },
+                {
+                  key: "Mod-=",
+                  preventDefault: true,
+                  run: () => {
+                    changeFontSize(1);
+                    return true;
+                  },
+                },
+                {
+                  key: "Mod--",
+                  preventDefault: true,
+                  run: () => {
+                    changeFontSize(-1);
+                    return true;
+                  },
+                },
+                {
+                  key: "Mod-0",
+                  preventDefault: true,
+                  run: () => {
+                    changeFontSize("reset");
+                    return true;
+                  },
+                },
                 ...closeBracketsKeymap,
                 ...defaultKeymap,
                 ...historyKeymap,
@@ -204,6 +296,7 @@ export default function EditorPane({
               // stringify the (<=5MB) doc when lengths match, so typing in a big
               // file doesn't serialize it on every keystroke.
               EditorView.updateListener.of((u) => {
+                if (u.selectionSet || u.docChanged) updateCursorStatus(u.state);
                 if (!u.docChanged) return;
                 const doc = u.state.doc;
                 const d =
@@ -216,6 +309,7 @@ export default function EditorPane({
           }),
         });
         viewRef.current = view;
+        updateCursorStatus(view.state);
         setLoading(false);
 
         // Load the language grammar in the background and swap it into the
@@ -241,7 +335,19 @@ export default function EditorPane({
       viewRef.current?.destroy();
       viewRef.current = null;
     };
-  }, [filePath, markDirty]);
+  }, [
+    changeFontSize,
+    filePath,
+    markDirty,
+    toggleWordWrap,
+    updateCursorStatus,
+  ]);
+
+  useEffect(() => {
+    if (!loading && !error && viewRef.current) {
+      updateCursorStatus(viewRef.current.state);
+    }
+  }, [error, loading, updateCursorStatus]);
 
   /** Download the file locally (offered when it can't be edited). */
   async function downloadInstead() {
@@ -431,11 +537,40 @@ export default function EditorPane({
       disabled: !ready,
     },
   ];
+  const viewMenu: DropItem[] = [
+    {
+      type: "check",
+      label: "자동 줄 바꿈",
+      checked: wordWrap,
+      onClick: toggleWordWrap,
+      disabled: !ready,
+    },
+    { type: "separator" },
+    {
+      label: "글자 크게",
+      shortcut: "Ctrl+=",
+      onClick: () => changeFontSize(1),
+      disabled: !ready || fontSize >= 20,
+    },
+    {
+      label: "글자 작게",
+      shortcut: "Ctrl+-",
+      onClick: () => changeFontSize(-1),
+      disabled: !ready || fontSize <= 10,
+    },
+    {
+      label: "글자 크기 초기화",
+      shortcut: "Ctrl+0",
+      onClick: () => changeFontSize("reset"),
+      disabled: !ready || fontSize === 13,
+    },
+  ];
 
   usePaneMenuRegistration(id, [
     { label: "파일", items: fileMenu },
     { label: "편집", items: editMenu },
     { label: "코드", items: codeMenu },
+    { label: "보기", items: viewMenu },
   ]);
 
   return (
@@ -512,6 +647,15 @@ export default function EditorPane({
           </>
         )}
       </div>
+      {ready && (
+        <div className="flex h-6 shrink-0 items-center justify-end gap-3 border-t border-ink-700/60 bg-ink-800 px-2 font-mono text-2xs text-slate-500">
+          <span title="탭 한 칸이 차지하는 열 수">탭: 4</span>
+          <span title="줄바꿈 형식">{lineEnding}</span>
+          <span title="문자 인코딩">{encoding}</span>
+          <span title="편집기 글자 크기">{fontSize}px</span>
+          <span ref={positionRef} className="min-w-[5.5rem] text-right" />
+        </div>
+      )}
     </div>
   );
 }
