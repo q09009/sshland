@@ -6,6 +6,7 @@ const SHORTCUTS: { keys: string; desc: string }[] = [
   { keys: "Alt+Shift+V", desc: "상하 분할 (새 터미널)" },
   { keys: "Alt+방향키", desc: "포커스 이동" },
   { keys: "Alt+Shift+W", desc: "현재 pane 닫기" },
+  { keys: "Ctrl+Shift+P", desc: "현재 pane 명령 검색" },
 ];
 
 export default function ShortcutsHelp() {

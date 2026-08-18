@@ -6,6 +6,7 @@ import PaneView from "./PaneView";
 import ShortcutsHelp from "./ShortcutsHelp";
 import TransfersPanel from "./TransfersPanel";
 import DragLayer from "./DragLayer";
+import CommandPalette from "./CommandPalette";
 
 /** Hosts the pane tree, global tiling shortcuts, and connection-wide events. */
 export default function TilingShell() {
@@ -83,6 +84,7 @@ export default function TilingShell() {
       <ShortcutsHelp />
       <TransfersPanel />
       <DragLayer />
+      <CommandPalette />
     </div>
   );
 }
