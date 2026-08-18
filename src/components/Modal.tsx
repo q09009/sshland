@@ -117,6 +117,65 @@ export function UnsavedChangesDialog({
   );
 }
 
+/** Prevents a remote file changed elsewhere from being overwritten silently. */
+export function FileConflictDialog({
+  fileName,
+  busy,
+  onReload,
+  onOverwrite,
+  onCancel,
+}: {
+  fileName: string;
+  busy?: boolean;
+  onReload: () => void;
+  onOverwrite: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  return (
+    <Backdrop>
+      <h2 className="text-base font-semibold text-slate-100">
+        서버의 파일이 변경됐어요
+      </h2>
+      <div className="mt-2 text-sm text-slate-300">
+        <span className="font-medium text-slate-100">{fileName}</span> 이 다른
+        곳에서 수정됐어요. 서버 버전을 다시 불러오거나, 현재 편집 내용을 서버에
+        덮어쓸 수 있어요.
+      </div>
+      <div className="mt-6 flex flex-wrap justify-end gap-2">
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700 disabled:opacity-50"
+        >
+          취소
+        </button>
+        <button
+          onClick={onReload}
+          disabled={busy}
+          className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          서버 버전 불러오기
+        </button>
+        <button
+          onClick={onOverwrite}
+          disabled={busy}
+          className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+        >
+          {busy ? "저장 중…" : "내 내용으로 덮어쓰기"}
+        </button>
+      </div>
+    </Backdrop>
+  );
+}
+
 /**
  * Confirmation shown before killing a process from the dashboard process
  * manager. Offers a normal kill and a clearly-labeled force kill (-9); both are

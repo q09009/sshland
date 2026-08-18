@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorState, Text } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -48,7 +48,11 @@ import { operationToCommandString } from "../lib/commandLog";
 import { baseName } from "../lib/path";
 import { editorTheme, editorHighlight } from "../lib/editorTheme";
 import { languageLabel, loadLanguageForFile } from "../lib/languages";
-import { UnsavedChangesDialog } from "./Modal";
+import {
+  ConfirmDialog,
+  FileConflictDialog,
+  UnsavedChangesDialog,
+} from "./Modal";
 import type { DropItem } from "./Menu";
 import { usePaneMenuRegistration } from "../lib/paneMenus";
 
@@ -76,11 +80,14 @@ export default function EditorPane({
   const langCompartmentRef = useRef(new Compartment());
   const wrapCompartmentRef = useRef(new Compartment());
   const fontCompartmentRef = useRef(new Compartment());
+  const lineEndingCompartmentRef = useRef(new Compartment());
   const positionRef = useRef<HTMLSpanElement>(null);
   // The last saved/loaded contents; the doc is "dirty" when it differs.
   const baselineRef = useRef("");
+  const remoteBaselineRef = useRef("");
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  const reloadingRef = useRef(false);
   // The file's original encoding, echoed back on save so it's preserved.
   const encodingRef = useRef("UTF-8");
 
@@ -93,6 +100,9 @@ export default function EditorPane({
   const [lineEnding, setLineEnding] = useState("LF");
   const [wordWrap, setWordWrap] = useState(false);
   const [fontSize, setFontSize] = useState(13);
+  const [reloading, setReloading] = useState(false);
+  const [reloadConfirm, setReloadConfirm] = useState(false);
+  const [fileConflict, setFileConflict] = useState(false);
 
   const closePane = useAppStore((s) => s.closePane);
   const requestClose = useAppStore((s) => s.requestClose);
@@ -120,17 +130,29 @@ export default function EditorPane({
 
   // Save the current contents back to the server. Held in a ref so the (once-
   // built) CodeMirror keymap always calls the latest version.
-  const doSave = useCallback(async (): Promise<boolean> => {
+  const doSave = useCallback(async (overwrite = false): Promise<boolean> => {
     const view = viewRef.current;
-    if (!view || savingRef.current) return false;
-    const content = view.state.doc.toString();
+    if (!view || savingRef.current || reloadingRef.current) return false;
+    const normalizedContent = view.state.doc.toString();
+    const content = view.state.sliceDoc();
     savingRef.current = true;
     setSaving(true);
     setActionError(null);
     try {
+      if (!overwrite) {
+        const remote = await readRemoteFile(filePath);
+        if (
+          remote.content !== remoteBaselineRef.current ||
+          remote.encoding !== encodingRef.current
+        ) {
+          setFileConflict(true);
+          return false;
+        }
+      }
       await writeRemoteFile(filePath, content, encodingRef.current);
-      baselineRef.current = content;
-      markDirty(false);
+      baselineRef.current = normalizedContent;
+      remoteBaselineRef.current = content;
+      markDirty(view.state.doc.toString() !== normalizedContent);
       // Record the save in the command-log bar (a descriptive line, since a
       // save has no clean shell-command equivalent).
       if (connection) {
@@ -153,6 +175,69 @@ export default function EditorPane({
 
   const saveRef = useRef(doSave);
   saveRef.current = doSave;
+
+  const applyRemoteContents = useCallback(
+    (contents: string, remoteEncoding: string) => {
+      const view = viewRef.current;
+      if (!view) return;
+      const separator = contents.includes("\r\n")
+        ? "\r\n"
+        : contents.includes("\r")
+          ? "\r"
+          : "\n";
+      view.dispatch({
+        effects: lineEndingCompartmentRef.current.reconfigure(
+          EditorState.lineSeparator.of(separator)
+        ),
+      });
+      const text = Text.of(contents.split(/\r\n|\r|\n/));
+      baselineRef.current = text.toString();
+      remoteBaselineRef.current = contents;
+      encodingRef.current = remoteEncoding;
+      setEncoding(remoteEncoding);
+      setLineEnding(
+        separator === "\r\n" ? "CRLF" : separator === "\r" ? "CR" : "LF"
+      );
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: text },
+      });
+      markDirty(false);
+      view.focus();
+    },
+    [markDirty]
+  );
+
+  const reloadFromServer = useCallback(async (discardChanges = false) => {
+    if (reloadingRef.current || savingRef.current) return;
+    const contentsBeforeReload = viewRef.current?.state.doc.toString();
+    reloadingRef.current = true;
+    setReloading(true);
+    setActionError(null);
+    try {
+      const remote = await readRemoteFile(filePath);
+      if (
+        !discardChanges &&
+        (dirtyRef.current ||
+          viewRef.current?.state.doc.toString() !== contentsBeforeReload)
+      ) {
+        setReloadConfirm(true);
+        return;
+      }
+      applyRemoteContents(remote.content, remote.encoding);
+    } catch (err) {
+      setActionError(
+        typeof err === "string" ? err : "서버에서 다시 불러오지 못했어요."
+      );
+    } finally {
+      reloadingRef.current = false;
+      setReloading(false);
+    }
+  }, [applyRemoteContents, filePath]);
+
+  const requestReload = useCallback(() => {
+    if (dirtyRef.current) setReloadConfirm(true);
+    else void reloadFromServer(false);
+  }, [reloadFromServer]);
 
   const updateCursorStatus = useCallback((state: EditorState) => {
     const head = state.selection.main.head;
@@ -207,7 +292,6 @@ export default function EditorPane({
         const host = hostRef.current;
         if (!host) return;
 
-        baselineRef.current = contents;
         encodingRef.current = enc;
         setEncoding(enc);
         const separator = contents.includes("\r\n")
@@ -219,7 +303,7 @@ export default function EditorPane({
         const view = new EditorView({
           parent: host,
           state: EditorState.create({
-            doc: contents,
+            doc: Text.of(contents.split(/\r\n|\r|\n/)),
             extensions: [
               lineNumbers(),
               highlightActiveLine(),
@@ -232,7 +316,9 @@ export default function EditorPane({
               autocompletion(),
               highlightSelectionMatches(),
               syntaxHighlighting(editorHighlight()),
-              EditorState.lineSeparator.of(separator),
+              lineEndingCompartmentRef.current.of(
+                EditorState.lineSeparator.of(separator)
+              ),
               // Starts empty (plain text); reconfigured once the grammar loads.
               langCompartmentRef.current.of([]),
               wrapCompartmentRef.current.of(
@@ -252,6 +338,14 @@ export default function EditorPane({
                   },
                 },
                 { key: "Mod-g", preventDefault: true, run: gotoLine },
+                {
+                  key: "Mod-Shift-r",
+                  preventDefault: true,
+                  run: () => {
+                    requestReload();
+                    return true;
+                  },
+                },
                 {
                   key: "Alt-z",
                   preventDefault: true,
@@ -309,6 +403,8 @@ export default function EditorPane({
           }),
         });
         viewRef.current = view;
+        baselineRef.current = view.state.doc.toString();
+        remoteBaselineRef.current = contents;
         updateCursorStatus(view.state);
         setLoading(false);
 
@@ -339,6 +435,7 @@ export default function EditorPane({
     changeFontSize,
     filePath,
     markDirty,
+    requestReload,
     toggleWordWrap,
     updateCursorStatus,
   ]);
@@ -427,6 +524,12 @@ export default function EditorPane({
       shortcut: "Ctrl+S",
       onClick: () => void doSave(),
       disabled: !ready || !dirty || saving,
+    },
+    {
+      label: reloading ? "다시 불러오는 중…" : "서버에서 다시 불러오기",
+      shortcut: "Ctrl+Shift+R",
+      onClick: requestReload,
+      disabled: !ready || saving || reloading,
     },
     { type: "separator" },
     {
@@ -618,6 +721,34 @@ export default function EditorPane({
             closePane(id);
           }}
           onCancel={clearCloseRequest}
+        />
+      )}
+      {reloadConfirm && (
+        <ConfirmDialog
+          title="변경사항을 버리고 다시 불러올까요?"
+          message="저장하지 않은 편집 내용은 사라지고 서버에 있는 파일로 바뀌어요."
+          confirmLabel="다시 불러오기"
+          danger
+          onConfirm={() => {
+            setReloadConfirm(false);
+            void reloadFromServer(true);
+          }}
+          onCancel={() => setReloadConfirm(false)}
+        />
+      )}
+      {fileConflict && (
+        <FileConflictDialog
+          fileName={name}
+          busy={saving || reloading}
+          onOverwrite={() => {
+            setFileConflict(false);
+            void doSave(true);
+          }}
+          onReload={() => {
+            setFileConflict(false);
+            void reloadFromServer(true);
+          }}
+          onCancel={() => setFileConflict(false)}
         />
       )}
       {actionError && (
