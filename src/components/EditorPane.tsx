@@ -304,7 +304,7 @@ export default function EditorPane({
 
   return (
     <div className="flex h-full w-full flex-col bg-ink-900">
-      <div className="flex h-7 shrink-0 items-center gap-2 border-b border-ink-700/60 bg-ink-800 px-2 text-xs text-slate-400">
+      <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
         <span className="flex min-w-0 items-center gap-1.5" title={filePath}>
           <span className="truncate">📝 {name}</span>
           {dirty && (
@@ -324,6 +324,14 @@ export default function EditorPane({
             </span>
           )}
         </span>
+        <button
+          onClick={() => requestClose(id)}
+          title="pane 닫기"
+          aria-label="pane 닫기"
+          className="shrink-0 rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300"
+        >
+          ✕
+        </button>
       </div>
       {closeRequested && (
         <UnsavedChangesDialog
