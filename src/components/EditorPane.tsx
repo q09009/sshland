@@ -16,6 +16,14 @@ import {
   indentWithTab,
   undo,
   redo,
+  selectAll,
+  toggleComment,
+  indentMore,
+  indentLess,
+  moveLineUp,
+  moveLineDown,
+  copyLineDown,
+  deleteLine,
 } from "@codemirror/commands";
 import {
   syntaxHighlighting,
@@ -32,6 +40,7 @@ import {
   highlightSelectionMatches,
   searchKeymap,
   openSearchPanel,
+  gotoLine,
 } from "@codemirror/search";
 import { download, readRemoteFile, writeRemoteFile } from "../api";
 import { useAppStore } from "../store";
@@ -76,7 +85,7 @@ export default function EditorPane({
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [encoding, setEncoding] = useState("UTF-8");
 
   const closePane = useAppStore((s) => s.closePane);
@@ -111,7 +120,7 @@ export default function EditorPane({
     const content = view.state.doc.toString();
     savingRef.current = true;
     setSaving(true);
-    setSaveError(null);
+    setActionError(null);
     try {
       await writeRemoteFile(filePath, content, encodingRef.current);
       baselineRef.current = content;
@@ -128,7 +137,7 @@ export default function EditorPane({
       }
       return true;
     } catch (err) {
-      setSaveError(typeof err === "string" ? err : "저장하지 못했어요.");
+      setActionError(typeof err === "string" ? err : "저장하지 못했어요.");
       return false;
     } finally {
       savingRef.current = false;
@@ -182,6 +191,7 @@ export default function EditorPane({
                     return true;
                   },
                 },
+                { key: "Mod-g", preventDefault: true, run: gotoLine },
                 ...closeBracketsKeymap,
                 ...defaultKeymap,
                 ...historyKeymap,
@@ -254,6 +264,54 @@ export default function EditorPane({
     fn(view);
     view.focus();
   };
+
+  const copySelection = async (cut: boolean) => {
+    const view = viewRef.current;
+    if (!view) return;
+    const ranges = view.state.selection.ranges.filter((range) => !range.empty);
+    const currentLine = view.state.doc.lineAt(view.state.selection.main.head);
+    const text =
+      ranges.length > 0
+        ? ranges
+            .map((range) => view.state.sliceDoc(range.from, range.to))
+            .join("\n")
+        : `${currentLine.text}\n`;
+    setActionError(null);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (cut && ranges.length > 0) {
+        view.dispatch(view.state.replaceSelection(""));
+      } else if (cut) {
+        const from =
+          currentLine.to === view.state.doc.length && currentLine.from > 0
+            ? currentLine.from - 1
+            : currentLine.from;
+        const to =
+          currentLine.to < view.state.doc.length
+            ? currentLine.to + 1
+            : currentLine.to;
+        view.dispatch({ changes: { from, to } });
+      }
+    } catch {
+      setActionError("클립보드에 접근하지 못했어요.");
+    } finally {
+      view.focus();
+    }
+  };
+
+  const pasteClipboard = async () => {
+    const view = viewRef.current;
+    if (!view) return;
+    setActionError(null);
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) view.dispatch(view.state.replaceSelection(text));
+    } catch {
+      setActionError("클립보드 내용을 읽지 못했어요.");
+    } finally {
+      view.focus();
+    }
+  };
   // Editing tools only make sense once the doc is actually loaded.
   const ready = !loading && !error;
 
@@ -286,6 +344,31 @@ export default function EditorPane({
     },
     { type: "separator" },
     {
+      label: "잘라내기",
+      shortcut: "Ctrl+X",
+      onClick: () => void copySelection(true),
+      disabled: !ready,
+    },
+    {
+      label: "복사",
+      shortcut: "Ctrl+C",
+      onClick: () => void copySelection(false),
+      disabled: !ready,
+    },
+    {
+      label: "붙여넣기",
+      shortcut: "Ctrl+V",
+      onClick: () => void pasteClipboard(),
+      disabled: !ready,
+    },
+    {
+      label: "모두 선택",
+      shortcut: "Ctrl+A",
+      onClick: () => runCmd(selectAll),
+      disabled: !ready,
+    },
+    { type: "separator" },
+    {
       label: "찾기 / 바꾸기",
       shortcut: "Ctrl+F",
       onClick: () =>
@@ -296,10 +379,63 @@ export default function EditorPane({
       disabled: !ready,
     },
   ];
+  const codeMenu: DropItem[] = [
+    {
+      label: "줄 주석 전환",
+      shortcut: "Ctrl+/",
+      onClick: () => runCmd(toggleComment),
+      disabled: !ready,
+    },
+    {
+      label: "들여쓰기",
+      shortcut: "Ctrl+]",
+      onClick: () => runCmd(indentMore),
+      disabled: !ready,
+    },
+    {
+      label: "내어쓰기",
+      shortcut: "Ctrl+[",
+      onClick: () => runCmd(indentLess),
+      disabled: !ready,
+    },
+    { type: "separator" },
+    {
+      label: "줄 위로 이동",
+      shortcut: "Alt+↑",
+      onClick: () => runCmd(moveLineUp),
+      disabled: !ready,
+    },
+    {
+      label: "줄 아래로 이동",
+      shortcut: "Alt+↓",
+      onClick: () => runCmd(moveLineDown),
+      disabled: !ready,
+    },
+    {
+      label: "줄 아래에 복제",
+      shortcut: "Shift+Alt+↓",
+      onClick: () => runCmd(copyLineDown),
+      disabled: !ready,
+    },
+    {
+      label: "줄 삭제",
+      shortcut: "Ctrl+Shift+K",
+      onClick: () => runCmd(deleteLine),
+      disabled: !ready,
+    },
+    { type: "separator" },
+    {
+      label: "특정 줄로 이동",
+      shortcut: "Ctrl+G",
+      onClick: () => runCmd(gotoLine),
+      disabled: !ready,
+    },
+  ];
 
   usePaneMenuRegistration(id, [
     { label: "파일", items: fileMenu },
     { label: "편집", items: editMenu },
+    { label: "코드", items: codeMenu },
   ]);
 
   return (
@@ -349,9 +485,9 @@ export default function EditorPane({
           onCancel={clearCloseRequest}
         />
       )}
-      {saveError && (
+      {actionError && (
         <div className="shrink-0 bg-red-950/80 px-2 py-1 text-2xs text-red-300">
-          {saveError}
+          {actionError}
         </div>
       )}
       <div className="relative min-h-0 flex-1 overflow-hidden">
