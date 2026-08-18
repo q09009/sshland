@@ -20,14 +20,15 @@ import { isProbablyBinary, MAX_EDITABLE_SIZE } from "../lib/editable";
 import { FileOperation, operationToCommandString } from "../lib/commandLog";
 import { ConfirmDialog, PromptDialog } from "../components/Modal";
 import ContextMenu, { MenuItem } from "../components/ContextMenu";
-import Menu, { DropItem } from "../components/Menu";
+import type { DropItem } from "../components/Menu";
 import FileView from "../components/FileView";
+import { usePaneMenuRegistration } from "../lib/paneMenus";
 
 /**
  * One file-manager pane. All directory state (path, listing, view mode) is
  * LOCAL so multiple file-manager panes navigate independently.
  */
-export default function FilesScreen() {
+export default function FilesScreen({ id }: { id: string }) {
   const connection = useAppStore((s) => s.connection);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
   const startTransfer = useAppStore((s) => s.startTransfer);
@@ -560,6 +561,12 @@ export default function FilesScreen() {
     { type: "check", label: "숨김파일 표시", checked: showHidden, onClick: () => setShowHidden((v) => !v) },
   ];
 
+  usePaneMenuRegistration(id, [
+    { label: "파일", items: fileMenu },
+    { label: "편집", items: editMenu },
+    { label: "보기", items: viewMenu },
+  ]);
+
   const atRoot = currentPath === "/";
 
   return (
@@ -567,13 +574,6 @@ export default function FilesScreen() {
       ref={rootRef}
       className="relative flex h-full flex-col bg-ink-900 text-slate-100"
     >
-      {/* Menu bar */}
-      <div className="flex items-center gap-1 border-b border-ink-700/60 bg-ink-800 px-2 py-1">
-        <Menu label="파일" items={fileMenu} />
-        <Menu label="편집" items={editMenu} />
-        <Menu label="보기" items={viewMenu} />
-      </div>
-
       {/* Navigation row: up / home / refresh + breadcrumb */}
       <div className="flex items-center gap-1 border-b border-ink-700/60 bg-ink-800/60 px-2 py-1">
         <ToolButton
@@ -734,4 +734,3 @@ function ToolButton({
     </button>
   );
 }
-

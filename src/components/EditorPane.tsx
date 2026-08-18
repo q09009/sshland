@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Compartment, EditorState } from "@codemirror/state";
 import {
@@ -40,6 +40,8 @@ import { baseName } from "../lib/path";
 import { editorTheme, editorHighlight } from "../lib/editorTheme";
 import { languageLabel, loadLanguageForFile } from "../lib/languages";
 import { UnsavedChangesDialog } from "./Modal";
+import type { DropItem } from "./Menu";
+import { usePaneMenuRegistration } from "../lib/paneMenus";
 
 /**
  * A lightweight text/code editor for one remote file, rendered with CodeMirror
@@ -255,9 +257,54 @@ export default function EditorPane({
   // Editing tools only make sense once the doc is actually loaded.
   const ready = !loading && !error;
 
+  const fileMenu: DropItem[] = [
+    {
+      label: saving ? "저장 중…" : "저장",
+      shortcut: "Ctrl+S",
+      onClick: () => void doSave(),
+      disabled: !ready || !dirty || saving,
+    },
+    { type: "separator" },
+    {
+      label: "pane 닫기",
+      shortcut: "Alt+Shift+W",
+      onClick: () => requestClose(id),
+    },
+  ];
+  const editMenu: DropItem[] = [
+    {
+      label: "실행 취소",
+      shortcut: "Ctrl+Z",
+      onClick: () => runCmd(undo),
+      disabled: !ready,
+    },
+    {
+      label: "다시 실행",
+      shortcut: "Ctrl+Y",
+      onClick: () => runCmd(redo),
+      disabled: !ready,
+    },
+    { type: "separator" },
+    {
+      label: "찾기 / 바꾸기",
+      shortcut: "Ctrl+F",
+      onClick: () =>
+        runCmd((view) => {
+          openSearchPanel(view);
+          return true;
+        }),
+      disabled: !ready,
+    },
+  ];
+
+  usePaneMenuRegistration(id, [
+    { label: "파일", items: fileMenu },
+    { label: "편집", items: editMenu },
+  ]);
+
   return (
     <div className="flex h-full w-full flex-col bg-ink-900">
-      <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
+      <div className="flex h-7 shrink-0 items-center gap-2 border-b border-ink-700/60 bg-ink-800 px-2 text-xs text-slate-400">
         <span className="flex min-w-0 items-center gap-1.5" title={filePath}>
           <span className="truncate">📝 {name}</span>
           {dirty && (
@@ -276,47 +323,6 @@ export default function EditorPane({
               {encoding}
             </span>
           )}
-        </span>
-        <span className="flex shrink-0 items-center gap-0.5">
-          {ready && (
-            <>
-              <ToolbarButton label="실행취소 (Ctrl+Z)" onClick={() => runCmd(undo)}>
-                ↶
-              </ToolbarButton>
-              <ToolbarButton label="다시실행 (Ctrl+Y)" onClick={() => runCmd(redo)}>
-                ↷
-              </ToolbarButton>
-              <ToolbarButton
-                label="찾기 / 바꾸기 (Ctrl+F)"
-                onClick={() =>
-                  runCmd((v) => {
-                    openSearchPanel(v);
-                    return true;
-                  })
-                }
-              >
-                찾기
-              </ToolbarButton>
-              <span className="mx-0.5 h-4 w-px bg-ink-700" />
-            </>
-          )}
-          {!error && (
-            <button
-              onClick={() => void doSave()}
-              disabled={!dirty || saving}
-              title="저장 (Ctrl+S)"
-              className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
-            >
-              {saving ? "저장 중…" : "저장"}
-            </button>
-          )}
-          <button
-            onClick={() => requestClose(id)}
-            title="pane 닫기"
-            className="rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300"
-          >
-            ✕
-          </button>
         </span>
       </div>
       {closeRequested && (
@@ -363,27 +369,5 @@ export default function EditorPane({
         )}
       </div>
     </div>
-  );
-}
-
-/** A compact icon/text button in the editor header toolbar. */
-function ToolbarButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
-    >
-      {children}
-    </button>
   );
 }

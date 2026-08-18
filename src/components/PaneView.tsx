@@ -115,8 +115,8 @@ function Divider({ layout }: { layout: DividerLayout }) {
 function Leaf({ node }: { node: LeafNode }) {
   const focused = useAppStore((s) => s.focusedPaneId === node.id);
   const setFocus = useAppStore((s) => s.setFocus);
-  // The editor provides its own header (path + save + close), so it skips the
-  // generic PaneHeader; every other pane type gets the shared header.
+  // The editor provides its own metadata header, so it skips the generic
+  // PaneHeader; its commands live in the app-wide contextual menu.
   const isEditor = node.content === "editor";
 
   return (
@@ -129,7 +129,7 @@ function Leaf({ node }: { node: LeafNode }) {
       {!isEditor && <PaneHeader node={node} />}
       <div className="min-h-0 flex-1 overflow-hidden">
         {node.content === "file-manager" ? (
-          <FilesScreen />
+          <FilesScreen id={node.id} />
         ) : node.content === "editor" ? (
           <EditorPane id={node.id} filePath={node.filePath ?? ""} />
         ) : node.content === "dashboard" ? (

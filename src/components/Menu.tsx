@@ -7,6 +7,7 @@ export type DropItem =
       onClick: () => void;
       disabled?: boolean;
       danger?: boolean;
+      shortcut?: string;
     }
   | { type: "check"; label: string; checked: boolean; onClick: () => void }
   | { type: "separator" };
@@ -47,7 +48,7 @@ export default function Menu({
         {label}
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-40 mt-0.5 min-w-[160px] overflow-hidden rounded-lg border border-ink-700 bg-ink-800 py-1 shadow-2xl">
+        <div className="absolute left-0 top-full z-40 mt-0.5 min-w-[190px] overflow-hidden rounded-lg border border-ink-700 bg-ink-800 py-1 shadow-2xl">
           {items.map((item, i) =>
             item.type === "separator" ? (
               <div key={i} className="my-1 border-t border-ink-700/60" />
@@ -74,6 +75,11 @@ export default function Menu({
               >
                 <span className="w-4" />
                 <span>{item.label}</span>
+                {item.shortcut && (
+                  <span className="ml-auto pl-4 text-xs text-slate-500">
+                    {item.shortcut}
+                  </span>
+                )}
               </Row>
             )
           )}

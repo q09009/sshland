@@ -2,56 +2,33 @@ import { useEffect, useState } from "react";
 import { useAppStore, ConnectionStatus } from "../store";
 import { useSettings } from "../lib/settings";
 import { formatClock, formatElapsed } from "../lib/format";
+import { usePaneMenuStore } from "../lib/paneMenus";
+import Menu from "./Menu";
 
 /**
- * Thin GNOME-style top bar, a fixed layer above (and separate from) the pane
- * tiling area. Everything here is derived locally — connection identity,
- * a local session timer, and the OS clock. Nothing here contacts the server.
- *
- * Future server-resource widgets (CPU/memory) will slot into the CENTER region
- * marked below; the three-region layout leaves room for them without reflow.
+ * App-wide top bar. Contextual menus on the left target the focused pane, the
+ * connection stays geometrically centered, and local time/settings sit right.
  */
 export default function StatusBar() {
   const connection = useAppStore((s) => s.connection);
   const status = useAppStore((s) => s.connectionStatus);
   const openSettings = useAppStore((s) => s.openSettings);
-  const showSeconds = useSettings((s) => s.settings.clockShowSeconds);
-
-  // One local ticker drives both the session timer and the wall clock. No
-  // server round-trips — purely Date-based.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const elapsed = connection ? formatElapsed(now - connection.connectedAt) : "";
 
   return (
-    <header className="flex h-8 shrink-0 items-center gap-3 border-b border-ink-700/70 bg-ink-800 px-3 text-xs text-slate-300 select-none">
-      {/* LEFT: connection identity + health */}
-      <div className="flex items-center gap-3">
+    <header className="grid h-8 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-ink-700/70 bg-ink-800 px-2 text-xs text-slate-300 select-none">
+      <GlobalPaneMenus />
+
+      <div className="flex min-w-0 items-center gap-3 justify-self-center px-3">
         {connection && (
-          <span className="font-medium text-slate-200">
+          <span className="max-w-56 truncate font-medium text-slate-200">
             {connection.username}@{connection.host}
           </span>
         )}
         <StatusIndicator status={status} />
       </div>
 
-      {/* CENTER: reserved for future server-resource widgets (CPU/mem). */}
-      <div className="flex-1" />
-
-      {/* RIGHT: local session timer, OS clock, settings */}
-      <div className="flex items-center gap-3">
-        {connection && (
-          <span className="text-slate-400" title="세션 경과 시간">
-            ⏱ {elapsed}
-          </span>
-        )}
-        <span className="tabular-nums text-slate-300" title="로컬 시각">
-          {formatClock(new Date(now), showSeconds)}
-        </span>
+      <div className="flex items-center gap-3 justify-self-end">
+        <StatusTime />
         <button
           onClick={openSettings}
           title="설정"
@@ -62,6 +39,50 @@ export default function StatusBar() {
         </button>
       </div>
     </header>
+  );
+}
+
+const EMPTY_MENUS: never[] = [];
+
+function GlobalPaneMenus() {
+  const focusedPaneId = useAppStore((state) => state.focusedPaneId);
+  const menus = usePaneMenuStore(
+    (state) => state.byPane[focusedPaneId] ?? EMPTY_MENUS
+  );
+
+  return (
+    <nav className="flex min-w-0 items-center gap-0.5 justify-self-start">
+      {menus.map((menu) => (
+        <Menu key={menu.label} label={menu.label} items={menu.items} />
+      ))}
+    </nav>
+  );
+}
+
+/** Isolated so its one-second tick does not re-render the global menus. */
+function StatusTime() {
+  const connectedAt = useAppStore(
+    (state) => state.connection?.connectedAt ?? null
+  );
+  const showSeconds = useSettings((state) => state.settings.clockShowSeconds);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <>
+      {connectedAt !== null && (
+        <span className="text-slate-400" title="세션 경과 시간">
+          ⏱ {formatElapsed(now - connectedAt)}
+        </span>
+      )}
+      <span className="tabular-nums text-slate-300" title="로컬 시각">
+        {formatClock(new Date(now), showSeconds)}
+      </span>
+    </>
   );
 }
 
