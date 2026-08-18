@@ -12,6 +12,31 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionManager::new())
+        .setup(|app| {
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::Manager;
+                use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+                use windows_core::Interface;
+
+                if let Some(window) = app.get_webview_window("main") {
+                    window.with_webview(|webview| unsafe {
+                        // Ctrl+Shift+C is a WebView2 developer-tools accelerator.
+                        // Disable browser-only accelerators so terminal shortcuts
+                        // are delivered to xterm instead.
+                        if let Ok(core) = webview.controller().CoreWebView2() {
+                            if let Ok(settings) = core.Settings() {
+                                if let Ok(settings) = settings.cast::<ICoreWebView2Settings3>() {
+                                    let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
+                                }
+                            }
+                        }
+                    })?;
+                }
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             ssh::connect,
             ssh::list_dir,

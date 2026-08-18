@@ -140,14 +140,7 @@ export default function TerminalPane({ id }: { id: string }) {
       });
     });
 
-    openTerminal(id, term.cols, term.rows)
-      .then(() => {
-        // Inject the shell-integration setup once the shell is ready.
-        writeTerminal(
-          id,
-          Array.from(encoder.encode(SHELL_INTEGRATION_SETUP))
-        ).catch(() => {});
-      })
+    openTerminal(id, term.cols, term.rows, SHELL_INTEGRATION_SETUP)
       .catch(() => {
         if (!disposed)
           term.write("\r\n\x1b[31m터미널을 열지 못했어요.\x1b[0m\r\n");
@@ -158,21 +151,37 @@ export default function TerminalPane({ id }: { id: string }) {
       writeTerminal(id, Array.from(encoder.encode(data))).catch(() => {});
     });
 
-    // Copy (Ctrl+Shift+C) / paste (Ctrl+Shift+V).
+    // Terminal clipboard shortcuts. Consume the DOM event explicitly so the
+    // WebView cannot also run its browser shortcut or dispatch a second paste.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
-      if (e.ctrlKey && e.shiftKey && e.code === "KeyC") {
+
+      const copyShortcut =
+        (e.ctrlKey && e.shiftKey && e.code === "KeyC") ||
+        (e.ctrlKey && !e.shiftKey && e.code === "Insert");
+      const pasteShortcut =
+        (e.ctrlKey && e.shiftKey && e.code === "KeyV") ||
+        (!e.ctrlKey && e.shiftKey && e.code === "Insert");
+
+      if (copyShortcut) {
+        e.preventDefault();
+        e.stopPropagation();
         const sel = term.getSelection();
-        if (sel) void navigator.clipboard.writeText(sel);
+        if (sel) void navigator.clipboard.writeText(sel).catch(() => {});
         return false;
       }
-      if (e.ctrlKey && e.shiftKey && e.code === "KeyV") {
+
+      if (pasteShortcut) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.repeat) return false;
+
         void navigator.clipboard.readText().then((text) => {
-          if (text)
-            writeTerminal(id, Array.from(encoder.encode(text))).catch(() => {});
-        });
+          if (text && !disposed) term.paste(text);
+        }).catch(() => {});
         return false;
       }
+
       return true;
     });
 

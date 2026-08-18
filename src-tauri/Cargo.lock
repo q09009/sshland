@@ -2878,6 +2878,8 @@ dependencies = [
  "tauri-plugin-dialog",
  "tokio",
  "toml 0.8.2",
+ "webview2-com",
+ "windows-core 0.61.2",
 ]
 
 [[package]]

@@ -21,7 +21,7 @@ import type { IDisposable, IMarker, Terminal } from "@xterm/xterm";
  * guard is what keeps the C marker to exactly one emit per command.
  */
 export const SHELL_INTEGRATION_SETUP =
-  String.raw`__ssl_pe(){ if [ -n "$__ssl_a" ]; then printf '\033]133;C\007'; __ssl_a=; fi; }; __ssl_pc(){ local s=$?; printf '\033]133;D;%s\007' "$s"; printf '\033]133;A\007'; __ssl_a=1; }; PROMPT_COMMAND='__ssl_pc'; PS1="$PS1"'\[\e]133;B\a\]'; trap '__ssl_pe' DEBUG` +
+  String.raw`stty echo 2>/dev/null; printf '\033[2K\r'; __ssl_pe(){ if [ -n "$__ssl_a" ]; then printf '\033]133;C\007'; __ssl_a=; fi; }; __ssl_pc(){ local s=$?; printf '\033]133;D;%s\007' "$s"; printf '\033]133;A\007'; __ssl_a=1; }; PROMPT_COMMAND='__ssl_pc'; PS1="$PS1"'\[\e]133;B\a\]'; trap '__ssl_pe' DEBUG` +
   "\n";
 
 /** One captured command: what was typed, its output, and its exit code. */

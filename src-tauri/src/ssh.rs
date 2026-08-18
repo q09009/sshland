@@ -16,7 +16,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use ssh2::{Channel, OpenFlags, OpenType, Session, Sftp};
+use ssh2::{Channel, OpenFlags, OpenType, PtyModeOpcode, PtyModes, Session, Sftp};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::oneshot;
 
@@ -211,6 +211,7 @@ pub enum Req {
         id: String,
         cols: u16,
         rows: u16,
+        setup: String,
         resp: oneshot::Sender<Result<(), String>>,
     },
     /// Send keystrokes/input to a terminal's shell (fire-and-forget).
@@ -783,20 +784,26 @@ fn exec_capture(session: &Session, command: &str) -> Result<String, String> {
 }
 
 /// Open a new PTY shell channel on the existing session.
-fn open_shell(session: &Session, cols: u16, rows: u16) -> Result<Channel, String> {
+fn open_shell(session: &Session, cols: u16, rows: u16, setup: &str) -> Result<Channel, String> {
     let mut channel = session
         .channel_session()
         .map_err(|_| "터미널을 열 수 없어요.".to_string())?;
+    let mut pty_modes = PtyModes::new();
+    pty_modes.set_boolean(PtyModeOpcode::ECHO, false);
     channel
         .request_pty(
             "xterm-256color",
-            None,
+            Some(pty_modes),
             Some((cols as u32, rows as u32, 0, 0)),
         )
         .map_err(|_| "터미널을 준비하지 못했어요.".to_string())?;
     channel
         .shell()
         .map_err(|_| "셸을 시작하지 못했어요.".to_string())?;
+    channel
+        .write_all(setup.as_bytes())
+        .and_then(|_| channel.flush())
+        .map_err(|_| "터미널을 초기화하지 못했어요.".to_string())?;
     Ok(channel)
 }
 
@@ -892,9 +899,10 @@ fn handle_req(
             id,
             cols,
             rows,
+            setup,
             resp,
         } => {
-            match open_shell(session, cols, rows) {
+            match open_shell(session, cols, rows, &setup) {
                 Ok(channel) => {
                     terminals.insert(id, channel);
                     let _ = resp.send(Ok(()));
@@ -1325,12 +1333,14 @@ pub async fn open_terminal(
     id: String,
     cols: u16,
     rows: u16,
+    setup: String,
 ) -> Result<(), String> {
     let (resp_tx, resp_rx) = oneshot::channel();
     state.send(Req::OpenTerminal {
         id,
         cols,
         rows,
+        setup,
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?

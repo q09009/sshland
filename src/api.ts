@@ -178,9 +178,10 @@ export interface TransferProgress {
 export function openTerminal(
   id: string,
   cols: number,
-  rows: number
+  rows: number,
+  setup: string
 ): Promise<void> {
-  return invoke<void>("open_terminal", { id, cols, rows });
+  return invoke<void>("open_terminal", { id, cols, rows, setup });
 }
 
 /** Send input bytes (keystrokes) to a terminal. */
