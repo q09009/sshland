@@ -468,53 +468,6 @@ export default function EditorPane({
     view.focus();
   };
 
-  const copySelection = async (cut: boolean) => {
-    const view = viewRef.current;
-    if (!view) return;
-    const ranges = view.state.selection.ranges.filter((range) => !range.empty);
-    const currentLine = view.state.doc.lineAt(view.state.selection.main.head);
-    const text =
-      ranges.length > 0
-        ? ranges
-            .map((range) => view.state.sliceDoc(range.from, range.to))
-            .join("\n")
-        : `${currentLine.text}\n`;
-    setActionError(null);
-    try {
-      await navigator.clipboard.writeText(text);
-      if (cut && ranges.length > 0) {
-        view.dispatch(view.state.replaceSelection(""));
-      } else if (cut) {
-        const from =
-          currentLine.to === view.state.doc.length && currentLine.from > 0
-            ? currentLine.from - 1
-            : currentLine.from;
-        const to =
-          currentLine.to < view.state.doc.length
-            ? currentLine.to + 1
-            : currentLine.to;
-        view.dispatch({ changes: { from, to } });
-      }
-    } catch {
-      setActionError("클립보드에 접근하지 못했어요.");
-    } finally {
-      view.focus();
-    }
-  };
-
-  const pasteClipboard = async () => {
-    const view = viewRef.current;
-    if (!view) return;
-    setActionError(null);
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) view.dispatch(view.state.replaceSelection(text));
-    } catch {
-      setActionError("클립보드 내용을 읽지 못했어요.");
-    } finally {
-      view.focus();
-    }
-  };
   // Editing tools only make sense once the doc is actually loaded.
   const ready = !loading && !error;
 
@@ -531,12 +484,6 @@ export default function EditorPane({
       onClick: requestReload,
       disabled: !ready || saving || reloading,
     },
-    { type: "separator" },
-    {
-      label: "pane 닫기",
-      shortcut: "Alt+Shift+W",
-      onClick: () => requestClose(id),
-    },
   ];
   const editMenu: DropItem[] = [
     {
@@ -552,24 +499,6 @@ export default function EditorPane({
       disabled: !ready,
     },
     { type: "separator" },
-    {
-      label: "잘라내기",
-      shortcut: "Ctrl+X",
-      onClick: () => void copySelection(true),
-      disabled: !ready,
-    },
-    {
-      label: "복사",
-      shortcut: "Ctrl+C",
-      onClick: () => void copySelection(false),
-      disabled: !ready,
-    },
-    {
-      label: "붙여넣기",
-      shortcut: "Ctrl+V",
-      onClick: () => void pasteClipboard(),
-      disabled: !ready,
-    },
     {
       label: "모두 선택",
       shortcut: "Ctrl+A",
