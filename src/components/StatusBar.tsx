@@ -168,8 +168,8 @@ function parseServerClock(
 /**
  * The connected server, centered — a status dot + `user@host` in mono.
  * Isolated so its one-second clock tick does not re-render the global menus.
- * Clicking it samples the server's clock once and opens a popover with that
- * server time, session elapsed, and a connection-wide disconnect action.
+ * Each SSH connection samples the server clock once; clicking opens a popover
+ * that advances the cached time locally alongside the elapsed session time.
  */
 function ConnectionInfo() {
   const connection = useAppStore((s) => s.connection);
@@ -181,6 +181,10 @@ function ConnectionInfo() {
   const [now, setNow] = useState(() => Date.now());
   const [serverClock, setServerClock] = useState<ServerClockSample | null>(null);
   const [serverClockFailed, setServerClockFailed] = useState(false);
+  const serverClockRequestRef = useRef<{
+    connectionStartedAt: number;
+    request: Promise<ServerClockSample>;
+  } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -201,22 +205,34 @@ function ConnectionInfo() {
   }, [open]);
 
   useEffect(() => {
-    if (!open || !connection) return;
+    if (!connection) {
+      setServerClock(null);
+      setServerClockFailed(false);
+      return;
+    }
 
     let active = true;
     setServerClock(null);
     setServerClockFailed(false);
-    const requestStartedAt = Date.now();
+    let cachedRequest = serverClockRequestRef.current;
 
-    void pollWidgetCommand(SERVER_CLOCK_COMMAND)
-      .then((output) => {
+    if (cachedRequest?.connectionStartedAt !== connection.connectedAt) {
+      const requestStartedAt = Date.now();
+      const request = pollWidgetCommand(SERVER_CLOCK_COMMAND).then((output) => {
         const sample = parseServerClock(output, requestStartedAt, Date.now());
-        if (!active) return;
-        if (sample) {
-          setServerClock(sample);
-        } else {
-          setServerClockFailed(true);
-        }
+        if (!sample) throw new Error("Invalid server clock response");
+        return sample;
+      });
+      cachedRequest = {
+        connectionStartedAt: connection.connectedAt,
+        request,
+      };
+      serverClockRequestRef.current = cachedRequest;
+    }
+
+    void cachedRequest.request
+      .then((sample) => {
+        if (active) setServerClock(sample);
       })
       .catch(() => {
         if (active) setServerClockFailed(true);
@@ -225,7 +241,7 @@ function ConnectionInfo() {
     return () => {
       active = false;
     };
-  }, [open, connection]);
+  }, [connection]);
 
   async function handleDisconnect() {
     setOpen(false);
