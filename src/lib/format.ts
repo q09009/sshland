@@ -38,6 +38,18 @@ export function formatClock(d: Date, showSeconds: boolean): string {
   return showSeconds ? `${base}:${pad(d.getSeconds())}` : base;
 }
 
+/** Format a Unix time using an explicit UTC offset instead of the local OS zone. */
+export function formatClockAtOffset(
+  unixMs: number,
+  utcOffsetMinutes: number,
+  showSeconds: boolean
+): string {
+  const d = new Date(unixMs + utcOffsetMinutes * 60_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const base = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  return showSeconds ? `${base}:${pad(d.getUTCSeconds())}` : base;
+}
+
 /** Format a Unix timestamp (seconds) as "YYYY-MM-DD HH:mm". */
 export function formatDate(unixSeconds: number | null | undefined): string {
   if (!unixSeconds) return "-";

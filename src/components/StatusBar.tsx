@@ -1,44 +1,108 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { disconnect, pollWidgetCommand } from "../api";
 import { useAppStore, ConnectionStatus } from "../store";
 import { useSettings } from "../lib/settings";
-import { formatClock, formatElapsed } from "../lib/format";
+import { formatClockAtOffset, formatElapsed } from "../lib/format";
 import { usePaneMenuStore } from "../lib/paneMenus";
 import Menu from "./Menu";
 
 /**
  * App-wide top bar. Contextual menus on the left target the focused pane, the
- * connection stays geometrically centered, and local time/settings sit right.
+ * connection stays geometrically centered, and transient transfer progress
+ * plus settings sit right.
  */
 export default function StatusBar() {
-  const connection = useAppStore((s) => s.connection);
-  const status = useAppStore((s) => s.connectionStatus);
-  const openSettings = useAppStore((s) => s.openSettings);
-
   return (
     <header className="grid h-8 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-ink-700/70 bg-ink-800 px-2 text-xs text-slate-300 select-none">
       <GlobalPaneMenus />
-
-      <div className="flex min-w-0 items-center gap-3 justify-self-center px-3">
-        {connection && (
-          <span className="max-w-56 truncate font-medium text-slate-200">
-            {connection.username}@{connection.host}
-          </span>
-        )}
-        <StatusIndicator status={status} />
-      </div>
-
+      <ConnectionInfo />
       <div className="flex items-center gap-3 justify-self-end">
-        <StatusTime />
-        <button
-          onClick={openSettings}
-          title="설정"
-          aria-label="설정"
-          className="rounded p-1 text-slate-400 hover:bg-ink-700 hover:text-slate-100"
-        >
-          <GearIcon />
-        </button>
+        <TransferStatus />
+        <SettingsButton />
       </div>
     </header>
+  );
+}
+
+function TransferStatus() {
+  const transfers = useAppStore((s) => s.transfers);
+  const batches = useAppStore((s) => s.uploadBatches);
+  const activeTransfers = transfers.filter(
+    (transfer) => transfer.status === "active"
+  );
+  const activeBatches = batches.filter((batch) => batch.done < batch.total);
+
+  if (activeTransfers.length === 0 && activeBatches.length === 0) return null;
+
+  const knownTransfers = activeTransfers.filter(
+    (transfer) => transfer.total > 0
+  );
+  const transferredBytes = knownTransfers.reduce(
+    (sum, transfer) => sum + Math.min(transfer.transferred, transfer.total),
+    0
+  );
+  const totalBytes = knownTransfers.reduce(
+    (sum, transfer) => sum + transfer.total,
+    0
+  );
+  const batch = activeBatches[0];
+
+  const percent =
+    totalBytes > 0
+      ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100))
+      : activeTransfers.length === 0 && batch && batch.total > 0
+        ? Math.min(100, Math.round((batch.done / batch.total) * 100))
+        : null;
+
+  const singleTransfer =
+    activeTransfers.length === 1 ? activeTransfers[0] : null;
+  const label = singleTransfer
+    ? `${singleTransfer.kind === "upload" ? "↑" : "↓"} ${singleTransfer.name}`
+    : activeTransfers.length > 1
+      ? `${activeTransfers.length}개 전송`
+      : batch
+        ? `업로드 ${batch.done}/${batch.total}`
+        : "전송 중";
+
+  return (
+    <div
+      className="flex max-w-52 items-center gap-2 text-slate-400"
+      title={label}
+      aria-label={`${label}${percent === null ? "" : ` ${percent}%`}`}
+    >
+      <span className="max-w-28 truncate">{label}</span>
+      <span
+        className="h-1 w-14 shrink-0 overflow-hidden rounded-full bg-ink-900"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent ?? undefined}
+      >
+        <span
+          className={`block h-full rounded-full bg-sky-500 transition-[width] ${
+            percent === null ? "w-1/3 animate-pulse" : ""
+          }`}
+          style={percent === null ? undefined : { width: `${percent}%` }}
+        />
+      </span>
+      <span className="w-8 shrink-0 text-right font-mono text-2xs text-slate-500">
+        {percent === null ? "…" : `${percent}%`}
+      </span>
+    </div>
+  );
+}
+
+function SettingsButton() {
+  const openSettings = useAppStore((s) => s.openSettings);
+  return (
+    <button
+      onClick={openSettings}
+      title="설정"
+      aria-label="설정"
+      className="rounded p-1 text-slate-400 hover:bg-ink-700 hover:text-slate-100"
+    >
+      <GearIcon />
+    </button>
   );
 }
 
@@ -59,53 +123,188 @@ function GlobalPaneMenus() {
   );
 }
 
-/** Isolated so its one-second tick does not re-render the global menus. */
-function StatusTime() {
-  const connectedAt = useAppStore(
-    (state) => state.connection?.connectedAt ?? null
-  );
-  const showSeconds = useSettings((state) => state.settings.clockShowSeconds);
+const DOT_META: Record<ConnectionStatus, { color: string; pulse?: boolean }> = {
+  connected: { color: "bg-emerald-500" },
+  reconnecting: { color: "bg-amber-400", pulse: true },
+  disconnected: { color: "bg-red-500" },
+};
+
+const SERVER_CLOCK_COMMAND = "date '+%s %z'";
+
+interface ServerClockSample {
+  /** Difference between the remote Unix clock and the local wall clock. */
+  epochDeltaMs: number;
+  /** Remote UTC offset, including daylight-saving time, at sampling time. */
+  utcOffsetMinutes: number;
+}
+
+function parseServerClock(
+  output: string,
+  requestStartedAt: number,
+  requestFinishedAt: number
+): ServerClockSample | null {
+  const match = output.trim().match(/(\d{9,})\s+([+-])(\d{2})(\d{2})/);
+  if (!match) return null;
+
+  const epochSeconds = Number(match[1]);
+  const offsetHours = Number(match[3]);
+  const offsetMinutes = Number(match[4]);
+  if (
+    !Number.isSafeInteger(epochSeconds) ||
+    offsetHours > 23 ||
+    offsetMinutes > 59
+  ) {
+    return null;
+  }
+
+  const sign = match[2] === "-" ? -1 : 1;
+  const requestMidpoint = Math.round((requestStartedAt + requestFinishedAt) / 2);
+  return {
+    epochDeltaMs: epochSeconds * 1000 - requestMidpoint,
+    utcOffsetMinutes: sign * (offsetHours * 60 + offsetMinutes),
+  };
+}
+
+/**
+ * The connected server, centered — a status dot + `user@host` in mono.
+ * Isolated so its one-second clock tick does not re-render the global menus.
+ * Clicking it samples the server's clock once and opens a popover with that
+ * server time, session elapsed, and a connection-wide disconnect action.
+ */
+function ConnectionInfo() {
+  const connection = useAppStore((s) => s.connection);
+  const status = useAppStore((s) => s.connectionStatus);
+  const returnToConnect = useAppStore((s) => s.returnToConnect);
+  const showSeconds = useSettings((s) => s.settings.clockShowSeconds);
+
+  const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [serverClock, setServerClock] = useState<ServerClockSample | null>(null);
+  const [serverClockFailed, setServerClockFailed] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!open) return;
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !connection) return;
+
+    let active = true;
+    setServerClock(null);
+    setServerClockFailed(false);
+    const requestStartedAt = Date.now();
+
+    void pollWidgetCommand(SERVER_CLOCK_COMMAND)
+      .then((output) => {
+        const sample = parseServerClock(output, requestStartedAt, Date.now());
+        if (!active) return;
+        if (sample) {
+          setServerClock(sample);
+        } else {
+          setServerClockFailed(true);
+        }
+      })
+      .catch(() => {
+        if (active) setServerClockFailed(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [open, connection]);
+
+  async function handleDisconnect() {
+    setOpen(false);
+    try {
+      await disconnect();
+    } finally {
+      returnToConnect();
+    }
+  }
+
+  const dot = DOT_META[status];
+  const serverTime = serverClock
+    ? formatClockAtOffset(
+        now + serverClock.epochDeltaMs,
+        serverClock.utcOffsetMinutes,
+        showSeconds
+      )
+    : serverClockFailed
+      ? "확인할 수 없음"
+      : "불러오는 중…";
 
   return (
-    <>
-      {connectedAt !== null && (
-        <span className="text-slate-400" title="세션 경과 시간">
-          ⏱ {formatElapsed(now - connectedAt)}
-        </span>
+    <div ref={ref} className="relative min-w-0 justify-self-center">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={!connection}
+        className="flex min-w-0 items-center gap-2 rounded px-2 py-0.5 hover:bg-ink-700 disabled:hover:bg-transparent"
+      >
+        <span
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot.color} ${
+            dot.pulse ? "animate-pulse" : ""
+          }`}
+        />
+        {connection && (
+          <span className="max-w-56 truncate font-mono text-slate-200">
+            {connection.username}@{connection.host}
+          </span>
+        )}
+      </button>
+
+      {open && connection && (
+        <div className="absolute left-1/2 top-full z-40 mt-1.5 w-56 -translate-x-1/2 rounded-lg border border-ink-700 bg-ink-800 p-3 text-xs shadow-2xl">
+          <Row label="서버 시각" value={serverTime} />
+          <Row
+            label="경과"
+            value={formatElapsed(now - connection.connectedAt)}
+            last
+          />
+          <hr className="hr my-2.5" />
+          <button
+            onClick={() => void handleDisconnect()}
+            className="text-left text-red-400 hover:text-red-300"
+          >
+            연결 종료
+          </button>
+        </div>
       )}
-      <span className="tabular-nums text-slate-300" title="로컬 시각">
-        {formatClock(new Date(now), showSeconds)}
-      </span>
-    </>
+    </div>
   );
 }
 
-const STATUS_META: Record<
-  ConnectionStatus,
-  { label: string; dot: string; pulse?: boolean }
-> = {
-  connected: { label: "연결됨", dot: "bg-emerald-500" },
-  reconnecting: { label: "재연결 중", dot: "bg-amber-400", pulse: true },
-  disconnected: { label: "끊김", dot: "bg-red-500" },
-};
-
-function StatusIndicator({ status }: { status: ConnectionStatus }) {
-  const meta = STATUS_META[status];
+function Row({
+  label,
+  value,
+  last,
+}: {
+  label: string;
+  value: string;
+  last?: boolean;
+}) {
   return (
-    <span className="flex items-center gap-1.5 text-slate-400">
-      <span
-        className={`h-2 w-2 rounded-full ${meta.dot} ${
-          meta.pulse ? "animate-pulse" : ""
-        }`}
-      />
-      {meta.label}
-    </span>
+    <div
+      className={`flex items-center justify-between text-slate-400 ${
+        last ? "" : "mb-1.5"
+      }`}
+    >
+      <span>{label}</span>
+      <span className="text-slate-200">{value}</span>
+    </div>
   );
 }
 

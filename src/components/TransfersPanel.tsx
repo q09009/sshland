@@ -7,19 +7,23 @@ const AUTO_DISMISS_MS = 3000;
 /** Fade-out transition duration; must match the CSS duration below. */
 const FADE_MS = 300;
 
-/** Bottom-right panel showing active and finished file transfers. */
+/** Bottom-right completion/error toasts; active progress lives in StatusBar. */
 export default function TransfersPanel() {
   const transfers = useAppStore((s) => s.transfers);
   const batches = useAppStore((s) => s.uploadBatches);
+  const visibleTransfers = transfers.filter(
+    (transfer) => transfer.status !== "active"
+  );
+  const visibleBatches = batches.filter((batch) => batch.done >= batch.total);
 
-  if (transfers.length === 0 && batches.length === 0) return null;
+  if (visibleTransfers.length === 0 && visibleBatches.length === 0) return null;
 
   return (
     <div className="pointer-events-none fixed bottom-4 right-4 z-30 flex w-80 flex-col gap-2">
-      {batches.map((b) => (
+      {visibleBatches.map((b) => (
         <BatchCard key={b.id} batch={b} />
       ))}
-      {transfers.map((t) => (
+      {visibleTransfers.map((t) => (
         <TransferCard key={t.id} transfer={t} />
       ))}
     </div>
