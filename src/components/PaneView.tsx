@@ -24,10 +24,10 @@ export default function PaneView({ node }: { node: PaneNode }) {
   const { leaves, dividers } = useMemo(() => collectLayout(node), [node]);
 
   return (
-    <div className="relative h-full w-full">
-      {leaves.map(({ node: leaf, rect }) => (
-        <div key={leaf.id} className="absolute" style={pctStyle(rect)}>
-          <Leaf node={leaf} />
+    <div className="relative h-full w-full overflow-hidden bg-ink-900">
+      {leaves.map(({ node: leaf, rect }, i) => (
+        <div key={leaf.id} className="absolute" style={paneStyle(rect)}>
+          <Leaf node={leaf} index={i + 1} />
         </div>
       ))}
       {dividers.map((d) => (
@@ -37,12 +37,36 @@ export default function PaneView({ node }: { node: PaneNode }) {
   );
 }
 
-function pctStyle(rect: Rect) {
+const EDGE_EPSILON = 0.000001;
+
+function startInset(position: number) {
+  return position <= EDGE_EPSILON
+    ? "var(--space-pane-edge)"
+    : "var(--space-pane-half-gap)";
+}
+
+function endInset(position: number) {
+  return position >= 1 - EDGE_EPSILON
+    ? "var(--space-pane-edge)"
+    : "var(--space-pane-half-gap)";
+}
+
+/**
+ * Keep the pane tree's normalized geometry intact while insetting each visual
+ * surface. Adjacent panes each contribute half the gap; outer panes use the
+ * full edge spacing token.
+ */
+function paneStyle(rect: Rect) {
+  const leftInset = startInset(rect.x);
+  const topInset = startInset(rect.y);
+  const rightInset = endInset(rect.x + rect.w);
+  const bottomInset = endInset(rect.y + rect.h);
+
   return {
-    left: `${rect.x * 100}%`,
-    top: `${rect.y * 100}%`,
-    width: `${rect.w * 100}%`,
-    height: `${rect.h * 100}%`,
+    left: `calc(${rect.x * 100}% + ${leftInset})`,
+    top: `calc(${rect.y * 100}% + ${topInset})`,
+    width: `calc(${rect.w * 100}% - ${leftInset} - ${rightInset})`,
+    height: `calc(${rect.h * 100}% - ${topInset} - ${bottomInset})`,
   };
 }
 
@@ -80,16 +104,24 @@ function Divider({ layout }: { layout: DividerLayout }) {
   const style = horizontal
     ? {
         left: `${layout.x * 100}%`,
-        top: `${layout.parentRect.y * 100}%`,
-        height: `${layout.parentRect.h * 100}%`,
-        width: 6,
+        top: `calc(${layout.parentRect.y * 100}% + ${startInset(
+          layout.parentRect.y
+        )})`,
+        height: `calc(${layout.parentRect.h * 100}% - ${startInset(
+          layout.parentRect.y
+        )} - ${endInset(layout.parentRect.y + layout.parentRect.h)})`,
+        width: "var(--space-pane-gap)",
         transform: "translateX(-50%)",
       }
     : {
         top: `${layout.y * 100}%`,
-        left: `${layout.parentRect.x * 100}%`,
-        width: `${layout.parentRect.w * 100}%`,
-        height: 6,
+        left: `calc(${layout.parentRect.x * 100}% + ${startInset(
+          layout.parentRect.x
+        )})`,
+        width: `calc(${layout.parentRect.w * 100}% - ${startInset(
+          layout.parentRect.x
+        )} - ${endInset(layout.parentRect.x + layout.parentRect.w)})`,
+        height: "var(--space-pane-gap)",
         transform: "translateY(-50%)",
       };
 
@@ -100,7 +132,9 @@ function Divider({ layout }: { layout: DividerLayout }) {
         style={style}
         className={`absolute z-10 ${
           horizontal ? "cursor-col-resize" : "cursor-row-resize"
-        } ${dragging ? "bg-sky-500" : "bg-ink-700 hover:bg-sky-500"}`}
+        } transition-colors ${
+          dragging ? "bg-sky-500/70" : "bg-transparent hover:bg-sky-500/35"
+        }`}
       />
       {dragging && (
         <div
@@ -112,7 +146,7 @@ function Divider({ layout }: { layout: DividerLayout }) {
   );
 }
 
-function Leaf({ node }: { node: LeafNode }) {
+function Leaf({ node, index }: { node: LeafNode; index: number }) {
   const focused = useAppStore((s) => s.focusedPaneId === node.id);
   const setFocus = useAppStore((s) => s.setFocus);
   // The editor provides its own metadata header, so it skips the generic
@@ -122,16 +156,20 @@ function Leaf({ node }: { node: LeafNode }) {
   return (
     <div
       onMouseDownCapture={() => setFocus(node.id)}
-      className={`flex h-full w-full flex-col overflow-hidden border-2 ${
-        focused ? "border-sky-500" : "border-transparent"
-      }`}
+      data-focused={focused}
+      className="pane-surface flex h-full w-full flex-col overflow-hidden"
     >
-      {!isEditor && <PaneHeader node={node} />}
+      {!isEditor && <PaneHeader node={node} index={index} focused={focused} />}
       <div className="min-h-0 flex-1 overflow-hidden">
         {node.content === "file-manager" ? (
           <FilesScreen id={node.id} />
         ) : node.content === "editor" ? (
-          <EditorPane id={node.id} filePath={node.filePath ?? ""} />
+          <EditorPane
+            id={node.id}
+            filePath={node.filePath ?? ""}
+            index={index}
+            focused={focused}
+          />
         ) : node.content === "dashboard" ? (
           <DashboardPane id={node.id} />
         ) : (
@@ -143,7 +181,15 @@ function Leaf({ node }: { node: LeafNode }) {
 }
 
 /** Slim per-pane title bar with content-switch and close controls. */
-function PaneHeader({ node }: { node: LeafNode }) {
+function PaneHeader({
+  node,
+  index,
+  focused,
+}: {
+  node: LeafNode;
+  index: number;
+  focused: boolean;
+}) {
   const setPaneContent = useAppStore((s) => s.setPaneContent);
   const requestClose = useAppStore((s) => s.requestClose);
   const canClose = useAppStore((s) => leafCount(s.paneTree) > 1);
@@ -151,21 +197,21 @@ function PaneHeader({ node }: { node: LeafNode }) {
   const isFm = node.content === "file-manager";
   const isDashboard = node.content === "dashboard";
 
-  const label = isFm
-    ? "📁 파일관리자"
-    : isDashboard
-      ? "📊 대시보드"
-      : "❯_ 터미널";
+  const label = isFm ? "파일관리자" : isDashboard ? "대시보드" : "터미널";
 
   return (
-    <div className="flex h-7 shrink-0 items-center justify-between border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
-      <span className="select-none">{label}</span>
+    <div className="flex h-7 shrink-0 items-center justify-between border-b border-ink-700/60 bg-ink-800 pl-2.5 pr-1 text-xs text-slate-400">
+      <span className="flex items-center gap-1.5 select-none">
+        {focused && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" />}
+        <span className="font-medium text-slate-300">{label}</span>
+        <span className="font-mono text-2xs text-slate-500">.{index}</span>
+      </span>
       <span className="flex items-center gap-0.5">
         {isDashboard ? (
           <button
             onClick={() => setPaneContent(node.id, "file-manager")}
             title="파일관리자로 전환"
-            className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+            className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
           >
             📁
           </button>
@@ -176,7 +222,7 @@ function PaneHeader({ node }: { node: LeafNode }) {
                 setPaneContent(node.id, isFm ? "terminal" : "file-manager")
               }
               title={isFm ? "터미널로 전환" : "파일관리자로 전환"}
-              className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+              className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
             >
               ⇄
             </button>
@@ -184,7 +230,7 @@ function PaneHeader({ node }: { node: LeafNode }) {
               <button
                 onClick={() => setPaneContent(node.id, "dashboard")}
                 title="대시보드로 전환"
-                className="rounded px-1.5 py-0.5 hover:bg-ink-700 hover:text-slate-100"
+                className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
               >
                 📊
               </button>
@@ -195,7 +241,7 @@ function PaneHeader({ node }: { node: LeafNode }) {
           onClick={() => requestClose(node.id)}
           disabled={!canClose}
           title="pane 닫기"
-          className="rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-30 disabled:hover:bg-transparent"
+          className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-30 disabled:hover:bg-transparent"
         >
           ✕
         </button>

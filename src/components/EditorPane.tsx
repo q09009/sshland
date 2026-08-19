@@ -68,9 +68,13 @@ import { usePaneMenuRegistration } from "../lib/paneMenus";
 export default function EditorPane({
   id,
   filePath,
+  index,
+  focused,
 }: {
   id: string;
   filePath: string;
+  index?: number;
+  focused?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -609,7 +613,11 @@ export default function EditorPane({
     <div className="flex h-full w-full flex-col bg-ink-900">
       <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
         <span className="flex min-w-0 items-center gap-1.5" title={filePath}>
-          <span className="truncate">📝 {name}</span>
+          {focused && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" />}
+          <span className="truncate font-medium text-slate-300">{name}</span>
+          {index !== undefined && (
+            <span className="font-mono text-2xs text-slate-500">.{index}</span>
+          )}
           {dirty && (
             <span className="text-amber-400" title="저장하지 않은 변경사항">
               ●

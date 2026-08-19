@@ -16,30 +16,36 @@
  * for `bg-sky-500/20`.
  */
 :root {
-  /* --- Neutral surfaces (custom "ink" scale) --- */
-  --color-ink-900: 15 23 42;
-  --color-ink-800: 30 41 59;
-  --color-ink-700: 51 65 85;
-  --color-ink-600: 71 85 105;
+  /* --- Neutral surfaces (custom "ink" scale) ---
+     Repointed to the Nocturne design system (claude.ai/design import,
+     "sshland-workspace-concepts" E — final direction): ink-900 = Nocturne
+     --color-bg (#161826), ink-800 = --color-surface (#232532), ink-700/600 =
+     the neutral-800/700 ramp steps. Names/classes unchanged — only values
+     moved, per the "future redesign only touches :root" rule below. */
+  --color-ink-900: 22 24 38;
+  --color-ink-800: 35 37 50;
+  --color-ink-700: 63 66 77;
+  --color-ink-600: 89 93 108;
 
-  /* --- Text / neutral foreground (slate) --- */
-  --color-slate-100: 241 245 249;
-  --color-slate-200: 226 232 240;
-  --color-slate-300: 203 213 225;
-  --color-slate-400: 148 163 184;
-  --color-slate-500: 100 116 139;
-  --color-slate-600: 71 85 105;
+  /* --- Text / neutral foreground (slate) — Nocturne --color-text + neutral ramp --- */
+  --color-slate-100: 233 233 237;
+  --color-slate-200: 228 231 245;
+  --color-slate-300: 207 211 229;
+  --color-slate-400: 147 151 171;
+  --color-slate-500: 117 121 140;
+  --color-slate-600: 89 93 108;
 
-  /* --- Accent (sky) --- */
-  --color-sky-200: 186 230 253;
-  --color-sky-300: 125 211 252;
-  --color-sky-400: 56 189 248;
-  --color-sky-500: 14 165 233;
-  --color-sky-600: 2 132 199;
-  --color-sky-950: 8 47 73;
+  /* --- Accent (sky) — Nocturne's blurple accent (--color-accent #9184d9)
+     and its accent-* ramp. --color-sky-500 carries the base accent. --- */
+  --color-sky-200: 231 229 254;
+  --color-sky-300: 210 206 253;
+  --color-sky-400: 181 171 252;
+  --color-sky-500: 145 132 217;
+  --color-sky-600: 121 108 191;
+  --color-sky-950: 43 39 65;
 
   /* --- Status --- */
-  --color-emerald-500: 16 185 129;
+  --color-emerald-500: 95 217 154; /* Nocturne's connected-dot green */
   --color-amber-400: 251 191 36;
   --color-red-200: 254 202 202;
   --color-red-300: 252 165 165;
@@ -49,8 +55,8 @@
   --color-red-950: 69 10 10;
 
   /* --- Typography --- */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Malgun Gothic",
-    sans-serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+    "Malgun Gothic", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
   /* Terminal (xterm) monospace stack — read from JS in TerminalPane. */
@@ -70,14 +76,23 @@
   --text-2xl: 1.5rem;
   --leading-2xl: 2rem;
 
-  /* --- Border radius (mirrors Tailwind defaults, centralized) --- */
+  /* --- Border radius --- calm, monotonic 8/10/12/16px surface scale. */
   --radius-sm: 0.125rem;
   --radius: 0.25rem;
-  --radius-md: 0.375rem;
-  --radius-lg: 0.5rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
   --radius-xl: 0.75rem;
   --radius-2xl: 1rem;
   --radius-full: 9999px;
+
+  /* --- Spatial pane system --- */
+  --space-pane-gap: 0.5rem;
+  --space-pane-half-gap: 0.25rem;
+  --space-pane-edge: 0.5rem;
+  --radius-pane: var(--radius-xl);
+  --shadow-pane-rest: 0 1px 2px rgb(0 0 0 / 0.18);
+  --shadow-pane-focus: 0 0 0 1px rgb(var(--color-sky-500) / 0.34),
+    0 8px 24px -16px rgb(var(--color-sky-500) / 0.72);
 }
 
 html,
@@ -97,6 +112,36 @@ body {
   outline: 2px solid rgb(var(--color-sky-400));
   outline-offset: -2px;
   background: rgb(var(--color-sky-400) / 0.12);
+}
+
+/* Spatial pane surfaces share one restrained hierarchy. Geometry remains in
+   PaneView so split ratios and live terminal instances are unaffected. */
+.pane-surface {
+  border: 1px solid rgb(var(--color-ink-700) / 0.72);
+  border-radius: var(--radius-pane);
+  background: rgb(var(--color-ink-900));
+  box-shadow: var(--shadow-pane-rest);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.pane-surface[data-focused="true"] {
+  border-color: rgb(var(--color-sky-500) / 0.9);
+  box-shadow: var(--shadow-pane-focus);
+}
+
+/* Fading rule — a Nocturne signature. `.hr` fades to transparent at both ends
+   instead of stopping cleanly, painted from the ink-700 divider token. */
+.hr {
+  height: 1px;
+  border: 0;
+  margin: 0.7rem 0;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgb(var(--color-ink-700)) 48px,
+    rgb(var(--color-ink-700)) calc(100% - 48px),
+    transparent
+  );
 }
 
 /* Slim, dark scrollbars to match the theme. */
