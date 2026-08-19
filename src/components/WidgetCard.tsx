@@ -13,11 +13,13 @@ import { ReorderItemProps } from "../lib/reorder";
 import { useAppStore } from "../store";
 import WidgetView from "./WidgetView";
 import { KillProcessDialog } from "./Modal";
+import {
+  DashboardCardAction,
+  DashboardCardBody,
+  DashboardCardFrame,
+  DashboardCardHeader,
+} from "./DashboardCardFrame";
 
-/** Grid column span per card size. */
-const SPAN: Record<WidgetSize, number> = { small: 1, medium: 2, large: 3 };
-/** Minimum card body height per size. */
-const MIN_H: Record<WidgetSize, number> = { small: 96, medium: 132, large: 184 };
 const SIZE_LABEL: Record<WidgetSize, string> = {
   small: "소",
   medium: "중",
@@ -100,8 +102,6 @@ export default function WidgetCard({
     return () => window.clearInterval(handle);
   }, [command, intervalSeconds]);
 
-  const spanStyle = { gridColumn: `span ${SPAN[instance.size]}` };
-
   const cycleSize = () => {
     const i = WIDGET_SIZES.indexOf(instance.size);
     setSize(instance.instanceId, WIDGET_SIZES[(i + 1) % WIDGET_SIZES.length]);
@@ -138,61 +138,45 @@ export default function WidgetCard({
   };
 
   return (
-    <div
-      ref={drag.itemRef}
-      style={spanStyle}
-      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border bg-ink-800 ${
-        drag.dropTarget
-          ? "border-sky-500"
-          : "border-ink-700/70"
-      } ${drag.dragging ? "opacity-40" : ""}`}
-    >
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-ink-700/60 px-1.5 text-xs text-slate-400">
-        <span
-          onMouseDown={drag.onHandleMouseDown}
-          title="드래그해서 위치 이동"
-          className="cursor-grab select-none px-0.5 text-slate-500 hover:text-slate-300 active:cursor-grabbing"
-        >
-          ⠿
-        </span>
-        <span className="truncate text-slate-300" title={config?.label}>
-          {config?.icon ? `${config.icon} ` : ""}
-          {config?.label ?? instance.widgetId}
-        </span>
-        {loading && <span className="text-2xs text-slate-600">…</span>}
-        <span className="ml-auto flex items-center gap-0.5">
+    <DashboardCardFrame size={instance.size} drag={drag}>
+      <DashboardCardHeader
+        drag={drag}
+        title={
+          <>
+            {config?.icon ? `${config.icon} ` : ""}
+            {config?.label ?? instance.widgetId}
+          </>
+        }
+        titleHint={config?.label}
+        busy={loading}
+      >
           <IntervalInput
             seconds={intervalSeconds}
             onCommit={(s) => setRefreshInterval(instance.instanceId, s)}
           />
-          <button
+          <DashboardCardAction
             onClick={cycleSize}
             title="카드 크기 변경"
-            className="rounded px-1 py-0.5 text-2xs hover:bg-ink-700 hover:text-slate-100"
+            className="text-2xs"
           >
             {SIZE_LABEL[instance.size]}
-          </button>
-          <button
+          </DashboardCardAction>
+          <DashboardCardAction
             onClick={() => pollRef.current()}
             title="지금 새로고침"
-            className="rounded px-1 py-0.5 hover:bg-ink-700 hover:text-slate-100"
           >
             ⟳
-          </button>
-          <button
+          </DashboardCardAction>
+          <DashboardCardAction
             onClick={() => removeWidget(instance.instanceId)}
             title="위젯 제거"
-            className="rounded px-1 py-0.5 hover:bg-red-500/20 hover:text-red-300"
+            danger
           >
             ✕
-          </button>
-        </span>
-      </div>
+          </DashboardCardAction>
+      </DashboardCardHeader>
 
-      <div
-        className="min-h-0 flex-1 overflow-auto p-2.5"
-        style={{ minHeight: MIN_H[instance.size] }}
-      >
+      <DashboardCardBody>
         {!config ? (
           <CardMessage tone="error">
             위젯 설정을 찾을 수 없어요. 제거하거나 설정 파일을 확인해주세요.
@@ -208,7 +192,7 @@ export default function WidgetCard({
             onKill={(pid, name) => setKillTarget({ pid, name })}
           />
         )}
-      </div>
+      </DashboardCardBody>
 
       {killTarget && (
         <KillProcessDialog
@@ -220,7 +204,7 @@ export default function WidgetCard({
           onCancel={() => setKillTarget(null)}
         />
       )}
-    </div>
+    </DashboardCardFrame>
   );
 }
 

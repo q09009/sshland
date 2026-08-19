@@ -4,6 +4,7 @@ import { useDashboardLayout } from "../lib/dashboardLayout";
 import { useSettings } from "../lib/settings";
 import { Macro, newMacro, useMacros } from "../lib/macros";
 import { useReorder } from "../lib/reorder";
+import { usePaneMenuRegistration } from "../lib/paneMenus";
 import WidgetCard from "./WidgetCard";
 import MacroCard from "./MacroCard";
 import WidgetPicker from "./WidgetPicker";
@@ -64,30 +65,39 @@ export default function DashboardPane({ id }: { id: string }) {
     setCreating(null);
   };
 
+  usePaneMenuRegistration(id, [
+    {
+      label: "위젯",
+      items: [
+        { label: "위젯 추가", onClick: () => setPickerOpen(true) },
+        { label: "새 매크로 만들기", onClick: handleCreateMacro },
+      ],
+    },
+  ]);
+
   return (
-    <div className="h-full w-full overflow-auto bg-ink-900 p-4" data-pane-id={id}>
+    <div
+      className="dashboard-canvas h-full w-full overflow-auto bg-ink-900"
+      data-pane-id={id}
+    >
       {widgets.length === 0 ? (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center">
-          <div className="text-4xl opacity-40 select-none">📊</div>
-          <p className="text-sm text-slate-400">아직 위젯이 없어요.</p>
-          <p className="text-2xs text-slate-500">
-            위젯이나 매크로를 추가해 서버를 한눈에 관리해보세요.
+        <div className="flex h-full w-full flex-col items-center justify-center text-center">
+          <DashboardMark />
+          <p className="mt-4 text-sm font-medium text-slate-300">
+            대시보드가 비어 있어요
+          </p>
+          <p className="mt-1 max-w-64 text-2xs leading-relaxed text-slate-500">
+            필요한 서버 상태만 골라 현재 작업 공간에 배치할 수 있어요.
           </p>
           <button
             onClick={() => setPickerOpen(true)}
-            className="mt-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500"
+            className="mt-4 rounded-lg border border-sky-500/70 px-3.5 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/10"
           >
-            ＋ 위젯 추가
+            위젯 추가
           </button>
         </div>
       ) : (
-        <div
-          className="grid gap-3"
-          style={{
-            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-            gridAutoRows: "min-content",
-          }}
-        >
+        <div className="dashboard-grid grid">
           {widgets.map((w, i) =>
             w.source === "macro" ? (
               <MacroCard key={w.instanceId} instance={w} drag={itemProps(i)} />
@@ -97,7 +107,7 @@ export default function DashboardPane({ id }: { id: string }) {
           )}
           <button
             onClick={() => setPickerOpen(true)}
-            className="flex min-h-[96px] items-center justify-center rounded-xl border border-dashed border-ink-700 text-sm text-slate-500 hover:border-sky-600/60 hover:text-slate-300"
+            className="dashboard-add-card flex min-h-10 items-center justify-center rounded-lg border border-dashed border-ink-700/70 text-xs text-slate-500 hover:border-sky-500/60 hover:text-slate-300"
           >
             ＋ 위젯 추가
           </button>
@@ -128,5 +138,21 @@ export default function DashboardPane({ id }: { id: string }) {
         />
       )}
     </div>
+  );
+}
+
+function DashboardMark() {
+  return (
+    <svg
+      className="h-9 w-9 text-slate-600"
+      viewBox="0 0 36 36"
+      fill="none"
+      aria-hidden="true"
+    >
+      <rect x="3.5" y="3.5" width="12" height="12" rx="2.5" stroke="currentColor" />
+      <rect x="20.5" y="3.5" width="12" height="12" rx="2.5" stroke="currentColor" />
+      <rect x="3.5" y="20.5" width="12" height="12" rx="2.5" stroke="currentColor" />
+      <rect x="20.5" y="20.5" width="12" height="12" rx="2.5" stroke="currentColor" />
+    </svg>
   );
 }
