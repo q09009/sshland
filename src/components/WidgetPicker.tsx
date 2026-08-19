@@ -31,11 +31,11 @@ export default function WidgetPicker({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="motion-dialog-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       onMouseDown={onClose}
     >
       <div
-        className="flex max-h-[560px] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-800 shadow-2xl"
+        className="motion-dialog-surface flex max-h-[560px] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-800 shadow-dialog"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-ink-700/60 px-4 py-3">
@@ -60,7 +60,7 @@ export default function WidgetPicker({
                 <li key={c.id}>
                   <button
                     onClick={() => onPick(c.id)}
-                    className="flex w-full items-start gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left hover:border-ink-700 hover:bg-ink-700/40"
+                    className="flex w-full items-start gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors duration-fast ease-standard hover:border-ink-700 hover:bg-ink-700/40"
                   >
                     <span className="mt-0.5 text-xl leading-none select-none">
                       {c.icon ?? "📊"}
@@ -86,7 +86,7 @@ export default function WidgetPicker({
             <li>
               <button
                 onClick={onCreateMacro}
-                className="flex w-full items-center gap-3 rounded-lg border border-dashed border-ink-700 px-3 py-2.5 text-left text-sky-200 hover:bg-sky-500/10"
+                className="flex w-full items-center gap-3 rounded-lg border border-dashed border-ink-700 px-3 py-2.5 text-left text-sky-200 transition-colors duration-fast ease-standard hover:bg-sky-500/10"
               >
                 <span className="text-xl leading-none select-none">＋</span>
                 <span className="text-sm">새 매크로 만들기</span>
@@ -96,7 +96,7 @@ export default function WidgetPicker({
               <li key={m.id}>
                 <button
                   onClick={() => onPickMacro(m.id)}
-                  className="flex w-full items-start gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left hover:border-ink-700 hover:bg-ink-700/40"
+                  className="flex w-full items-start gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors duration-fast ease-standard hover:border-ink-700 hover:bg-ink-700/40"
                 >
                   <span className="mt-0.5 text-xl leading-none select-none">⚙</span>
                   <span className="min-w-0 flex-1">

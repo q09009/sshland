@@ -22,16 +22,28 @@ import DashboardPane from "./DashboardPane";
  */
 export default function PaneView({ node }: { node: PaneNode }) {
   const { leaves, dividers } = useMemo(() => collectLayout(node), [node]);
+  const [resizing, setResizing] = useState(false);
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-ink-900">
+    <div
+      className="pane-stage relative h-full w-full overflow-hidden bg-ink-900"
+      data-resizing={resizing || undefined}
+    >
       {leaves.map(({ node: leaf, rect }, i) => (
-        <div key={leaf.id} className="absolute" style={paneStyle(rect)}>
+        <div
+          key={leaf.id}
+          className="pane-layout-slot absolute"
+          style={paneStyle(rect)}
+        >
           <Leaf node={leaf} index={i + 1} />
         </div>
       ))}
       {dividers.map((d) => (
-        <Divider key={d.splitId} layout={d} />
+        <Divider
+          key={d.splitId}
+          layout={d}
+          onDraggingChange={setResizing}
+        />
       ))}
     </div>
   );
@@ -61,16 +73,38 @@ function paneStyle(rect: Rect) {
   const topInset = startInset(rect.y);
   const rightInset = endInset(rect.x + rect.w);
   const bottomInset = endInset(rect.y + rect.h);
+  const centerX = rect.x + rect.w / 2;
+  const centerY = rect.y + rect.h / 2;
+  const enterX =
+    centerX < 0.45
+      ? "calc(var(--distance-spatial) * -1)"
+      : centerX > 0.55
+        ? "var(--distance-spatial)"
+        : "0px";
+  const enterY =
+    centerY < 0.45
+      ? "calc(var(--distance-spatial) * -1)"
+      : centerY > 0.55
+        ? "var(--distance-spatial)"
+        : "0px";
 
   return {
     left: `calc(${rect.x * 100}% + ${leftInset})`,
     top: `calc(${rect.y * 100}% + ${topInset})`,
     width: `calc(${rect.w * 100}% - ${leftInset} - ${rightInset})`,
     height: `calc(${rect.h * 100}% - ${topInset} - ${bottomInset})`,
-  };
+    "--pane-enter-x": enterX,
+    "--pane-enter-y": enterY,
+  } as React.CSSProperties;
 }
 
-function Divider({ layout }: { layout: DividerLayout }) {
+function Divider({
+  layout,
+  onDraggingChange,
+}: {
+  layout: DividerLayout;
+  onDraggingChange: (dragging: boolean) => void;
+}) {
   const setRatio = useAppStore((s) => s.setRatio);
   const [dragging, setDragging] = useState(false);
   const horizontal = layout.direction === "horizontal";
@@ -81,6 +115,7 @@ function Divider({ layout }: { layout: DividerLayout }) {
     const container = (e.currentTarget as HTMLElement).parentElement;
     if (!container) return;
     setDragging(true);
+    onDraggingChange(true);
     const parent = layout.parentRect;
 
     const onMove = (ev: MouseEvent) => {
@@ -94,6 +129,7 @@ function Divider({ layout }: { layout: DividerLayout }) {
     };
     const onUp = () => {
       setDragging(false);
+      onDraggingChange(false);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
@@ -130,10 +166,9 @@ function Divider({ layout }: { layout: DividerLayout }) {
       <div
         onMouseDown={onDown}
         style={style}
-        className={`absolute z-10 ${
+        data-dragging={dragging || undefined}
+        className={`pane-divider absolute z-10 ${
           horizontal ? "cursor-col-resize" : "cursor-row-resize"
-        } transition-colors ${
-          dragging ? "bg-sky-500/70" : "bg-transparent hover:bg-sky-500/35"
         }`}
       />
       {dragging && (

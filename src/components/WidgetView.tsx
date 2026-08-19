@@ -141,7 +141,7 @@ function Gauge({ value, unit }: { value: number; unit?: string }) {
       </div>
       <div className="h-2.5 w-full overflow-hidden rounded-full bg-ink-700">
         <div
-          className={`h-full rounded-full transition-all ${fillClass}`}
+          className={`h-full rounded-full transition-[width,background-color] duration-normal ease-spatial ${fillClass}`}
           style={{ width: `${pct}%` }}
         />
       </div>

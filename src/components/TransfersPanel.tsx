@@ -4,8 +4,6 @@ import { formatSize } from "../lib/format";
 
 /** How long a completed card stays before it starts fading out. */
 const AUTO_DISMISS_MS = 3000;
-/** Fade-out transition duration; must match the CSS duration below. */
-const FADE_MS = 300;
 
 /** Bottom-right completion/error toasts; active progress lives in StatusBar. */
 export default function TransfersPanel() {
@@ -32,14 +30,13 @@ export default function TransfersPanel() {
 
 /**
  * Runs `onExpire` once, `AUTO_DISMISS_MS` after `when` first becomes true, and
- * returns whether the card is now fading out. Errors never expire — the user
- * dismisses them so they aren't missed.
+ * returns the leaving state plus a transition-end handler. Errors never expire
+ * — the user dismisses them so they aren't missed.
  */
 function useAutoDismiss(when: boolean, onExpire: () => void) {
   const [leaving, setLeaving] = useState(false);
-  // Keep the latest callback in a ref so the removal timer below depends only
-  // on `leaving` — an unrelated parent re-render (another transfer's progress
-  // tick) must not restart the fade-out timer.
+  // Keep the latest callback in a ref so unrelated progress updates do not
+  // restart the auto-dismiss delay.
   const cb = useRef(onExpire);
   cb.current = onExpire;
 
@@ -49,28 +46,38 @@ function useAutoDismiss(when: boolean, onExpire: () => void) {
     return () => clearTimeout(t);
   }, [when]);
 
-  useEffect(() => {
-    if (!leaving) return;
-    const t = setTimeout(() => cb.current(), FADE_MS);
-    return () => clearTimeout(t);
-  }, [leaving]);
-
-  return leaving;
+  return {
+    leaving,
+    finishLeaving: () => {
+      if (leaving) cb.current();
+    },
+  };
 }
 
 /** A dismissable card wrapper that slides/fades out when `leaving`. */
 function Card({
   leaving,
+  onLeaveComplete,
   accent,
   children,
 }: {
   leaving: boolean;
+  onLeaveComplete: () => void;
   accent?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div
-      className={`pointer-events-auto rounded-xl border bg-ink-800 p-3 shadow-2xl transition-all duration-300 ${
+      onTransitionEnd={(event) => {
+        if (
+          leaving &&
+          event.target === event.currentTarget &&
+          event.propertyName === "opacity"
+        ) {
+          onLeaveComplete();
+        }
+      }}
+      className={`pointer-events-auto rounded-xl border bg-ink-800 p-3 shadow-popover transition-[opacity,transform] duration-slow ease-spatial ${
         accent ? "border-sky-500/40" : "border-ink-700"
       } ${leaving ? "translate-x-6 opacity-0" : "translate-x-0 opacity-100"}`}
     >
@@ -82,11 +89,13 @@ function Card({
 function BatchCard({ batch }: { batch: UploadBatch }) {
   const dismiss = useAppStore((s) => s.dismissBatch);
   const complete = batch.done >= batch.total;
-  const leaving = useAutoDismiss(complete, () => dismiss(batch.id));
+  const { leaving, finishLeaving } = useAutoDismiss(complete, () =>
+    dismiss(batch.id)
+  );
   const pct = batch.total > 0 ? Math.round((batch.done / batch.total) * 100) : 0;
 
   return (
-    <Card leaving={leaving} accent>
+    <Card leaving={leaving} onLeaveComplete={finishLeaving} accent>
       <div className="flex items-center justify-between gap-2 text-sm">
         <span className="text-slate-200">
           {complete ? "업로드 완료" : "업로드 중"}
@@ -97,7 +106,7 @@ function BatchCard({ batch }: { batch: UploadBatch }) {
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink-900">
         <div
-          className={`h-full rounded-full transition-[width] ${
+          className={`h-full rounded-full transition-[width] duration-normal ease-spatial ${
             complete ? "bg-emerald-500" : "bg-sky-500"
           }`}
           style={{ width: `${pct}%` }}
@@ -109,7 +118,10 @@ function BatchCard({ batch }: { batch: UploadBatch }) {
 
 function TransferCard({ transfer: t }: { transfer: Transfer }) {
   const dismiss = useAppStore((s) => s.dismissTransfer);
-  const leaving = useAutoDismiss(t.status === "done", () => dismiss(t.id));
+  const { leaving, finishLeaving } = useAutoDismiss(
+    t.status === "done",
+    () => dismiss(t.id)
+  );
 
   const pct =
     t.total > 0
@@ -119,7 +131,7 @@ function TransferCard({ transfer: t }: { transfer: Transfer }) {
       : 0;
 
   return (
-    <Card leaving={leaving}>
+    <Card leaving={leaving} onLeaveComplete={finishLeaving}>
       <div className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="text-xs text-slate-500">
@@ -146,7 +158,7 @@ function TransferCard({ transfer: t }: { transfer: Transfer }) {
         <>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink-900">
             <div
-              className={`h-full rounded-full transition-[width] ${
+              className={`h-full rounded-full transition-[width] duration-normal ease-spatial ${
                 t.status === "done" ? "bg-emerald-500" : "bg-sky-500"
               }`}
               style={{ width: `${pct}%` }}

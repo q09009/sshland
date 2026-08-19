@@ -71,6 +71,21 @@ export default {
         "2xl": "var(--radius-2xl)",
         full: "var(--radius-full)",
       },
+      boxShadow: {
+        control: "var(--shadow-control)",
+        popover: "var(--shadow-popover)",
+        dialog: "var(--shadow-dialog)",
+      },
+      transitionDuration: {
+        instant: "var(--duration-instant)",
+        fast: "var(--duration-fast)",
+        normal: "var(--duration-normal)",
+        slow: "var(--duration-slow)",
+      },
+      transitionTimingFunction: {
+        standard: "var(--ease-standard)",
+        spatial: "var(--ease-spatial)",
+      },
     },
   },
   plugins: [],

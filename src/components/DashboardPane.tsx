@@ -91,7 +91,7 @@ export default function DashboardPane({ id }: { id: string }) {
           </p>
           <button
             onClick={() => setPickerOpen(true)}
-            className="mt-4 rounded-lg border border-sky-500/70 px-3.5 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/10"
+            className="mt-4 rounded-lg border border-sky-500/70 px-3.5 py-1.5 text-xs font-medium text-sky-300 transition-colors duration-fast ease-standard hover:bg-sky-500/10"
           >
             위젯 추가
           </button>

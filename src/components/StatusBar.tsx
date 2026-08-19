@@ -79,7 +79,7 @@ function TransferStatus() {
         aria-valuenow={percent ?? undefined}
       >
         <span
-          className={`block h-full rounded-full bg-sky-500 transition-[width] ${
+          className={`block h-full rounded-full bg-sky-500 transition-[width] duration-normal ease-spatial ${
             percent === null ? "w-1/3 animate-pulse" : ""
           }`}
           style={percent === null ? undefined : { width: `${percent}%` }}
@@ -283,7 +283,7 @@ function ConnectionInfo() {
       </button>
 
       {open && connection && (
-        <div className="absolute left-1/2 top-full z-40 mt-1.5 w-56 -translate-x-1/2 rounded-lg border border-ink-700 bg-ink-800 p-3 text-xs shadow-2xl">
+        <div className="motion-popover absolute left-1/2 top-full z-40 mt-1.5 w-56 -translate-x-1/2 rounded-lg border border-ink-700 bg-ink-800 p-3 text-xs shadow-popover">
           <Row label="서버 시각" value={serverTime} />
           <Row
             label="경과"

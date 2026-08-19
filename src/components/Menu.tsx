@@ -47,14 +47,14 @@ export default function Menu({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`rounded px-2 py-0.5 text-sm hover:bg-ink-700 ${
+        className={`rounded px-2 py-0.5 text-sm transition-colors duration-fast ease-standard hover:bg-ink-700 ${
           open ? "bg-ink-700 text-slate-100" : "text-slate-300"
         }`}
       >
         {label}
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-40 mt-0.5 min-w-[190px] overflow-hidden rounded-lg border border-ink-700 bg-ink-800 py-1 shadow-2xl">
+        <div className="motion-popover absolute left-0 top-full z-40 mt-0.5 min-w-[190px] overflow-hidden rounded-lg border border-ink-700 bg-ink-800 py-1 shadow-popover">
           {items.map((item, i) =>
             item.type === "separator" ? (
               <div key={i} className="my-1 border-t border-ink-700/60" />
@@ -111,7 +111,7 @@ function Row({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-ink-700 disabled:opacity-40 disabled:hover:bg-transparent ${
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors duration-fast ease-standard hover:bg-ink-700 disabled:opacity-40 disabled:hover:bg-transparent ${
         danger ? "text-red-400" : "text-slate-200"
       }`}
     >

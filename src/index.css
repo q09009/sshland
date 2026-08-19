@@ -76,6 +76,16 @@
   --text-2xl: 1.5rem;
   --leading-2xl: 2rem;
 
+  /* --- Motion --- short, spatial, and shared across every surface. */
+  --duration-instant: 90ms;
+  --duration-fast: 140ms;
+  --duration-normal: 220ms;
+  --duration-slow: 300ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-spatial: cubic-bezier(0.22, 1, 0.36, 1);
+  --distance-spatial: 0.375rem;
+  --scale-spatial-enter: 0.985;
+
   /* --- Border radius --- calm, monotonic 8/10/12/16px surface scale. */
   --radius-sm: 0.125rem;
   --radius: 0.25rem;
@@ -85,10 +95,17 @@
   --radius-2xl: 1rem;
   --radius-full: 9999px;
 
+  /* --- Shared elevation --- */
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.16);
+  --shadow-popover: 0 16px 36px -18px rgb(0 0 0 / 0.72);
+  --shadow-dialog: 0 24px 56px -24px rgb(0 0 0 / 0.82);
+
   /* --- Spatial pane system --- */
   --space-pane-gap: 0.5rem;
   --space-pane-half-gap: 0.25rem;
   --space-pane-edge: 0.5rem;
+  --opacity-pane-divider-hover: 0.35;
+  --opacity-pane-divider-active: 0.7;
   --radius-pane: var(--radius-xl);
   --shadow-pane-rest: 0 1px 2px rgb(0 0 0 / 0.18);
   --shadow-pane-focus: 0 0 0 1px rgb(var(--color-sky-500) / 0.34),
@@ -127,12 +144,58 @@ body {
   border-radius: var(--radius-pane);
   background: rgb(var(--color-ink-900));
   box-shadow: var(--shadow-pane-rest);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition-property: border-color, box-shadow;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-standard);
 }
 
 .pane-surface[data-focused="true"] {
   border-color: rgb(var(--color-sky-500) / 0.9);
   box-shadow: var(--shadow-pane-focus);
+}
+
+.pane-layout-slot {
+  animation: pane-enter var(--duration-normal) var(--ease-spatial) both;
+  transition-property: left, top, width, height;
+  transition-duration: var(--duration-normal);
+  transition-timing-function: var(--ease-spatial);
+}
+
+.pane-stage[data-resizing="true"] .pane-layout-slot {
+  transition-duration: 0ms;
+}
+
+.pane-divider {
+  background: transparent;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.pane-divider:hover {
+  background: rgb(
+    var(--color-sky-500) / var(--opacity-pane-divider-hover)
+  );
+}
+
+.pane-divider[data-dragging="true"] {
+  background: rgb(
+    var(--color-sky-500) / var(--opacity-pane-divider-active)
+  );
+}
+
+@keyframes pane-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(
+        var(--pane-enter-x, 0),
+        var(--pane-enter-y, 0),
+        0
+      )
+      scale(var(--scale-spatial-enter));
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
 
 .dashboard-canvas {
@@ -153,6 +216,9 @@ body {
   border-radius: var(--radius-dashboard-card);
   background: rgb(var(--color-ink-800) / 0.72);
   box-shadow: var(--shadow-dashboard-card);
+  transition-property: border-color, box-shadow, opacity, transform;
+  transition-duration: var(--duration-normal);
+  transition-timing-function: var(--ease-spatial);
 }
 
 .dashboard-card[data-size="small"] {
@@ -170,6 +236,7 @@ body {
 
 .dashboard-card[data-dragging="true"] {
   opacity: 0.4;
+  transform: scale(var(--scale-spatial-enter));
 }
 
 .dashboard-card-header {
@@ -179,6 +246,9 @@ body {
 
 .dashboard-card-action {
   color: rgb(var(--color-slate-500));
+  transition-property: color, background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-standard);
 }
 
 .dashboard-card-action:hover {
@@ -204,6 +274,57 @@ body {
 
 .dashboard-add-card {
   grid-column: 1 / -1;
+  transition-property: color, border-color, background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-standard);
+}
+
+.motion-popover {
+  transform-origin: top center;
+  animation: popover-enter var(--duration-fast) var(--ease-spatial) both;
+}
+
+.motion-dialog-backdrop {
+  animation: fade-enter var(--duration-fast) var(--ease-standard) both;
+}
+
+.motion-dialog-surface {
+  animation: dialog-enter var(--duration-normal) var(--ease-spatial) both;
+}
+
+@keyframes popover-enter {
+  from {
+    opacity: 0;
+    translate: 0 calc(var(--distance-spatial) * -0.5);
+    scale: 0.985;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    translate: 0 var(--distance-spatial);
+    scale: var(--scale-spatial-enter);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+@keyframes fade-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @container dashboard-grid (max-width: 640px) {
@@ -248,4 +369,15 @@ body {
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

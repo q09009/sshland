@@ -118,7 +118,8 @@ export default function ConnectScreen() {
   // Cardless workspace surface: the form sits directly on the page ground
   // (no card), and the auth section cross-slides between password and key.
   const isPassword = authKind === "password";
-  const slideBase = "absolute inset-0 transition-[opacity,transform] duration-150";
+  const slideBase =
+    "absolute inset-0 transition-[opacity,transform] duration-fast ease-spatial";
   const passGroupClass = `${slideBase} ${
     isPassword ? "opacity-100 translate-x-0" : "pointer-events-none -translate-x-2 opacity-0"
   }`;
@@ -199,7 +200,10 @@ export default function ConnectScreen() {
           </div>
 
           {/* Cross-sliding auth credential area */}
-          <div className="relative transition-[height] duration-150" style={{ height: isPassword ? 76 : 172 }}>
+          <div
+            className="relative transition-[height] duration-normal ease-spatial"
+            style={{ height: isPassword ? 76 : 172 }}
+          >
             <div className={passGroupClass} aria-hidden={!isPassword}>
               <Field label="비밀번호">
                 <input
@@ -269,7 +273,7 @@ export default function ConnectScreen() {
           <button
             type="submit"
             disabled={busy}
-            className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg border border-sky-500 px-4 py-2 font-medium text-sky-500 transition hover:bg-sky-500/10 active:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-70"
+            className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg border border-sky-500 px-4 py-2 font-medium text-sky-500 transition-colors duration-fast ease-standard hover:bg-sky-500/10 active:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {busy ? (
               <>
@@ -316,7 +320,7 @@ function SegButton({
       role="radio"
       aria-checked={active}
       onClick={onClick}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast ease-standard ${
         active ? "bg-ink-700 text-sky-400 shadow" : "text-slate-400 hover:text-slate-200"
       }`}
     >
