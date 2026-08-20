@@ -4,7 +4,6 @@ import { disconnect, TransferProgress } from "../api";
 import { useAppStore } from "../store";
 import PaneView from "./PaneView";
 import ShortcutsHelp from "./ShortcutsHelp";
-import TransfersPanel from "./TransfersPanel";
 import DragLayer from "./DragLayer";
 import CommandPalette from "./CommandPalette";
 
@@ -82,7 +81,6 @@ export default function TilingShell() {
     <div className="h-full w-full">
       <PaneView node={paneTree} />
       <ShortcutsHelp />
-      <TransfersPanel />
       <DragLayer />
       <CommandPalette />
     </div>

@@ -6,6 +6,8 @@ import { formatClockAtOffset, formatElapsed } from "../lib/format";
 import { usePaneMenuStore } from "../lib/paneMenus";
 import Menu from "./Menu";
 
+const TRANSFER_COMPLETE_VISIBLE_MS = 3000;
+
 /**
  * App-wide top bar. Contextual menus on the left target the focused pane, the
  * connection stays geometrically centered, and transient transfer progress
@@ -27,12 +29,93 @@ export default function StatusBar() {
 function TransferStatus() {
   const transfers = useAppStore((s) => s.transfers);
   const batches = useAppStore((s) => s.uploadBatches);
+  const dismissTransfer = useAppStore((s) => s.dismissTransfer);
+  const dismissBatch = useAppStore((s) => s.dismissBatch);
+
+  const completedTransferIds = transfers
+    .filter((transfer) => transfer.status === "done")
+    .map((transfer) => transfer.id);
+  const completedBatchIds = batches
+    .filter((batch) => batch.done >= batch.total)
+    .map((batch) => batch.id);
+  const completedTransferKey = completedTransferIds.join("|");
+  const completedBatchKey = completedBatchIds.join("|");
+
+  // Completed items stay in the top bar briefly, then leave the session store.
+  // Errors are deliberately excluded: they remain visible until dismissed.
+  useEffect(() => {
+    if (completedTransferIds.length === 0 && completedBatchIds.length === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      completedTransferIds.forEach(dismissTransfer);
+      completedBatchIds.forEach(dismissBatch);
+    }, TRANSFER_COMPLETE_VISIBLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    completedTransferKey,
+    completedBatchKey,
+    dismissTransfer,
+    dismissBatch,
+  ]);
+
   const activeTransfers = transfers.filter(
     (transfer) => transfer.status === "active"
   );
   const activeBatches = batches.filter((batch) => batch.done < batch.total);
+  const failedTransfers = transfers.filter(
+    (transfer) => transfer.status === "error"
+  );
+  const completedTransfers = transfers.filter(
+    (transfer) => transfer.status === "done"
+  );
+  const completedBatches = batches.filter(
+    (batch) => batch.done >= batch.total
+  );
 
-  if (activeTransfers.length === 0 && activeBatches.length === 0) return null;
+  if (activeTransfers.length === 0 && activeBatches.length === 0) {
+    const failed = failedTransfers[failedTransfers.length - 1];
+    if (failed) {
+      return (
+        <div
+          className="flex max-w-52 items-center gap-1.5 text-red-400"
+          title={failed.error ?? `${failed.name} 전송에 실패했어요.`}
+          role="status"
+          aria-live="polite"
+        >
+          <span aria-hidden="true">!</span>
+          <span className="max-w-36 truncate">{failed.name} 전송 실패</span>
+          <button
+            onClick={() => dismissTransfer(failed.id)}
+            className="rounded px-1 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
+            title="전송 오류 닫기"
+            aria-label={`${failed.name} 전송 오류 닫기`}
+          >
+            ✕
+          </button>
+        </div>
+      );
+    }
+
+    const completedBatch = completedBatches[completedBatches.length - 1];
+    const completed = completedTransfers[completedTransfers.length - 1];
+    if (!completedBatch && !completed) return null;
+
+    const label = completedBatch
+      ? `${completedBatch.total}개 업로드 완료`
+      : `${completed?.kind === "upload" ? "↑" : "↓"} ${completed?.name} 완료`;
+    return (
+      <div
+        className="flex max-w-52 items-center gap-1.5 text-emerald-400"
+        title={label}
+        role="status"
+        aria-live="polite"
+      >
+        <span aria-hidden="true">✓</span>
+        <span className="max-w-44 truncate">{label}</span>
+      </div>
+    );
+  }
 
   const knownTransfers = activeTransfers.filter(
     (transfer) => transfer.total > 0
@@ -47,28 +130,29 @@ function TransferStatus() {
   );
   const batch = activeBatches[0];
 
-  const percent =
-    totalBytes > 0
+  const percent = batch
+    ? Math.min(100, Math.round((batch.done / batch.total) * 100))
+    : totalBytes > 0
       ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100))
-      : activeTransfers.length === 0 && batch && batch.total > 0
-        ? Math.min(100, Math.round((batch.done / batch.total) * 100))
-        : null;
+      : null;
 
   const singleTransfer =
     activeTransfers.length === 1 ? activeTransfers[0] : null;
-  const label = singleTransfer
+  const label = batch
+    ? `업로드 ${batch.done}/${batch.total}`
+    : singleTransfer
     ? `${singleTransfer.kind === "upload" ? "↑" : "↓"} ${singleTransfer.name}`
     : activeTransfers.length > 1
       ? `${activeTransfers.length}개 전송`
-      : batch
-        ? `업로드 ${batch.done}/${batch.total}`
-        : "전송 중";
+      : "전송 중";
 
   return (
     <div
       className="flex max-w-52 items-center gap-2 text-slate-400"
       title={label}
       aria-label={`${label}${percent === null ? "" : ` ${percent}%`}`}
+      role="status"
+      aria-live="polite"
     >
       <span className="max-w-28 truncate">{label}</span>
       <span
