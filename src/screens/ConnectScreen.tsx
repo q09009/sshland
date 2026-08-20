@@ -151,7 +151,6 @@ export default function ConnectScreen() {
                     placeholder="예: 192.168.0.10"
                     value={host}
                     onChange={(e) => setHost(e.target.value)}
-                    autoFocus
                     spellCheck={false}
                   />
                 </Field>
@@ -211,6 +210,7 @@ export default function ConnectScreen() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  autoFocus
                   autoComplete="off"
                   tabIndex={isPassword ? 0 : -1}
                 />
