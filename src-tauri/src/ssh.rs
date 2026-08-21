@@ -117,7 +117,6 @@ struct TerminalOutput {
 /// lets a non-blocking write resume after `WouldBlock` without dropping or
 /// duplicating any bytes.
 struct PendingTerminalInput {
-    sequence: u64,
     data: Vec<u8>,
     written: usize,
 }
@@ -438,41 +437,6 @@ fn record_connection_lost(
     }
 
     diagnostics::record(app, "ERROR", "connection_lost", &fields);
-}
-
-fn terminal_input_kind(data: &[u8]) -> &'static str {
-    if data.is_empty() {
-        "empty"
-    } else if data.iter().all(u8::is_ascii_control) {
-        "control"
-    } else if data.is_ascii() {
-        "ascii"
-    } else {
-        "utf8_or_binary"
-    }
-}
-
-fn record_terminal_input_error(
-    app: &AppHandle,
-    stage: &'static str,
-    sequence: u64,
-    data: &[u8],
-    input_error: &io::Error,
-    terminal_channels: usize,
-    macro_channels: usize,
-) {
-    let fields = [
-        ("stage", stage.to_owned()),
-        ("input_sequence", sequence.to_string()),
-        ("input_bytes", data.len().to_string()),
-        ("input_kind", terminal_input_kind(data).to_owned()),
-        ("io_error_kind", format!("{:?}", input_error.kind())),
-        ("io_error_message", input_error.to_string()),
-        ("terminal_channels", terminal_channels.to_string()),
-        ("macro_channels", macro_channels.to_string()),
-    ];
-
-    diagnostics::record(app, "ERROR", "terminal_input_failed", &fields);
 }
 
 fn send_and_check<T>(
@@ -911,7 +875,6 @@ fn handle_req(
     terminals: &mut HashMap<String, Channel>,
     macros: &mut HashMap<String, Channel>,
     pending_terminal_inputs: &mut PendingTerminalInputs,
-    terminal_input_sequence: &mut u64,
 ) -> bool {
     let terminal_channels = terminals.len();
     let macro_channels = macros.len();
@@ -1110,31 +1073,14 @@ fn handle_req(
             false
         }
         Req::WriteTerminal { id, data } => {
-            *terminal_input_sequence = terminal_input_sequence.wrapping_add(1);
-            let sequence = *terminal_input_sequence;
             if terminals.contains_key(&id) {
                 pending_terminal_inputs
                     .entry(id)
                     .or_default()
                     .push_back(PendingTerminalInput {
-                        sequence,
                         data,
                         written: 0,
                     });
-            } else {
-                diagnostics::record(
-                    app,
-                    "WARN",
-                    "terminal_input_dropped",
-                    &[
-                        ("reason", "channel_missing".to_owned()),
-                        ("input_sequence", sequence.to_string()),
-                        ("input_bytes", data.len().to_string()),
-                        ("input_kind", terminal_input_kind(&data).to_owned()),
-                        ("terminal_channels", terminal_channels.to_string()),
-                        ("macro_channels", macro_channels.to_string()),
-                    ],
-                );
             }
             false
         }
@@ -1193,7 +1139,6 @@ fn dispatch_worker_req(
     terminals: &mut HashMap<String, Channel>,
     macros: &mut HashMap<String, Channel>,
     pending_terminal_inputs: &mut PendingTerminalInputs,
-    terminal_input_sequence: &mut u64,
 ) -> bool {
     let queued_terminal_input = matches!(&req, Req::WriteTerminal { .. });
     if !queued_terminal_input {
@@ -1208,7 +1153,6 @@ fn dispatch_worker_req(
         terminals,
         macros,
         pending_terminal_inputs,
-        terminal_input_sequence,
     );
 
     if !queued_terminal_input && !should_stop {
@@ -1221,11 +1165,8 @@ fn dispatch_worker_req(
 /// `false` means either the queue drained or libssh2 asked us to retry later;
 /// `true` means a real channel error occurred and the caller should close/probe.
 fn drain_terminal_input(
-    app: &AppHandle,
     channel: &mut Channel,
     queue: &mut std::collections::VecDeque<PendingTerminalInput>,
-    terminal_channels: usize,
-    macro_channels: usize,
 ) -> bool {
     loop {
         let Some(input) = queue.front_mut() else {
@@ -1242,18 +1183,7 @@ fn drain_terminal_input(
                 Err(ref write_error) if write_error.kind() == io::ErrorKind::WouldBlock => {
                     return false;
                 }
-                Err(write_error) => {
-                    record_terminal_input_error(
-                        app,
-                        "write",
-                        input.sequence,
-                        &input.data,
-                        &write_error,
-                        terminal_channels,
-                        macro_channels,
-                    );
-                    return true;
-                }
+                Err(_) => return true,
             }
         }
 
@@ -1398,7 +1328,6 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
     // with the same non-blocking read-and-batch mechanism as terminals.
     let mut macros: HashMap<String, Channel> = HashMap::new();
     let mut pending_terminal_inputs: PendingTerminalInputs = HashMap::new();
-    let mut terminal_input_sequence = 0u64;
     let mut buf = [0u8; TERM_BUF];
     let mut next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
 
@@ -1422,7 +1351,6 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
                         &mut terminals,
                         &mut macros,
                         &mut pending_terminal_inputs,
-                        &mut terminal_input_sequence,
                     ) {
                         break 'outer;
                     }
@@ -1436,12 +1364,10 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
         //    All streaming operations remain in the same non-blocking mode.
         if !terminals.is_empty() || !macros.is_empty() {
             let mut closed_terms: Vec<String> = Vec::new();
-            let terminal_channels = terminals.len();
-            let macro_channels = macros.len();
             for (id, queue) in pending_terminal_inputs.iter_mut() {
-                let failed = terminals.get_mut(id).is_some_and(|channel| {
-                    drain_terminal_input(&app, channel, queue, terminal_channels, macro_channels)
-                });
+                let failed = terminals
+                    .get_mut(id)
+                    .is_some_and(|channel| drain_terminal_input(channel, queue));
                 if failed {
                     closed_terms.push(id.clone());
                 }
@@ -1567,7 +1493,6 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
                     &mut terminals,
                     &mut macros,
                     &mut pending_terminal_inputs,
-                    &mut terminal_input_sequence,
                 ) {
                     break 'outer;
                 }
@@ -1888,14 +1813,6 @@ pub async fn disconnect(state: State<'_, SessionManager>) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn terminal_input_classification_never_records_content() {
-        assert_eq!(terminal_input_kind(&[]), "empty");
-        assert_eq!(terminal_input_kind(b"\r"), "control");
-        assert_eq!(terminal_input_kind(b"hello\r"), "ascii");
-        assert_eq!(terminal_input_kind("한글".as_bytes()), "utf8_or_binary");
-    }
 
     #[test]
     fn utf8_text_decodes_as_utf8() {
