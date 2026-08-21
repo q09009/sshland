@@ -1,6 +1,13 @@
 // Typed wrappers around the Rust Tauri commands.
-// Every command rejects with a friendly Korean string on failure.
+// Every command rejects with a friendly message in the current UI language.
 import { invoke } from "@tauri-apps/api/core";
+import { localizeBackendError } from "./i18n/errors";
+
+function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  return invoke<T>(command, args).catch((error) =>
+    Promise.reject(localizeBackendError(error)),
+  );
+}
 
 export type AuthMethod =
   | { type: "password"; password: string }
@@ -33,12 +40,12 @@ export interface FileEntry {
 
 /** Open an SSH/SFTP connection. Resolves with the home directory. */
 export function connect(params: ConnectParams): Promise<ConnectResult> {
-  return invoke<ConnectResult>("connect", { params });
+  return invokeCommand<ConnectResult>("connect", { params });
 }
 
 /** List the contents of a directory on the server. */
 export function listDir(path: string): Promise<FileEntry[]> {
-  return invoke<FileEntry[]>("list_dir", { path });
+  return invokeCommand<FileEntry[]>("list_dir", { path });
 }
 
 /** Download a remote file to a local path (emits `transfer-progress`). */
@@ -47,7 +54,7 @@ export function download(
   remotePath: string,
   localPath: string
 ): Promise<void> {
-  return invoke<void>("download", { id, remotePath, localPath });
+  return invokeCommand<void>("download", { id, remotePath, localPath });
 }
 
 export interface UploadResult {
@@ -60,32 +67,32 @@ export function upload(
   localPath: string,
   remotePath: string
 ): Promise<UploadResult> {
-  return invoke<UploadResult>("upload", { id, localPath, remotePath });
+  return invokeCommand<UploadResult>("upload", { id, localPath, remotePath });
 }
 
 /** Rename or move a remote entry. */
 export function rename(from: string, to: string): Promise<void> {
-  return invoke<void>("rename", { from, to });
+  return invokeCommand<void>("rename", { from, to });
 }
 
 /** Create a new directory. */
 export function mkdir(path: string): Promise<void> {
-  return invoke<void>("mkdir", { path });
+  return invokeCommand<void>("mkdir", { path });
 }
 
 /** Create a new, empty file. Rejects if something already exists at the path. */
 export function createFile(path: string): Promise<void> {
-  return invoke<void>("create_file", { path });
+  return invokeCommand<void>("create_file", { path });
 }
 
 /** Delete a file, or a directory and its contents. */
 export function deletePath(path: string, isDir: boolean): Promise<void> {
-  return invoke<void>("delete", { path, isDir });
+  return invokeCommand<void>("delete", { path, isDir });
 }
 
 /** Copy a file or directory to a new path on the server. */
 export function copyPath(src: string, dst: string): Promise<void> {
-  return invoke<void>("copy", { src, dst });
+  return invokeCommand<void>("copy", { src, dst });
 }
 
 /**
@@ -94,7 +101,7 @@ export function copyPath(src: string, dst: string): Promise<void> {
  * manager's kill action — shares the existing SSH worker, no dedicated channel.
  */
 export function pollWidgetCommand(command: string): Promise<string> {
-  return invoke<string>("poll_widget_command", { command });
+  return invokeCommand<string>("poll_widget_command", { command });
 }
 
 /**
@@ -105,10 +112,10 @@ export function pollWidgetCommand(command: string): Promise<string> {
  */
 export function killProcess(pid: string, force: boolean): Promise<string> {
   if (!/^\d+$/.test(pid)) {
-    return Promise.reject("잘못된 프로세스 번호예요.");
+    return Promise.reject(localizeBackendError("sshland:error:errors.invalidProcessId"));
   }
   const command = `kill ${force ? "-9 " : ""}${pid}`;
-  return invoke<string>("poll_widget_command", { command });
+  return invokeCommand<string>("poll_widget_command", { command });
 }
 
 /**
@@ -126,10 +133,10 @@ export function killProcess(pid: string, force: boolean): Promise<string> {
  */
 export function killProcessGroup(pgid: string, force: boolean): Promise<string> {
   if (!/^\d+$/.test(pgid)) {
-    return Promise.reject("잘못된 프로세스 번호예요.");
+    return Promise.reject(localizeBackendError("sshland:error:errors.invalidProcessId"));
   }
   const command = `kill ${force ? "-9 " : ""}-${pgid}`;
-  return invoke<string>("poll_widget_command", { command });
+  return invokeCommand<string>("poll_widget_command", { command });
 }
 
 /**
@@ -139,7 +146,7 @@ export function killProcessGroup(pgid: string, force: boolean): Promise<string> 
  */
 export function isProcessGroupAlive(pgid: string): Promise<boolean> {
   if (!/^\d+$/.test(pgid)) return Promise.resolve(false);
-  return invoke<string>("poll_widget_command", { command: `kill -0 -${pgid}` })
+  return invokeCommand<string>("poll_widget_command", { command: `kill -0 -${pgid}` })
     .then(() => true)
     .catch(() => false);
 }
@@ -156,7 +163,7 @@ export interface FileContent {
  * via their detected encoding; rejects only if too large or truly binary.
  */
 export function readRemoteFile(path: string): Promise<FileContent> {
-  return invoke<FileContent>("read_remote_file", { path });
+  return invokeCommand<FileContent>("read_remote_file", { path });
 }
 
 /**
@@ -168,7 +175,7 @@ export function writeRemoteFile(
   contents: string,
   encoding: string
 ): Promise<void> {
-  return invoke<void>("write_remote_file", { path, contents, encoding });
+  return invokeCommand<void>("write_remote_file", { path, contents, encoding });
 }
 
 /** Progress event payload emitted during a transfer. */
@@ -185,12 +192,12 @@ export function openTerminal(
   rows: number,
   setup: string
 ): Promise<void> {
-  return invoke<void>("open_terminal", { id, cols, rows, setup });
+  return invokeCommand<void>("open_terminal", { id, cols, rows, setup });
 }
 
 /** Send input bytes (keystrokes) to a terminal. */
 export function writeTerminal(id: string, data: number[]): Promise<void> {
-  return invoke<void>("write_terminal", { id, data });
+  return invokeCommand<void>("write_terminal", { id, data });
 }
 
 /** Notify a terminal that its window size changed. */
@@ -199,12 +206,12 @@ export function resizeTerminal(
   cols: number,
   rows: number
 ): Promise<void> {
-  return invoke<void>("resize_terminal", { id, cols, rows });
+  return invokeCommand<void>("resize_terminal", { id, cols, rows });
 }
 
 /** Close a terminal channel (SSH connection stays open). */
 export function closeTerminal(id: string): Promise<void> {
-  return invoke<void>("close_terminal", { id });
+  return invokeCommand<void>("close_terminal", { id });
 }
 
 /** Payload of a `terminal-output` event. */
@@ -215,17 +222,17 @@ export interface TerminalOutput {
 
 /** Close the active connection (no-op if already disconnected). */
 export function disconnect(): Promise<void> {
-  return invoke<void>("disconnect");
+  return invokeCommand<void>("disconnect");
 }
 
 /** Read the persisted settings object (empty object on first run). */
 export function loadSettings(): Promise<Record<string, unknown>> {
-  return invoke<Record<string, unknown>>("load_settings");
+  return invokeCommand<Record<string, unknown>>("load_settings");
 }
 
 /** Persist the whole settings object to disk. */
 export function saveSettings(settings: Record<string, unknown>): Promise<void> {
-  return invoke<void>("save_settings", { settings });
+  return invokeCommand<void>("save_settings", { settings });
 }
 
 /** A declarative command-GUI config (from a default or user TOML file). */
@@ -245,17 +252,17 @@ export interface CommandConfig {
 
 /** Load + merge command-GUI configs (bundled defaults + user folder). */
 export function loadCommandConfigs(): Promise<CommandConfig[]> {
-  return invoke<CommandConfig[]>("load_command_configs");
+  return invokeCommand<CommandConfig[]>("load_command_configs");
 }
 
 /** Absolute path of the user command-config folder (created if missing). */
 export function commandsDirPath(): Promise<string> {
-  return invoke<string>("commands_dir_path");
+  return invokeCommand<string>("commands_dir_path");
 }
 
 /** Open the user command-config folder in the OS file manager. */
 export function openCommandsDir(): Promise<void> {
-  return invoke<void>("open_commands_dir");
+  return invokeCommand<void>("open_commands_dir");
 }
 
 /**
@@ -296,12 +303,12 @@ export interface DashboardWidgetConfig {
 
 /** Load + merge dashboard-widget configs (bundled defaults + user folder). */
 export function loadDashboardWidgetConfigs(): Promise<DashboardWidgetConfig[]> {
-  return invoke<DashboardWidgetConfig[]>("load_dashboard_widget_configs");
+  return invokeCommand<DashboardWidgetConfig[]>("load_dashboard_widget_configs");
 }
 
 /** Absolute path of the user dashboard-widget folder (created if missing). */
 export function dashboardWidgetsDirPath(): Promise<string> {
-  return invoke<string>("dashboard_widgets_dir_path");
+  return invokeCommand<string>("dashboard_widgets_dir_path");
 }
 
 /** One step of a macro: a short label plus the shell command to run. */
@@ -320,22 +327,22 @@ export interface Macro {
 
 /** Load every saved macro (one JSON file per macro in the macros folder). */
 export function listMacros(): Promise<Macro[]> {
-  return invoke<Macro[]>("list_macros");
+  return invokeCommand<Macro[]>("list_macros");
 }
 
 /** Save (create or overwrite) one macro as `<id>.json`. */
 export function saveMacro(mac: Macro): Promise<void> {
-  return invoke<void>("save_macro", { mac });
+  return invokeCommand<void>("save_macro", { mac });
 }
 
 /** Delete one macro file by id. */
 export function deleteMacro(id: string): Promise<void> {
-  return invoke<void>("delete_macro", { id });
+  return invokeCommand<void>("delete_macro", { id });
 }
 
 /** Absolute path of the user macro folder (created if missing). */
 export function macrosDirPath(): Promise<string> {
-  return invoke<string>("macros_dir_path");
+  return invokeCommand<string>("macros_dir_path");
 }
 
 /**
@@ -344,12 +351,12 @@ export function macrosDirPath(): Promise<string> {
  * keyed by `runId`. Resolves once the channel is open; progress arrives as events.
  */
 export function runMacro(runId: string, script: string): Promise<void> {
-  return invoke<void>("run_macro", { runId, script });
+  return invokeCommand<void>("run_macro", { runId, script });
 }
 
 /** Stop a running macro by closing its exec channel (terminates the script). */
 export function stopMacro(runId: string): Promise<void> {
-  return invoke<void>("stop_macro", { runId });
+  return invokeCommand<void>("stop_macro", { runId });
 }
 
 /** Payload of a `macro-output` event: a chunk of the run's combined stdout/stderr. */

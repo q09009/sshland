@@ -14,12 +14,14 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::error;
+
 /// The user-editable command config folder (`<app_config_dir>/commands`).
 fn commands_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
-        .map_err(|_| "설정 폴더를 찾지 못했어요.".to_string())?;
+        .map_err(|_| error::code("errors.configFolder"))?;
     Ok(dir.join("commands"))
 }
 
@@ -151,7 +153,7 @@ pub fn commands_dir_path(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn open_commands_dir(app: AppHandle) -> Result<(), String> {
     let dir = commands_dir(&app)?;
-    fs::create_dir_all(&dir).map_err(|_| "폴더를 만들지 못했어요.".to_string())?;
+    fs::create_dir_all(&dir).map_err(|_| error::code("errors.folderCreate"))?;
     open_in_file_manager(&dir)
 }
 
@@ -166,7 +168,7 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
     std::process::Command::new(program)
         .arg(path)
         .spawn()
-        .map_err(|_| "폴더를 열지 못했어요.".to_string())?;
+        .map_err(|_| error::code("errors.folderOpen"))?;
     Ok(())
 }
 

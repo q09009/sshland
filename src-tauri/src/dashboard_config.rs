@@ -20,12 +20,14 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::error;
+
 /// The user-editable widget folder (`<app_config_dir>/dashboard-widgets`).
 fn widgets_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
-        .map_err(|_| "설정 폴더를 찾지 못했어요.".to_string())?;
+        .map_err(|_| error::code("errors.configFolder"))?;
     Ok(dir.join("dashboard-widgets"))
 }
 

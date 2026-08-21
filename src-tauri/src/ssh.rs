@@ -27,8 +27,7 @@ const TERMINAL_POLL: Duration = Duration::from_millis(15);
 /// SSH-level keepalive interval. `set_keepalive` only configures libssh2;
 /// `keepalive_send` still has to be called by the worker at this cadence.
 const KEEPALIVE_INTERVAL_SECS: u32 = 30;
-const KEEPALIVE_INTERVAL: Duration =
-    Duration::from_secs(KEEPALIVE_INTERVAL_SECS as u64);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(KEEPALIVE_INTERVAL_SECS as u64);
 /// Read buffer size for terminal output.
 const TERM_BUF: usize = 32 * 1024;
 /// Largest file the editor will open in-memory. Bigger files are refused so a
@@ -367,16 +366,13 @@ fn tcp_connect(host: &str, port: u16) -> Result<TcpStream, String> {
 fn establish_session(params: ConnectParams) -> Result<Session, String> {
     let stream = tcp_connect(&params.host, params.port)?;
 
-    let mut session = Session::new().map_err(|_| "SSH 세션을 만들 수 없어요.".to_string())?;
+    let mut session = Session::new().map_err(|_| error::code("errors.sessionCreate"))?;
     // Per-operation timeout so a hung server never blocks forever.
     session.set_timeout(30_000);
     session.set_tcp_stream(stream);
-    session.handshake().map_err(|e| {
-        error::friendly_ssh(
-            &e,
-            "서버와 보안 연결을 맺지 못했어요. 이 서버가 SSH를 지원하는지 확인해주세요.",
-        )
-    })?;
+    session
+        .handshake()
+        .map_err(|e| error::friendly_ssh(&e, &error::code("errors.handshake")))?;
 
     match params.auth {
         AuthMethod::Password { password } => {
@@ -438,10 +434,7 @@ fn record_connection_lost(
 
     if let Some(primary_error) = primary_error {
         fields.push(("primary_error_code", ssh_error_code(primary_error)));
-        fields.push((
-            "primary_error_message",
-            primary_error.message().to_owned(),
-        ));
+        fields.push(("primary_error_message", primary_error.message().to_owned()));
     }
 
     diagnostics::record(app, "ERROR", "connection_lost", &fields);
@@ -518,7 +511,7 @@ fn format_permissions(perm: u32) -> String {
 fn read_dir_entries(sftp: &Sftp, path: &str) -> Result<Vec<FileEntry>, String> {
     let raw = sftp
         .readdir(Path::new(path))
-        .map_err(|_| error::sftp_error("폴더를 여는"))?;
+        .map_err(|_| error::sftp_error("folderOpen"))?;
 
     let mut entries = Vec::with_capacity(raw.len());
     for (child, stat) in raw {
@@ -553,11 +546,10 @@ fn download_file(
 ) -> Result<(), String> {
     let mut remote_file = sftp
         .open(Path::new(remote))
-        .map_err(|_| error::sftp_error("파일을 다운로드하는"))?;
+        .map_err(|_| error::sftp_error("fileDownload"))?;
     let total = remote_file.stat().ok().and_then(|s| s.size).unwrap_or(0);
 
-    let mut local_file =
-        File::create(local).map_err(|_| "파일을 저장할 수 없어요. 저장 위치를 확인해주세요.".to_string())?;
+    let mut local_file = File::create(local).map_err(|_| error::code("errors.localFileCreate"))?;
 
     let mut buf = [0u8; 32 * 1024];
     let mut transferred = 0u64;
@@ -566,13 +558,13 @@ fn download_file(
     loop {
         let n = remote_file
             .read(&mut buf)
-            .map_err(|_| error::sftp_error("파일을 다운로드하는"))?;
+            .map_err(|_| error::sftp_error("fileDownload"))?;
         if n == 0 {
             break;
         }
         local_file
             .write_all(&buf[..n])
-            .map_err(|_| "파일을 저장하는 중 문제가 발생했어요.".to_string())?;
+            .map_err(|_| error::code("errors.localFileWrite"))?;
         transferred += n as u64;
 
         // Throttle progress events to ~10/sec.
@@ -606,8 +598,8 @@ struct UploadPlan {
 /// uploads one aggregate byte total, this catches unreadable children and
 /// symlinks before leaving a partially-created remote tree whenever possible.
 fn build_upload_plan(local: &Path, remote: &str) -> Result<UploadPlan, String> {
-    let root_meta = fs::symlink_metadata(local)
-        .map_err(|_| "업로드할 파일이나 폴더를 열 수 없어요.".to_string())?;
+    let root_meta =
+        fs::symlink_metadata(local).map_err(|_| error::code("errors.uploadSourceOpen"))?;
     let is_dir = root_meta.is_dir();
     let mut entries = Vec::new();
     let mut total_bytes = 0;
@@ -626,12 +618,12 @@ fn append_upload_plan(
     total_bytes: &mut u64,
 ) -> Result<(), String> {
     let meta = fs::symlink_metadata(local)
-        .map_err(|_| format!("업로드할 항목을 읽을 수 없어요: {}", local.display()))?;
+        .map_err(|_| error::with_detail("errors.uploadItemRead", local.display().to_string()))?;
 
     if meta.file_type().is_symlink() {
-        return Err(format!(
-            "심볼릭 링크는 업로드할 수 없어요: {}",
-            local.display()
+        return Err(error::with_detail(
+            "errors.uploadSymlink",
+            local.display().to_string(),
         ));
     }
 
@@ -639,20 +631,20 @@ fn append_upload_plan(
         entries.push(UploadPlanEntry::Directory {
             remote_path: remote.to_string(),
         });
-        let children = fs::read_dir(local)
-            .map_err(|_| format!("업로드할 폴더를 읽을 수 없어요: {}", local.display()))?;
+        let children = fs::read_dir(local).map_err(|_| {
+            error::with_detail("errors.uploadFolderRead", local.display().to_string())
+        })?;
         let mut children = children
             .collect::<Result<Vec<_>, io::Error>>()
-            .map_err(|_| format!("업로드할 폴더를 읽을 수 없어요: {}", local.display()))?;
+            .map_err(|_| {
+                error::with_detail("errors.uploadFolderRead", local.display().to_string())
+            })?;
         children.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
         for child in children {
             let child_name = child.file_name();
             let child_name = child_name.to_str().ok_or_else(|| {
-                format!(
-                    "이름을 처리할 수 없는 로컬 항목이 있어요: {}",
-                    child.path().display()
-                )
+                error::with_detail("errors.uploadName", child.path().display().to_string())
             })?;
             append_upload_plan(
                 &child.path(),
@@ -667,7 +659,7 @@ fn append_upload_plan(
     if meta.is_file() {
         *total_bytes = total_bytes
             .checked_add(meta.len())
-            .ok_or_else(|| "업로드할 폴더의 전체 크기가 너무 커요.".to_string())?;
+            .ok_or_else(|| error::code("errors.uploadTooLarge"))?;
         entries.push(UploadPlanEntry::File {
             local_path: local.to_path_buf(),
             remote_path: remote.to_string(),
@@ -675,21 +667,19 @@ fn append_upload_plan(
         return Ok(());
     }
 
-    Err(format!(
-        "일반 파일이 아닌 항목은 업로드할 수 없어요: {}",
-        local.display()
+    Err(error::with_detail(
+        "errors.uploadUnsupported",
+        local.display().to_string(),
     ))
 }
 
 fn ensure_remote_directory(sftp: &Sftp, remote: &str) -> Result<(), String> {
     match sftp.stat(Path::new(remote)) {
         Ok(stat) if stat.is_dir() => Ok(()),
-        Ok(_) => Err(format!(
-            "같은 이름의 파일이 이미 있어 폴더를 만들 수 없어요: {remote}"
-        )),
+        Ok(_) => Err(error::with_detail("errors.uploadConflict", remote)),
         Err(_) => sftp
             .mkdir(Path::new(remote), 0o755)
-            .map_err(|_| error::sftp_error("폴더를 만드는")),
+            .map_err(|_| error::sftp_error("folderCreate")),
     }
 }
 
@@ -719,23 +709,23 @@ fn upload_planned_file(
     progress: &mut UploadProgress,
 ) -> Result<(), String> {
     let mut local_file = File::open(local)
-        .map_err(|_| format!("업로드할 파일을 열 수 없어요: {}", local.display()))?;
+        .map_err(|_| error::with_detail("errors.uploadFileOpen", local.display().to_string()))?;
     let mut remote_file = sftp
         .create(Path::new(remote))
-        .map_err(|_| error::sftp_error("파일을 업로드하는"))?;
+        .map_err(|_| error::sftp_error("fileUpload"))?;
 
     let mut buf = [0u8; 32 * 1024];
 
     loop {
         let n = local_file
             .read(&mut buf)
-            .map_err(|_| "업로드할 파일을 읽는 중 문제가 발생했어요.".to_string())?;
+            .map_err(|_| error::code("errors.uploadFileRead"))?;
         if n == 0 {
             break;
         }
         remote_file
             .write_all(&buf[..n])
-            .map_err(|_| error::sftp_error("파일을 업로드하는"))?;
+            .map_err(|_| error::sftp_error("fileUpload"))?;
         progress.transferred += n as u64;
         progress.emit(app, id, false);
     }
@@ -803,7 +793,7 @@ fn emit_progress(app: &AppHandle, id: &str, transferred: u64, total: u64) {
 fn read_file_contents(sftp: &Sftp, path: &str) -> Result<FileContent, String> {
     let mut remote_file = sftp.open(Path::new(path)).map_err(|e| {
         eprintln!("read_remote_file: open failed for {path}: {e}");
-        error::sftp_error("파일을 여는")
+        error::sftp_error("fileOpen")
     })?;
 
     let size = remote_file.stat().ok().and_then(|s| s.size).unwrap_or(0);
@@ -822,7 +812,7 @@ fn read_file_contents(sftp: &Sftp, path: &str) -> Result<FileContent, String> {
             Ok(n) => n,
             Err(e) => {
                 eprintln!("read_remote_file: read failed for {path}: {e}");
-                return Err(error::sftp_error("파일을 여는"));
+                return Err(error::sftp_error("fileOpen"));
             }
         };
         bytes.extend_from_slice(&buf[..n]);
@@ -893,7 +883,7 @@ fn create_empty_file(sftp: &Sftp, path: &str) -> Result<(), String> {
         0o644,
         OpenType::File,
     )
-    .map_err(|_| error::sftp_error("파일을 만드는"))?;
+    .map_err(|_| error::sftp_error("fileCreate"))?;
     Ok(())
 }
 
@@ -908,10 +898,10 @@ fn write_file_contents(
     let bytes = encode_text(contents, encoding);
     let mut remote_file = sftp
         .create(Path::new(path))
-        .map_err(|_| error::sftp_error("파일을 저장하는"))?;
+        .map_err(|_| error::sftp_error("fileSave"))?;
     remote_file
         .write_all(&bytes)
-        .map_err(|_| error::sftp_error("파일을 저장하는"))?;
+        .map_err(|_| error::sftp_error("fileSave"))?;
     Ok(())
 }
 
@@ -919,7 +909,7 @@ fn write_file_contents(
 fn remove_recursive(sftp: &Sftp, path: &str) -> Result<(), String> {
     let raw = sftp
         .readdir(Path::new(path))
-        .map_err(|_| error::sftp_error("폴더를 삭제하는"))?;
+        .map_err(|_| error::sftp_error("folderDelete"))?;
     for (child, stat) in raw {
         let name = match child.file_name() {
             Some(n) => n.to_string_lossy().into_owned(),
@@ -934,11 +924,11 @@ fn remove_recursive(sftp: &Sftp, path: &str) -> Result<(), String> {
             remove_recursive(sftp, &child_path)?;
         } else {
             sftp.unlink(Path::new(&child_path))
-                .map_err(|_| error::sftp_error("파일을 삭제하는"))?;
+                .map_err(|_| error::sftp_error("fileDelete"))?;
         }
     }
     sftp.rmdir(Path::new(path))
-        .map_err(|_| error::sftp_error("폴더를 삭제하는"))
+        .map_err(|_| error::sftp_error("folderDelete"))
 }
 
 /// Quote a string as a single shell argument (safe for arbitrary paths).
@@ -951,11 +941,9 @@ fn shell_quote(s: &str) -> String {
 fn exec_copy(session: &Session, src: &str, dst: &str) -> Result<(), String> {
     let mut channel = session
         .channel_session()
-        .map_err(|_| error::sftp_error("복사하는"))?;
+        .map_err(|_| error::sftp_error("copy"))?;
     let cmd = format!("cp -r -- {} {}", shell_quote(src), shell_quote(dst));
-    channel
-        .exec(&cmd)
-        .map_err(|_| error::sftp_error("복사하는"))?;
+    channel.exec(&cmd).map_err(|_| error::sftp_error("copy"))?;
 
     // Drain stdout/stderr so the remote command can finish.
     let mut out = String::new();
@@ -966,7 +954,7 @@ fn exec_copy(session: &Session, src: &str, dst: &str) -> Result<(), String> {
 
     match channel.exit_status() {
         Ok(0) => Ok(()),
-        _ => Err("복사하지 못했어요. 권한이 있는지, 같은 이름이 이미 있는지 확인해주세요.".to_string()),
+        _ => Err(error::code("errors.copy")),
     }
 }
 
@@ -982,9 +970,7 @@ fn exec_capture(session: &Session, command: &str) -> Result<String, String> {
     let mut channel = session
         .channel_session()
         .map_err(|_| error::command_failed())?;
-    channel
-        .exec(command)
-        .map_err(|_| error::command_failed())?;
+    channel.exec(command).map_err(|_| error::command_failed())?;
 
     let mut out = String::new();
     let _ = channel.read_to_string(&mut out);
@@ -1003,7 +989,7 @@ fn exec_capture(session: &Session, command: &str) -> Result<String, String> {
 fn open_shell(session: &Session, cols: u16, rows: u16, setup: &str) -> Result<Channel, String> {
     let mut channel = session
         .channel_session()
-        .map_err(|_| "터미널을 열 수 없어요.".to_string())?;
+        .map_err(|_| error::code("errors.terminalOpen"))?;
     let mut pty_modes = PtyModes::new();
     pty_modes.set_boolean(PtyModeOpcode::ECHO, false);
     channel
@@ -1012,13 +998,13 @@ fn open_shell(session: &Session, cols: u16, rows: u16, setup: &str) -> Result<Ch
             Some(pty_modes),
             Some((cols as u32, rows as u32, 0, 0)),
         )
-        .map_err(|_| "터미널을 준비하지 못했어요.".to_string())?;
+        .map_err(|_| error::code("errors.terminalPrepare"))?;
     channel
         .shell()
-        .map_err(|_| "셸을 시작하지 못했어요.".to_string())?;
+        .map_err(|_| error::code("errors.shellStart"))?;
     channel
         .write_all(setup.as_bytes())
-        .map_err(|_| "터미널을 초기화하지 못했어요.".to_string())?;
+        .map_err(|_| error::code("errors.terminalInit"))?;
     Ok(channel)
 }
 
@@ -1042,7 +1028,7 @@ fn handle_req(
             let result = sftp
                 .realpath(Path::new(&path))
                 .map(|p| p.to_string_lossy().into_owned())
-                .map_err(|_| error::sftp_error("경로를 확인하는"));
+                .map_err(|_| error::sftp_error("pathCheck"));
             send_and_check(
                 sftp,
                 app,
@@ -1053,17 +1039,15 @@ fn handle_req(
                 resp,
             )
         }
-        Req::ListDir { path, resp } => {
-            send_and_check(
-                sftp,
-                app,
-                "list_dir",
-                terminal_channels,
-                macro_channels,
-                read_dir_entries(sftp, &path),
-                resp,
-            )
-        }
+        Req::ListDir { path, resp } => send_and_check(
+            sftp,
+            app,
+            "list_dir",
+            terminal_channels,
+            macro_channels,
+            read_dir_entries(sftp, &path),
+            resp,
+        ),
         Req::Download {
             id,
             remote_path,
@@ -1101,7 +1085,7 @@ fn handle_req(
         Req::Rename { from, to, resp } => {
             let result = sftp
                 .rename(Path::new(&from), Path::new(&to), None)
-                .map_err(|_| error::sftp_error("이름을 바꾸는"));
+                .map_err(|_| error::sftp_error("rename"));
             send_and_check(
                 sftp,
                 app,
@@ -1115,7 +1099,7 @@ fn handle_req(
         Req::Mkdir { path, resp } => {
             let result = sftp
                 .mkdir(Path::new(&path), 0o755)
-                .map_err(|_| error::sftp_error("폴더를 만드는"));
+                .map_err(|_| error::sftp_error("folderCreate"));
             send_and_check(
                 sftp,
                 app,
@@ -1138,16 +1122,12 @@ fn handle_req(
                 resp,
             )
         }
-        Req::Delete {
-            path,
-            is_dir,
-            resp,
-        } => {
+        Req::Delete { path, is_dir, resp } => {
             let result = if is_dir {
                 remove_recursive(sftp, &path)
             } else {
                 sftp.unlink(Path::new(&path))
-                    .map_err(|_| error::sftp_error("파일을 삭제하는"))
+                    .map_err(|_| error::sftp_error("fileDelete"))
             };
             send_and_check(
                 sftp,
@@ -1183,17 +1163,15 @@ fn handle_req(
                 resp,
             )
         }
-        Req::ReadFile { path, resp } => {
-            send_and_check(
-                sftp,
-                app,
-                "read_file",
-                terminal_channels,
-                macro_channels,
-                read_file_contents(sftp, &path),
-                resp,
-            )
-        }
+        Req::ReadFile { path, resp } => send_and_check(
+            sftp,
+            app,
+            "read_file",
+            terminal_channels,
+            macro_channels,
+            read_file_contents(sftp, &path),
+            resp,
+        ),
         Req::WriteFile {
             path,
             contents,
@@ -1235,10 +1213,7 @@ fn handle_req(
                 pending_terminal_inputs
                     .entry(id)
                     .or_default()
-                    .push_back(PendingTerminalInput {
-                        data,
-                        written: 0,
-                    });
+                    .push_back(PendingTerminalInput { data, written: 0 });
             }
             false
         }
@@ -1409,10 +1384,7 @@ fn drain_channel(
 /// How long the worker may sleep before it must service streaming channels or
 /// send the next SSH keepalive. An idle worker still wakes for keepalives, while
 /// a live terminal/macro keeps the existing fast polling cadence.
-fn worker_wait_timeout(
-    has_streaming_channels: bool,
-    until_keepalive: Duration,
-) -> Duration {
+fn worker_wait_timeout(has_streaming_channels: bool, until_keepalive: Duration) -> Duration {
     if has_streaming_channels {
         TERMINAL_POLL.min(until_keepalive)
     } else {
@@ -1473,7 +1445,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
             );
             // Couldn't start SFTP: fail every queued request so callers unblock.
             while let Ok(req) = cmd_rx.recv() {
-                if !reply_err(req, error::sftp_error("파일 작업을 준비하는")) {
+                if !reply_err(req, error::sftp_error("fileOperation")) {
                     break;
                 }
             }
@@ -1686,7 +1658,7 @@ pub async fn connect(
     // The handshake blocks, so run it off the async runtime's threads.
     let session = tauri::async_runtime::spawn_blocking(move || establish_session(params))
         .await
-        .map_err(|_| "내부 오류가 발생했어요. 다시 시도해주세요.".to_string())??;
+        .map_err(|_| error::code("errors.internal"))??;
 
     // Hand the session to a dedicated worker thread.
     let (tx, rx) = mpsc::channel();
@@ -1862,10 +1834,7 @@ pub async fn resize_terminal(
 
 /// Close a terminal, leaving the SSH connection open.
 #[tauri::command]
-pub async fn close_terminal(
-    state: State<'_, SessionManager>,
-    id: String,
-) -> Result<(), String> {
+pub async fn close_terminal(state: State<'_, SessionManager>, id: String) -> Result<(), String> {
     state.send(Req::CloseTerminal { id })
 }
 

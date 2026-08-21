@@ -11,11 +11,13 @@ use std::path::PathBuf;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
+use crate::error;
+
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
-        .map_err(|_| "설정을 저장할 폴더를 찾지 못했어요.".to_string())?;
+        .map_err(|_| error::code("errors.settingsFolder"))?;
     Ok(dir.join("settings.json"))
 }
 
@@ -25,9 +27,7 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn load_settings(app: AppHandle) -> Result<Value, String> {
     let path = settings_path(&app)?;
     match fs::read_to_string(&path) {
-        Ok(text) => {
-            serde_json::from_str(&text).map_err(|_| "설정 파일을 읽지 못했어요.".to_string())
-        }
+        Ok(text) => serde_json::from_str(&text).map_err(|_| error::code("errors.settingsRead")),
         // No file yet (or unreadable) — start from an empty object.
         Err(_) => Ok(Value::Object(serde_json::Map::new())),
     }
@@ -38,11 +38,10 @@ pub fn load_settings(app: AppHandle) -> Result<Value, String> {
 pub fn save_settings(app: AppHandle, settings: Value) -> Result<(), String> {
     let path = settings_path(&app)?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|_| "설정 폴더를 만들지 못했어요.".to_string())?;
+        fs::create_dir_all(parent).map_err(|_| error::code("errors.settingsFolderCreate"))?;
     }
-    let text = serde_json::to_string_pretty(&settings)
-        .map_err(|_| "설정을 저장하지 못했어요.".to_string())?;
-    fs::write(&path, text).map_err(|_| "설정을 저장하지 못했어요.".to_string())?;
+    let text =
+        serde_json::to_string_pretty(&settings).map_err(|_| error::code("errors.settingsSave"))?;
+    fs::write(&path, text).map_err(|_| error::code("errors.settingsSave"))?;
     Ok(())
 }
