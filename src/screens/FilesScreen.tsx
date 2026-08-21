@@ -181,9 +181,9 @@ export default function FilesScreen({ id }: { id: string }) {
   }, []);
 
   /**
-   * Upload each dropped local file into this pane's current directory,
-   * sequentially. Folders are rejected by the backend with a friendly message.
-   * For multi-file drops, an overall "N개 중 M개 완료" batch counter is shown.
+   * Upload each dropped local file or folder into this pane's current directory,
+   * sequentially. Folders keep their complete nested directory structure.
+   * For multi-item drops, an overall "N개 중 M개 완료" batch counter is shown.
    */
   async function handleDrop(paths: string[]) {
     const dir = currentPathRef.current;
@@ -195,9 +195,14 @@ export default function FilesScreen({ id }: { id: string }) {
       const id = crypto.randomUUID();
       startTransfer({ id, name, kind: "upload", total: 0 });
       try {
-        await upload(id, local, joinPath(dir, name));
+        const result = await upload(id, local, joinPath(dir, name));
         finishTransfer(id);
-        logOp({ type: "upload", localPath: local, remoteDir: dir });
+        logOp({
+          type: "upload",
+          localPath: local,
+          remoteDir: dir,
+          isDir: result.isDir,
+        });
       } catch (err) {
         finishTransfer(
           id,
@@ -650,7 +655,7 @@ export default function FilesScreen({ id }: { id: string }) {
               여기에 놓으면 업로드돼요
             </div>
             <div className="mt-1 truncate text-sm text-sky-300/80">
-              {currentPath} 에 파일이 올라갑니다
+              {currentPath} 에 파일과 폴더가 올라갑니다
             </div>
           </div>
         </div>

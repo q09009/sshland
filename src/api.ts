@@ -50,13 +50,17 @@ export function download(
   return invoke<void>("download", { id, remotePath, localPath });
 }
 
-/** Upload a local file to a remote path (emits `transfer-progress`). */
+export interface UploadResult {
+  isDir: boolean;
+}
+
+/** Upload a local file or folder to a remote path (emits `transfer-progress`). */
 export function upload(
   id: string,
   localPath: string,
   remotePath: string
-): Promise<void> {
-  return invoke<void>("upload", { id, localPath, remotePath });
+): Promise<UploadResult> {
+  return invoke<UploadResult>("upload", { id, localPath, remotePath });
 }
 
 /** Rename or move a remote entry. */

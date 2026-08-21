@@ -14,7 +14,7 @@ export interface RemoteTarget {
 
 /** A file-manager operation, in terms the command formatter understands. */
 export type FileOperation =
-  | { type: "upload"; localPath: string; remoteDir: string }
+  | { type: "upload"; localPath: string; remoteDir: string; isDir: boolean }
   | { type: "download"; remotePath: string }
   | { type: "delete"; path: string; isDir: boolean }
   | { type: "mkdir"; path: string }
@@ -52,9 +52,9 @@ export function operationToCommandString(
   const host = `${remote.user}@${remote.host}`;
   switch (op.type) {
     case "upload":
-      return `scp ${shellArg("./" + baseName(op.localPath))} ${host}:${shellArg(
-        withTrailingSlash(op.remoteDir)
-      )}`;
+      return `scp ${op.isDir ? "-r " : ""}${shellArg(
+        "./" + baseName(op.localPath)
+      )} ${host}:${shellArg(withTrailingSlash(op.remoteDir))}`;
     case "download":
       return `scp ${host}:${shellArg(op.remotePath)} ./`;
     case "delete":

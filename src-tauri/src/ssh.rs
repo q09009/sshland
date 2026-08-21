@@ -7,10 +7,10 @@
 //! constraints (the `Session` and `Sftp` handles never leave the worker).
 
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -104,6 +104,14 @@ struct TransferProgress {
     total: u64,
 }
 
+/// Describes the local entry that finished uploading so the frontend can
+/// render an honest equivalent command (`scp` vs `scp -r`).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadResult {
+    pub is_dir: bool,
+}
+
 /// A chunk of terminal output, streamed as a `terminal-output` event.
 #[derive(Serialize, Clone)]
 struct TerminalOutput {
@@ -160,12 +168,12 @@ pub enum Req {
         local_path: String,
         resp: oneshot::Sender<Result<(), String>>,
     },
-    /// Upload a local file to a remote path, emitting progress events.
+    /// Upload a local file or folder to a remote path, emitting progress events.
     Upload {
         id: String,
         local_path: String,
         remote_path: String,
-        resp: oneshot::Sender<Result<(), String>>,
+        resp: oneshot::Sender<Result<UploadResult, String>>,
     },
     /// Rename/move a remote entry.
     Rename {
@@ -578,30 +586,145 @@ fn download_file(
     Ok(())
 }
 
-/// Stream a local file up to the server, emitting throttled progress events.
-fn upload_file(
+enum UploadPlanEntry {
+    Directory {
+        remote_path: String,
+    },
+    File {
+        local_path: PathBuf,
+        remote_path: String,
+    },
+}
+
+struct UploadPlan {
+    entries: Vec<UploadPlanEntry>,
+    total_bytes: u64,
+    is_dir: bool,
+}
+
+/// Inspect a local file tree before touching the server. Besides giving folder
+/// uploads one aggregate byte total, this catches unreadable children and
+/// symlinks before leaving a partially-created remote tree whenever possible.
+fn build_upload_plan(local: &Path, remote: &str) -> Result<UploadPlan, String> {
+    let root_meta = fs::symlink_metadata(local)
+        .map_err(|_| "업로드할 파일이나 폴더를 열 수 없어요.".to_string())?;
+    let is_dir = root_meta.is_dir();
+    let mut entries = Vec::new();
+    let mut total_bytes = 0;
+    append_upload_plan(local, remote, &mut entries, &mut total_bytes)?;
+    Ok(UploadPlan {
+        entries,
+        total_bytes,
+        is_dir,
+    })
+}
+
+fn append_upload_plan(
+    local: &Path,
+    remote: &str,
+    entries: &mut Vec<UploadPlanEntry>,
+    total_bytes: &mut u64,
+) -> Result<(), String> {
+    let meta = fs::symlink_metadata(local)
+        .map_err(|_| format!("업로드할 항목을 읽을 수 없어요: {}", local.display()))?;
+
+    if meta.file_type().is_symlink() {
+        return Err(format!(
+            "심볼릭 링크는 업로드할 수 없어요: {}",
+            local.display()
+        ));
+    }
+
+    if meta.is_dir() {
+        entries.push(UploadPlanEntry::Directory {
+            remote_path: remote.to_string(),
+        });
+        let children = fs::read_dir(local)
+            .map_err(|_| format!("업로드할 폴더를 읽을 수 없어요: {}", local.display()))?;
+        let mut children = children
+            .collect::<Result<Vec<_>, io::Error>>()
+            .map_err(|_| format!("업로드할 폴더를 읽을 수 없어요: {}", local.display()))?;
+        children.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+        for child in children {
+            let child_name = child.file_name();
+            let child_name = child_name.to_str().ok_or_else(|| {
+                format!(
+                    "이름을 처리할 수 없는 로컬 항목이 있어요: {}",
+                    child.path().display()
+                )
+            })?;
+            append_upload_plan(
+                &child.path(),
+                &join_unix(remote, child_name),
+                entries,
+                total_bytes,
+            )?;
+        }
+        return Ok(());
+    }
+
+    if meta.is_file() {
+        *total_bytes = total_bytes
+            .checked_add(meta.len())
+            .ok_or_else(|| "업로드할 폴더의 전체 크기가 너무 커요.".to_string())?;
+        entries.push(UploadPlanEntry::File {
+            local_path: local.to_path_buf(),
+            remote_path: remote.to_string(),
+        });
+        return Ok(());
+    }
+
+    Err(format!(
+        "일반 파일이 아닌 항목은 업로드할 수 없어요: {}",
+        local.display()
+    ))
+}
+
+fn ensure_remote_directory(sftp: &Sftp, remote: &str) -> Result<(), String> {
+    match sftp.stat(Path::new(remote)) {
+        Ok(stat) if stat.is_dir() => Ok(()),
+        Ok(_) => Err(format!(
+            "같은 이름의 파일이 이미 있어 폴더를 만들 수 없어요: {remote}"
+        )),
+        Err(_) => sftp
+            .mkdir(Path::new(remote), 0o755)
+            .map_err(|_| error::sftp_error("폴더를 만드는")),
+    }
+}
+
+struct UploadProgress {
+    transferred: u64,
+    total: u64,
+    last_emit: Instant,
+}
+
+impl UploadProgress {
+    fn emit(&mut self, app: &AppHandle, id: &str, force: bool) {
+        if force || self.last_emit.elapsed() >= Duration::from_millis(100) {
+            emit_progress(app, id, self.transferred, self.total);
+            self.last_emit = Instant::now();
+        }
+    }
+}
+
+/// Stream one planned local file up to the server, contributing its bytes to
+/// the progress total shared by the whole top-level upload.
+fn upload_planned_file(
     sftp: &Sftp,
     app: &AppHandle,
     id: &str,
-    local: &str,
+    local: &Path,
     remote: &str,
+    progress: &mut UploadProgress,
 ) -> Result<(), String> {
-    let meta = std::fs::metadata(local)
-        .map_err(|_| "업로드할 파일을 열 수 없어요.".to_string())?;
-    if meta.is_dir() {
-        return Err("폴더는 업로드할 수 없어요. 파일만 올릴 수 있어요.".to_string());
-    }
-    let total = meta.len();
-
-    let mut local_file =
-        File::open(local).map_err(|_| "업로드할 파일을 열 수 없어요.".to_string())?;
+    let mut local_file = File::open(local)
+        .map_err(|_| format!("업로드할 파일을 열 수 없어요: {}", local.display()))?;
     let mut remote_file = sftp
         .create(Path::new(remote))
         .map_err(|_| error::sftp_error("파일을 업로드하는"))?;
 
     let mut buf = [0u8; 32 * 1024];
-    let mut transferred = 0u64;
-    let mut last_emit = Instant::now();
 
     loop {
         let n = local_file
@@ -613,15 +736,50 @@ fn upload_file(
         remote_file
             .write_all(&buf[..n])
             .map_err(|_| error::sftp_error("파일을 업로드하는"))?;
-        transferred += n as u64;
+        progress.transferred += n as u64;
+        progress.emit(app, id, false);
+    }
+    Ok(())
+}
 
-        if last_emit.elapsed() >= Duration::from_millis(100) {
-            emit_progress(app, id, transferred, total);
-            last_emit = Instant::now();
+/// Upload a local file or recursively upload a folder using only SFTP. Existing
+/// remote directories are merged; existing files keep the previous overwrite
+/// behavior of `sftp.create`.
+fn upload_path(
+    sftp: &Sftp,
+    app: &AppHandle,
+    id: &str,
+    local: &str,
+    remote: &str,
+) -> Result<UploadResult, String> {
+    let plan = build_upload_plan(Path::new(local), remote)?;
+    let mut progress = UploadProgress {
+        transferred: 0,
+        total: plan.total_bytes,
+        last_emit: Instant::now(),
+    };
+    progress.emit(app, id, true);
+
+    for entry in plan.entries {
+        let result = match entry {
+            UploadPlanEntry::Directory { remote_path } => {
+                ensure_remote_directory(sftp, &remote_path)
+            }
+            UploadPlanEntry::File {
+                local_path,
+                remote_path,
+            } => upload_planned_file(sftp, app, id, &local_path, &remote_path, &mut progress),
+        };
+        if let Err(message) = result {
+            progress.emit(app, id, true);
+            return Err(message);
         }
     }
-    emit_progress(app, id, transferred, total);
-    Ok(())
+
+    progress.emit(app, id, true);
+    Ok(UploadResult {
+        is_dir: plan.is_dir,
+    })
 }
 
 fn emit_progress(app: &AppHandle, id: &str, transferred: u64, total: u64) {
@@ -929,7 +1087,7 @@ fn handle_req(
             remote_path,
             resp,
         } => {
-            let result = upload_file(sftp, app, &id, &local_path, &remote_path);
+            let result = upload_path(sftp, app, &id, &local_path, &remote_path);
             send_and_check(
                 sftp,
                 app,
@@ -1589,14 +1747,14 @@ pub async fn download(
     resp_rx.await.map_err(|_| error::disconnected_error())?
 }
 
-/// Upload a local file to a directory on the server.
+/// Upload a local file or folder to a directory on the server.
 #[tauri::command]
 pub async fn upload(
     state: State<'_, SessionManager>,
     id: String,
     local_path: String,
     remote_path: String,
-) -> Result<(), String> {
+) -> Result<UploadResult, String> {
     let (resp_tx, resp_rx) = oneshot::channel();
     state.send(Req::Upload {
         id,
@@ -1813,6 +1971,72 @@ pub async fn disconnect(state: State<'_, SessionManager>) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct LocalUploadFixture {
+        path: PathBuf,
+    }
+
+    impl LocalUploadFixture {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "sshland-upload-plan-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).expect("should create upload-plan fixture");
+            Self { path }
+        }
+    }
+
+    impl Drop for LocalUploadFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn folder_upload_plan_keeps_nested_and_empty_directories() {
+        let fixture = LocalUploadFixture::new();
+        let root = fixture.path.join("project");
+        fs::create_dir_all(root.join("nested")).expect("should create nested folder");
+        fs::create_dir(root.join("empty")).expect("should create empty folder");
+        fs::write(root.join("a.txt"), b"abc").expect("should write first file");
+        fs::write(root.join("nested").join("b.bin"), b"12345").expect("should write nested file");
+
+        let plan = build_upload_plan(&root, "/srv/project").expect("plan should build");
+        assert!(plan.is_dir);
+        assert_eq!(plan.total_bytes, 8);
+
+        let mut directories = Vec::new();
+        let mut files = Vec::new();
+        for entry in plan.entries {
+            match entry {
+                UploadPlanEntry::Directory { remote_path } => directories.push(remote_path),
+                UploadPlanEntry::File { remote_path, .. } => files.push(remote_path),
+            }
+        }
+        assert_eq!(
+            directories,
+            ["/srv/project", "/srv/project/empty", "/srv/project/nested"]
+        );
+        assert_eq!(files, ["/srv/project/a.txt", "/srv/project/nested/b.bin"]);
+    }
+
+    #[test]
+    fn single_file_upload_plan_stays_a_single_file() {
+        let fixture = LocalUploadFixture::new();
+        let file = fixture.path.join("hello.txt");
+        fs::write(&file, b"hello").expect("should write file");
+
+        let plan = build_upload_plan(&file, "/srv/hello.txt").expect("plan should build");
+        assert!(!plan.is_dir);
+        assert_eq!(plan.total_bytes, 5);
+        assert_eq!(plan.entries.len(), 1);
+        assert!(matches!(plan.entries[0], UploadPlanEntry::File { .. }));
+    }
 
     #[test]
     fn utf8_text_decodes_as_utf8() {

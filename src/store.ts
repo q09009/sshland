@@ -29,12 +29,12 @@ export interface Transfer {
 }
 
 /**
- * A multi-file drag-in upload, shown as an overall "N개 중 M개 완료" counter
- * above the per-file transfer cards. Only created when >1 file is dropped.
+ * A multi-item drag-in upload, shown as an overall "N개 중 M개 완료" counter
+ * above the per-item transfer cards. Only created when >1 item is dropped.
  */
 export interface UploadBatch {
   id: string;
-  /** How many files this batch is uploading. */
+  /** How many top-level files/folders this batch is uploading. */
   total: number;
   /** How many have finished (success or error). */
   done: number;
@@ -173,7 +173,7 @@ interface AppState {
   finishTransfer: (id: string, error?: string) => void;
   dismissTransfer: (id: string) => void;
 
-  // --- Multi-file upload batches (overall progress) ---
+  // --- Multi-item upload batches (overall progress) ---
   uploadBatches: UploadBatch[];
   startBatch: (id: string, total: number) => void;
   advanceBatch: (id: string) => void;
