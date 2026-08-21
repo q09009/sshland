@@ -1,6 +1,7 @@
 import { FileEntry } from "../api";
 import { ViewMode } from "../store";
 import { formatDate, formatSize } from "../lib/format";
+import { useI18n } from "../i18n";
 
 interface Props {
   entries: FileEntry[];
@@ -44,14 +45,15 @@ function rowHandlers(entry: FileEntry, p: Props) {
 /** Windows-style "Details": a table with size, date, and permissions. */
 function DetailsView(props: Props) {
   const { entries, selectedPath } = props;
+  const { t } = useI18n();
   return (
     <table className="w-full text-sm">
       <thead className="sticky top-0 bg-ink-800/95 text-xs text-slate-400 backdrop-blur">
         <tr className="border-b border-ink-700/60">
-          <th className="px-4 py-2 text-left font-medium">이름</th>
-          <th className="w-28 px-4 py-2 text-right font-medium">크기</th>
-          <th className="w-40 px-4 py-2 text-left font-medium">수정일</th>
-          <th className="w-32 px-4 py-2 text-left font-medium">권한</th>
+          <th className="px-4 py-2 text-left font-medium">{t("files.column.name")}</th>
+          <th className="w-28 px-4 py-2 text-right font-medium">{t("files.column.size")}</th>
+          <th className="w-40 px-4 py-2 text-left font-medium">{t("files.column.modified")}</th>
+          <th className="w-32 px-4 py-2 text-left font-medium">{t("files.column.permissions")}</th>
         </tr>
       </thead>
       <tbody>

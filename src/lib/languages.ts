@@ -144,8 +144,8 @@ const DISPLAY_NAMES: Record<string, string> = {
   dockerfile: "Dockerfile", nginx: "Nginx", diff: "Diff", powershell: "PowerShell",
 };
 
-/** Display label for a file's language, or "텍스트" when none is detected. */
-export function languageLabel(filePath: string): string {
+/** Display label for a file's language, or the supplied plain-text label. */
+export function languageLabel(filePath: string, plainTextLabel = "Text"): string {
   const key = languageNameForFile(filePath);
-  return key ? DISPLAY_NAMES[key] ?? key : "텍스트";
+  return key ? DISPLAY_NAMES[key] ?? key : plainTextLabel;
 }

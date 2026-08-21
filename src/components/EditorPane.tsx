@@ -55,6 +55,7 @@ import {
 } from "./Modal";
 import type { DropItem } from "./Menu";
 import { usePaneMenuRegistration } from "../lib/paneMenus";
+import { useI18n } from "../i18n";
 
 /**
  * A lightweight text/code editor for one remote file, rendered with CodeMirror
@@ -117,6 +118,9 @@ export default function EditorPane({
   const finishTransfer = useAppStore((s) => s.finishTransfer);
   const logCommand = useAppStore((s) => s.logCommand);
   const connection = useAppStore((s) => s.connection);
+  const { language, t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const name = baseName(filePath);
 
@@ -169,7 +173,7 @@ export default function EditorPane({
       }
       return true;
     } catch (err) {
-      setActionError(typeof err === "string" ? err : "저장하지 못했어요.");
+      setActionError(typeof err === "string" ? err : tRef.current("editor.error.save"));
       return false;
     } finally {
       savingRef.current = false;
@@ -230,7 +234,7 @@ export default function EditorPane({
       applyRemoteContents(remote.content, remote.encoding);
     } catch (err) {
       setActionError(
-        typeof err === "string" ? err : "서버에서 다시 불러오지 못했어요."
+        typeof err === "string" ? err : tRef.current("editor.error.reload")
       );
     } finally {
       reloadingRef.current = false;
@@ -251,9 +255,14 @@ export default function EditorPane({
       0
     );
     if (positionRef.current) {
-      positionRef.current.textContent = `${line.number}줄, ${
-        head - line.from + 1
-      }열${selected > 0 ? ` (${selected}자 선택)` : ""}`;
+      const params = {
+        line: line.number,
+        column: head - line.from + 1,
+        count: selected,
+      };
+      positionRef.current.textContent = selected > 0
+        ? tRef.current("editor.positionSelected", params)
+        : tRef.current("editor.position", params);
     }
   }, []);
 
@@ -426,7 +435,7 @@ export default function EditorPane({
       })
       .catch((e: unknown) => {
         if (disposed) return;
-        setError(typeof e === "string" ? e : "파일을 열 수 없어요.");
+        setError(typeof e === "string" ? e : tRef.current("editor.error.open"));
         setLoading(false);
       });
 
@@ -448,7 +457,7 @@ export default function EditorPane({
     if (!loading && !error && viewRef.current) {
       updateCursorStatus(viewRef.current.state);
     }
-  }, [error, loading, updateCursorStatus]);
+  }, [error, language, loading, updateCursorStatus]);
 
   /** Download the file locally (offered when it can't be edited). */
   async function downloadInstead() {
@@ -460,7 +469,10 @@ export default function EditorPane({
       await download(tid, filePath, local);
       finishTransfer(tid);
     } catch (err) {
-      finishTransfer(tid, typeof err === "string" ? err : "다운로드에 실패했어요.");
+      finishTransfer(
+        tid,
+        typeof err === "string" ? err : tRef.current("files.error.download"),
+      );
     }
   }
 
@@ -477,13 +489,13 @@ export default function EditorPane({
 
   const fileMenu: DropItem[] = [
     {
-      label: saving ? "저장 중…" : "저장",
+      label: saving ? t("editor.saving") : t("editor.save"),
       shortcut: "Ctrl+S",
       onClick: () => void doSave(),
       disabled: !ready || !dirty || saving,
     },
     {
-      label: reloading ? "다시 불러오는 중…" : "서버에서 다시 불러오기",
+      label: reloading ? t("editor.reloading") : t("editor.reload"),
       shortcut: "Ctrl+Shift+R",
       onClick: requestReload,
       disabled: !ready || saving || reloading,
@@ -491,27 +503,27 @@ export default function EditorPane({
   ];
   const editMenu: DropItem[] = [
     {
-      label: "실행 취소",
+      label: t("editor.undo"),
       shortcut: "Ctrl+Z",
       onClick: () => runCmd(undo),
       disabled: !ready,
     },
     {
-      label: "다시 실행",
+      label: t("editor.redo"),
       shortcut: "Ctrl+Y",
       onClick: () => runCmd(redo),
       disabled: !ready,
     },
     { type: "separator" },
     {
-      label: "모두 선택",
+      label: t("editor.selectAll"),
       shortcut: "Ctrl+A",
       onClick: () => runCmd(selectAll),
       disabled: !ready,
     },
     { type: "separator" },
     {
-      label: "찾기 / 바꾸기",
+      label: t("editor.findReplace"),
       shortcut: "Ctrl+F",
       onClick: () =>
         runCmd((view) => {
@@ -523,51 +535,51 @@ export default function EditorPane({
   ];
   const codeMenu: DropItem[] = [
     {
-      label: "줄 주석 전환",
+      label: t("editor.toggleComment"),
       shortcut: "Ctrl+/",
       onClick: () => runCmd(toggleComment),
       disabled: !ready,
     },
     {
-      label: "들여쓰기",
+      label: t("editor.indent"),
       shortcut: "Ctrl+]",
       onClick: () => runCmd(indentMore),
       disabled: !ready,
     },
     {
-      label: "내어쓰기",
+      label: t("editor.outdent"),
       shortcut: "Ctrl+[",
       onClick: () => runCmd(indentLess),
       disabled: !ready,
     },
     { type: "separator" },
     {
-      label: "줄 위로 이동",
+      label: t("editor.moveLineUp"),
       shortcut: "Alt+↑",
       onClick: () => runCmd(moveLineUp),
       disabled: !ready,
     },
     {
-      label: "줄 아래로 이동",
+      label: t("editor.moveLineDown"),
       shortcut: "Alt+↓",
       onClick: () => runCmd(moveLineDown),
       disabled: !ready,
     },
     {
-      label: "줄 아래에 복제",
+      label: t("editor.copyLineDown"),
       shortcut: "Shift+Alt+↓",
       onClick: () => runCmd(copyLineDown),
       disabled: !ready,
     },
     {
-      label: "줄 삭제",
+      label: t("editor.deleteLine"),
       shortcut: "Ctrl+Shift+K",
       onClick: () => runCmd(deleteLine),
       disabled: !ready,
     },
     { type: "separator" },
     {
-      label: "특정 줄로 이동",
+      label: t("editor.gotoLine"),
       shortcut: "Ctrl+G",
       onClick: () => runCmd(gotoLine),
       disabled: !ready,
@@ -576,26 +588,26 @@ export default function EditorPane({
   const viewMenu: DropItem[] = [
     {
       type: "check",
-      label: "자동 줄 바꿈",
+      label: t("editor.wordWrap"),
       checked: wordWrap,
       onClick: toggleWordWrap,
       disabled: !ready,
     },
     { type: "separator" },
     {
-      label: "글자 크게",
+      label: t("editor.fontIncrease"),
       shortcut: "Ctrl+=",
       onClick: () => changeFontSize(1),
       disabled: !ready || fontSize >= 20,
     },
     {
-      label: "글자 작게",
+      label: t("editor.fontDecrease"),
       shortcut: "Ctrl+-",
       onClick: () => changeFontSize(-1),
       disabled: !ready || fontSize <= 10,
     },
     {
-      label: "글자 크기 초기화",
+      label: t("editor.fontReset"),
       shortcut: "Ctrl+0",
       onClick: () => changeFontSize("reset"),
       disabled: !ready || fontSize === 13,
@@ -603,10 +615,10 @@ export default function EditorPane({
   ];
 
   usePaneMenuRegistration(id, [
-    { label: "파일", items: fileMenu },
-    { label: "편집", items: editMenu },
-    { label: "코드", items: codeMenu },
-    { label: "보기", items: viewMenu },
+    { label: t("common.file"), items: fileMenu },
+    { label: t("common.edit"), items: editMenu },
+    { label: t("common.code"), items: codeMenu },
+    { label: t("common.view"), items: viewMenu },
   ]);
 
   return (
@@ -619,17 +631,17 @@ export default function EditorPane({
             <span className="font-mono text-2xs text-slate-500">.{index}</span>
           )}
           {dirty && (
-            <span className="text-amber-400" title="저장하지 않은 변경사항">
+            <span className="text-amber-400" title={t("editor.unsaved")}>
               ●
             </span>
           )}
           <span className="shrink-0 rounded bg-ink-700 px-1.5 py-px text-2xs text-slate-400">
-            {languageLabel(filePath)}
+            {languageLabel(filePath, t("editor.plainText"))}
           </span>
           {ready && encoding !== "UTF-8" && (
             <span
               className="shrink-0 rounded bg-amber-400/15 px-1.5 py-px text-2xs text-amber-400"
-              title={`이 파일은 ${encoding} 인코딩이에요. 저장할 때도 같은 인코딩으로 유지돼요.`}
+              title={t("editor.encodingNotice", { encoding })}
             >
               {encoding}
             </span>
@@ -637,8 +649,8 @@ export default function EditorPane({
         </span>
         <button
           onClick={() => requestClose(id)}
-          title="pane 닫기"
-          aria-label="pane 닫기"
+          title={t("pane.close")}
+          aria-label={t("pane.close")}
           className="shrink-0 rounded px-1.5 py-0.5 hover:bg-red-500/20 hover:text-red-300"
         >
           ✕
@@ -662,9 +674,9 @@ export default function EditorPane({
       )}
       {reloadConfirm && (
         <ConfirmDialog
-          title="변경사항을 버리고 다시 불러올까요?"
-          message="저장하지 않은 편집 내용은 사라지고 서버에 있는 파일로 바뀌어요."
-          confirmLabel="다시 불러오기"
+          title={t("editor.reloadConfirm.title")}
+          message={t("editor.reloadConfirm.message")}
+          confirmLabel={t("editor.reloadConfirm.action")}
           danger
           onConfirm={() => {
             setReloadConfirm(false);
@@ -701,7 +713,7 @@ export default function EditorPane({
               onClick={downloadInstead}
               className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-500"
             >
-              다운로드
+              {t("common.download")}
             </button>
           </div>
         ) : (
@@ -709,7 +721,7 @@ export default function EditorPane({
             <div ref={hostRef} className="h-full w-full overflow-auto" />
             {loading && (
               <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">
-                불러오는 중…
+                {t("files.loading")}
               </div>
             )}
           </>
@@ -717,10 +729,10 @@ export default function EditorPane({
       </div>
       {ready && (
         <div className="flex h-6 shrink-0 items-center justify-end gap-3 border-t border-ink-700/60 bg-ink-800 px-2 font-mono text-2xs text-slate-500">
-          <span title="탭 한 칸이 차지하는 열 수">탭: 4</span>
-          <span title="줄바꿈 형식">{lineEnding}</span>
-          <span title="문자 인코딩">{encoding}</span>
-          <span title="편집기 글자 크기">{fontSize}px</span>
+          <span title={t("editor.status.tabWidth")}>{t("editor.status.tab")}</span>
+          <span title={t("editor.status.lineEnding")}>{lineEnding}</span>
+          <span title={t("editor.status.encoding")}>{encoding}</span>
+          <span title={t("editor.status.fontSize")}>{fontSize}px</span>
           <span ref={positionRef} className="min-w-[5.5rem] text-right" />
         </div>
       )}

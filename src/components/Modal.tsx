@@ -1,4 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 
 function Backdrop({ children }: { children: ReactNode }) {
   return (
@@ -14,7 +15,7 @@ function Backdrop({ children }: { children: ReactNode }) {
 export function ConfirmDialog({
   title,
   message,
-  confirmLabel = "확인",
+  confirmLabel,
   danger = false,
   onConfirm,
   onCancel,
@@ -26,6 +27,7 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -43,7 +45,7 @@ export function ConfirmDialog({
           onClick={onCancel}
           className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700"
         >
-          취소
+          {t("common.cancel")}
         </button>
         <button
           onClick={onConfirm}
@@ -51,7 +53,7 @@ export function ConfirmDialog({
             danger ? "bg-red-600 hover:bg-red-500" : "bg-sky-600 hover:bg-sky-500"
           }`}
         >
-          {confirmLabel}
+          {confirmLabel ?? t("common.confirm")}
         </button>
       </div>
     </Backdrop>
@@ -75,6 +77,7 @@ export function UnsavedChangesDialog({
   onDiscard: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -86,31 +89,30 @@ export function UnsavedChangesDialog({
   return (
     <Backdrop>
       <h2 className="text-base font-semibold text-slate-100">
-        저장하지 않은 변경사항이 있어요
+        {t("modal.unsaved.title")}
       </h2>
       <div className="mt-2 text-sm text-slate-300">
-        <span className="font-medium text-slate-100">{fileName}</span> 의 변경사항을
-        저장할까요? 저장하지 않으면 변경한 내용이 사라져요.
+        {t("modal.unsaved.message", { name: fileName })}
       </div>
       <div className="mt-6 flex justify-end gap-2">
         <button
           onClick={onCancel}
           className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700"
         >
-          취소
+          {t("common.cancel")}
         </button>
         <button
           onClick={onDiscard}
           className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-300 hover:bg-red-500/20"
         >
-          저장 안 함
+          {t("modal.unsaved.discard")}
         </button>
         <button
           onClick={onSave}
           disabled={saving}
           className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
         >
-          {saving ? "저장 중…" : "저장"}
+          {saving ? t("common.saving") : t("common.save")}
         </button>
       </div>
     </Backdrop>
@@ -131,6 +133,7 @@ export function FileConflictDialog({
   onOverwrite: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) onCancel();
@@ -142,12 +145,10 @@ export function FileConflictDialog({
   return (
     <Backdrop>
       <h2 className="text-base font-semibold text-slate-100">
-        서버의 파일이 변경됐어요
+        {t("modal.conflict.title")}
       </h2>
       <div className="mt-2 text-sm text-slate-300">
-        <span className="font-medium text-slate-100">{fileName}</span> 이 다른
-        곳에서 수정됐어요. 서버 버전을 다시 불러오거나, 현재 편집 내용을 서버에
-        덮어쓸 수 있어요.
+        {t("modal.conflict.message", { name: fileName })}
       </div>
       <div className="mt-6 flex flex-wrap justify-end gap-2">
         <button
@@ -155,21 +156,21 @@ export function FileConflictDialog({
           disabled={busy}
           className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700 disabled:opacity-50"
         >
-          취소
+          {t("common.cancel")}
         </button>
         <button
           onClick={onReload}
           disabled={busy}
           className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
         >
-          서버 버전 불러오기
+          {t("modal.conflict.reload")}
         </button>
         <button
           onClick={onOverwrite}
           disabled={busy}
           className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50"
         >
-          {busy ? "저장 중…" : "내 내용으로 덮어쓰기"}
+          {busy ? t("common.saving") : t("modal.conflict.overwrite")}
         </button>
       </div>
     </Backdrop>
@@ -196,6 +197,7 @@ export function KillProcessDialog({
   onForceKill: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -207,15 +209,14 @@ export function KillProcessDialog({
   return (
     <Backdrop>
       <h2 className="text-base font-semibold text-slate-100">
-        프로세스를 종료할까요?
+        {t("modal.kill.title")}
       </h2>
       <div className="mt-2 text-sm text-slate-300">
         <span className="font-mono text-slate-100">PID {pid}</span>
         <span className="mx-1 text-slate-500">·</span>
         <span className="break-all font-mono text-slate-100">{name}</span>
         <p className="mt-2 text-slate-400">
-          먼저 정상 종료를 시도해보고, 응답이 없을 때만 강제 종료(-9)를 쓰는 걸
-          권장해요.
+          {t("modal.kill.help")}
         </p>
       </div>
       <div className="mt-6 flex justify-end gap-2">
@@ -223,21 +224,21 @@ export function KillProcessDialog({
           onClick={onCancel}
           className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700"
         >
-          취소
+          {t("common.cancel")}
         </button>
         <button
           onClick={onForceKill}
           disabled={busy}
           className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50"
         >
-          강제 종료 (-9)
+          {t("modal.kill.force")}
         </button>
         <button
           onClick={onKill}
           disabled={busy}
           className="rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
         >
-          {busy ? "종료 중…" : "종료"}
+          {busy ? t("modal.kill.killing") : t("modal.kill.kill")}
         </button>
       </div>
     </Backdrop>
@@ -249,7 +250,7 @@ export function PromptDialog({
   title,
   initialValue = "",
   placeholder,
-  confirmLabel = "확인",
+  confirmLabel,
   onConfirm,
   onCancel,
 }: {
@@ -262,6 +263,7 @@ export function PromptDialog({
 }) {
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     // Focus and pre-select the name (minus extension feel: select all is fine).
@@ -298,14 +300,14 @@ export function PromptDialog({
             onClick={onCancel}
             className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700"
           >
-            취소
+            {t("common.cancel")}
           </button>
           <button
             type="submit"
             disabled={!value.trim()}
             className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
           >
-            {confirmLabel}
+            {confirmLabel ?? t("common.confirm")}
           </button>
         </div>
       </form>

@@ -21,6 +21,7 @@ import { useSettings } from "../lib/settings";
 import CommandWidgetPanel, {
   CommandResult,
 } from "./CommandWidgetPanel";
+import { useI18n } from "../i18n";
 
 /** xterm color theme, sourced from the central design tokens (see index.css). */
 function terminalTheme() {
@@ -52,6 +53,9 @@ export default function TerminalPane({ id }: { id: string }) {
   const flushTimerRef = useRef<number | null>(null);
   const focusedRef = useRef(false);
   const focused = useAppStore((s) => s.focusedPaneId === id);
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // Command-GUI results captured in this pane, and which one is open below.
   const [results, setResults] = useState<CommandResult[]>([]);
@@ -129,7 +133,7 @@ export default function TerminalPane({ id }: { id: string }) {
       });
       decoration?.onRender((el) => {
         el.textContent = "▦";
-        el.title = "GUI로 보기";
+        el.title = tRef.current("terminal.viewAsGui");
         el.style.cursor = "pointer";
         el.style.pointerEvents = "auto";
         el.style.color = colorToken("--color-ink-900");
@@ -143,7 +147,7 @@ export default function TerminalPane({ id }: { id: string }) {
     openTerminal(id, term.cols, term.rows, SHELL_INTEGRATION_SETUP)
       .catch(() => {
         if (!disposed)
-          term.write("\r\n\x1b[31m터미널을 열지 못했어요.\x1b[0m\r\n");
+          term.write(`\r\n\x1b[31m${tRef.current("terminal.openFailed")}\x1b[0m\r\n`);
       });
 
     // Keystrokes -> shell.
@@ -204,7 +208,7 @@ export default function TerminalPane({ id }: { id: string }) {
     const closedSub = listen<string>("terminal-closed", (e) => {
       if (e.payload === id && !disposed) {
         flush();
-        term.write("\r\n\x1b[90m[세션이 종료되었습니다]\x1b[0m\r\n");
+        term.write(`\r\n\x1b[90m[${tRef.current("terminal.sessionEnded")}]\x1b[0m\r\n`);
       }
     });
 

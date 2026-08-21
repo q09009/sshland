@@ -23,6 +23,7 @@ import ContextMenu, { MenuItem } from "../components/ContextMenu";
 import type { DropItem } from "../components/Menu";
 import FileView from "../components/FileView";
 import { usePaneMenuRegistration } from "../lib/paneMenus";
+import { useI18n } from "../i18n";
 
 /**
  * One file-manager pane. All directory state (path, listing, view mode) is
@@ -42,6 +43,9 @@ export default function FilesScreen({ id }: { id: string }) {
   const logCommand = useAppStore((s) => s.logCommand);
   const fsVersion = useAppStore((s) => s.fsVersion);
   const openEditor = useAppStore((s) => s.openEditor);
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const [currentPath, setCurrentPath] = useState(connection?.home ?? "/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -98,7 +102,7 @@ export default function FilesScreen({ id }: { id: string }) {
       }
     } catch (err) {
       if (reqIdRef.current === reqId) {
-        setError(typeof err === "string" ? err : "폴더를 불러오지 못했어요.");
+        setError(typeof err === "string" ? err : tRef.current("files.error.load"));
         setLoading(false);
       }
     }
@@ -206,7 +210,7 @@ export default function FilesScreen({ id }: { id: string }) {
       } catch (err) {
         finishTransfer(
           id,
-          typeof err === "string" ? err : "업로드에 실패했어요."
+          typeof err === "string" ? err : tRef.current("files.error.upload")
         );
       }
       if (showBatch) advanceBatch(batchId);
@@ -277,7 +281,7 @@ export default function FilesScreen({ id }: { id: string }) {
     const src = entry.path;
     if (destDir === parentPath(src)) return; // already there
     if (entry.isDir && (destDir === src || destDir.startsWith(src + "/"))) {
-      setOpError("폴더를 자기 자신 안으로 옮길 수 없어요.");
+      setOpError(t("files.error.moveIntoSelf"));
       return;
     }
     try {
@@ -286,7 +290,7 @@ export default function FilesScreen({ id }: { id: string }) {
       logOp({ type: "move", from: src, to });
       bumpFs();
     } catch (err) {
-      setOpError(typeof err === "string" ? err : "옮기지 못했어요.");
+      setOpError(typeof err === "string" ? err : t("files.error.move"));
     }
   }
 
@@ -307,9 +311,9 @@ export default function FilesScreen({ id }: { id: string }) {
   /** Offer to download a file that can't be opened in the editor. */
   function offerDownload(entry: FileEntry, reason: React.ReactNode) {
     setConfirm({
-      title: "편집기로 열 수 없어요",
+      title: t("files.cannotEdit.title"),
       message: reason,
-      confirmLabel: "다운로드",
+      confirmLabel: t("common.download"),
       onConfirm: () => {
         setConfirm(null);
         void doDownload(entry);
@@ -327,20 +331,14 @@ export default function FilesScreen({ id }: { id: string }) {
     if (isProbablyBinary(entry.name)) {
       offerDownload(
         entry,
-        <>
-          <span className="font-medium text-slate-100">{entry.name}</span> 은(는)
-          텍스트 파일이 아니라서 편집기로 열 수 없어요. 대신 다운로드할까요?
-        </>
+        t("files.cannotEdit.binary", { name: entry.name })
       );
       return;
     }
     if (entry.size >= MAX_EDITABLE_SIZE) {
       offerDownload(
         entry,
-        <>
-          <span className="font-medium text-slate-100">{entry.name}</span> 은(는)
-          너무 커서 편집기로 열 수 없어요. 대신 다운로드할까요?
-        </>
+        t("files.cannotEdit.large", { name: entry.name })
       );
       return;
     }
@@ -365,7 +363,7 @@ export default function FilesScreen({ id }: { id: string }) {
       if (op) logOp(op);
       bumpFs();
     } catch (err) {
-      setOpError(typeof err === "string" ? err : "작업에 실패했어요.");
+      setOpError(typeof err === "string" ? err : t("files.error.operation"));
     }
   }
 
@@ -381,14 +379,14 @@ export default function FilesScreen({ id }: { id: string }) {
     } catch (err) {
       finishTransfer(
         id,
-        typeof err === "string" ? err : "다운로드에 실패했어요."
+        typeof err === "string" ? err : t("files.error.download")
       );
     }
   }
 
   function doRename(entry: FileEntry) {
     setPrompt({
-      title: "이름 변경",
+      title: t("common.rename"),
       initialValue: entry.name,
       onConfirm: (newName) => {
         setPrompt(null);
@@ -405,16 +403,15 @@ export default function FilesScreen({ id }: { id: string }) {
 
   function doDelete(entry: FileEntry) {
     setConfirm({
-      title: entry.isDir ? "폴더를 삭제할까요?" : "파일을 삭제할까요?",
-      confirmLabel: "삭제",
+      title: entry.isDir ? t("files.deleteFolder.title") : t("files.deleteFile.title"),
+      confirmLabel: t("common.delete"),
       danger: true,
       message: (
         <>
-          <span className="font-medium text-slate-100">{entry.name}</span>
           {entry.isDir
-            ? " 폴더와 그 안의 모든 파일이 삭제돼요."
-            : " 파일이 삭제돼요."}
-          <br />이 작업은 되돌릴 수 없어요.
+            ? t("files.deleteFolder.message", { name: entry.name })
+            : t("files.deleteFile.message", { name: entry.name })}
+          <br />{t("files.delete.irreversible")}
         </>
       ),
       onConfirm: () => {
@@ -430,8 +427,8 @@ export default function FilesScreen({ id }: { id: string }) {
 
   function doNewFolder() {
     setPrompt({
-      title: "새 폴더 만들기",
-      placeholder: "폴더 이름",
+      title: t("files.newFolder.title"),
+      placeholder: t("files.newFolder.placeholder"),
       onConfirm: (name) => {
         setPrompt(null);
         const path = joinPath(currentPath, name);
@@ -442,8 +439,8 @@ export default function FilesScreen({ id }: { id: string }) {
 
   function doNewFile() {
     setPrompt({
-      title: "새 파일 만들기",
-      placeholder: "파일 이름 (예: notes.txt)",
+      title: t("files.newFile.title"),
+      placeholder: t("files.newFile.placeholder"),
       onConfirm: (name) => {
         setPrompt(null);
         void createNewFile(joinPath(currentPath, name));
@@ -459,7 +456,7 @@ export default function FilesScreen({ id }: { id: string }) {
       bumpFs();
       openEditor(path);
     } catch (err) {
-      setOpError(typeof err === "string" ? err : "파일을 만들지 못했어요.");
+      setOpError(typeof err === "string" ? err : t("files.error.create"));
     }
   }
 
@@ -473,9 +470,9 @@ export default function FilesScreen({ id }: { id: string }) {
     const taken = new Set(entries.map((e) => e.name));
     let name = clipboard.name;
     if (taken.has(name)) {
-      let n = name + " 사본";
+      let n = t("files.copySuffix", { name });
       let i = 2;
-      while (taken.has(n)) n = `${name} 사본 ${i++}`;
+      while (taken.has(n)) n = t("files.copyNumberedSuffix", { name, number: i++ });
       name = n;
     }
     const to = joinPath(currentPath, name);
@@ -504,72 +501,72 @@ export default function FilesScreen({ id }: { id: string }) {
     if (!menu.entry) {
       // Background menu.
       const items: MenuItem[] = [
-        { label: "새 파일", onClick: doNewFile },
-        { label: "새 폴더", onClick: doNewFolder },
+        { label: t("files.newFile"), onClick: doNewFile },
+        { label: t("files.newFolder"), onClick: doNewFolder },
       ];
       if (clipboard)
-        items.push({ label: `붙여넣기 (${clipboard.name})`, onClick: doPaste });
+        items.push({ label: t("common.pasteNamed", { name: clipboard.name }), onClick: doPaste });
       return items;
     }
     const entry = menu.entry;
-    const items: MenuItem[] = [{ label: "복사", onClick: () => doCopy(entry) }];
+    const items: MenuItem[] = [{ label: t("common.copy"), onClick: () => doCopy(entry) }];
     if (!entry.isDir)
-      items.push({ label: "다운로드", onClick: () => doDownload(entry) });
-    items.push({ label: "이름 변경", onClick: () => doRename(entry) });
-    items.push({ label: "삭제", danger: true, onClick: () => doDelete(entry) });
+      items.push({ label: t("common.download"), onClick: () => doDownload(entry) });
+    items.push({ label: t("common.rename"), onClick: () => doRename(entry) });
+    items.push({ label: t("common.delete"), danger: true, onClick: () => doDelete(entry) });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu, clipboard]);
+  }, [menu, clipboard, t]);
 
   // Menu-bar dropdown contents.
   const fileMenu: DropItem[] = [
-    { label: "새 파일", onClick: doNewFile },
-    { label: "새 폴더", onClick: doNewFolder },
+    { label: t("files.newFile"), onClick: doNewFile },
+    { label: t("files.newFolder"), onClick: doNewFolder },
     {
-      label: "다운로드",
+      label: t("common.download"),
       onClick: () => selected && doDownload(selected),
       disabled: !selected || selected.isDir,
     },
-    { label: "새로고침", onClick: () => loadDir(currentPath) },
+    { label: t("common.refresh"), onClick: () => loadDir(currentPath) },
     { type: "separator" },
-    { label: "접속 끊기", onClick: handleDisconnect },
+    { label: t("files.disconnect"), onClick: handleDisconnect },
   ];
   const editMenu: DropItem[] = [
     {
-      label: "복사",
+      label: t("common.copy"),
       onClick: () => selected && doCopy(selected),
       disabled: !selected,
     },
     {
-      label: clipboard ? `붙여넣기 (${clipboard.name})` : "붙여넣기",
+      label: clipboard ? t("common.pasteNamed", { name: clipboard.name }) : t("common.paste"),
       onClick: doPaste,
       disabled: !clipboard,
     },
     { type: "separator" },
     {
-      label: "이름 변경",
+      label: t("common.rename"),
       onClick: () => selected && doRename(selected),
       disabled: !selected,
     },
     {
-      label: "삭제",
+      label: t("common.delete"),
       danger: true,
       onClick: () => selected && doDelete(selected),
       disabled: !selected,
     },
   ];
   const viewMenu: DropItem[] = [
-    { type: "check", label: "목록", checked: viewMode === "list", onClick: () => setViewMode("list") },
-    { type: "check", label: "자세히", checked: viewMode === "details", onClick: () => setViewMode("details") },
-    { type: "check", label: "큰 아이콘", checked: viewMode === "grid", onClick: () => setViewMode("grid") },
+    { type: "check", label: t("files.view.list"), checked: viewMode === "list", onClick: () => setViewMode("list") },
+    { type: "check", label: t("files.view.details"), checked: viewMode === "details", onClick: () => setViewMode("details") },
+    { type: "check", label: t("files.view.grid"), checked: viewMode === "grid", onClick: () => setViewMode("grid") },
     { type: "separator" },
-    { type: "check", label: "숨김파일 표시", checked: showHidden, onClick: () => setShowHidden((v) => !v) },
+    { type: "check", label: t("files.view.hidden"), checked: showHidden, onClick: () => setShowHidden((v) => !v) },
   ];
 
   usePaneMenuRegistration(id, [
-    { label: "파일", items: fileMenu },
-    { label: "편집", items: editMenu },
-    { label: "보기", items: viewMenu },
+    { label: t("common.file"), items: fileMenu },
+    { label: t("common.edit"), items: editMenu },
+    { label: t("common.view"), items: viewMenu },
   ]);
 
   const atRoot = currentPath === "/";
@@ -582,19 +579,19 @@ export default function FilesScreen({ id }: { id: string }) {
       {/* Navigation row: up / home / refresh + breadcrumb */}
       <div className="flex items-center gap-1 border-b border-ink-700/60 bg-ink-800/60 px-2 py-1">
         <ToolButton
-          label="상위 폴더"
+          label={t("files.up")}
           disabled={atRoot}
           onClick={() => loadDir(parentPath(currentPath))}
         >
           <path d="M12 19V6M5 12l7-7 7 7" />
         </ToolButton>
         <ToolButton
-          label="홈"
+          label={t("files.home")}
           onClick={() => connection && loadDir(connection.home)}
         >
           <path d="M3 11l9-8 9 8M5 10v10h14V10" />
         </ToolButton>
-        <ToolButton label="새로고침" onClick={() => loadDir(currentPath)}>
+        <ToolButton label={t("common.refresh")} onClick={() => loadDir(currentPath)}>
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
           <path d="M21 3v5h-5" />
         </ToolButton>
@@ -611,7 +608,7 @@ export default function FilesScreen({ id }: { id: string }) {
                     : "text-slate-400"
                 }`}
               >
-                {crumb.name === "/" ? "루트" : crumb.name}
+                {crumb.name === "/" ? t("files.root") : crumb.name}
               </button>
             </span>
           ))}
@@ -624,7 +621,7 @@ export default function FilesScreen({ id }: { id: string }) {
         data-drop-dir={currentPath}
       >
         {loading ? (
-          <CenterMessage>불러오는 중…</CenterMessage>
+          <CenterMessage>{t("files.loading")}</CenterMessage>
         ) : error ? (
           <CenterMessage>
             <span className="text-red-300">{error}</span>
@@ -632,8 +629,8 @@ export default function FilesScreen({ id }: { id: string }) {
         ) : visibleEntries.length === 0 ? (
           <CenterMessage>
             {entries.length === 0
-              ? "이 폴더는 비어 있어요."
-              : "표시할 파일이 없어요. (숨김파일이 숨겨져 있어요)"}
+              ? t("files.empty")
+              : t("files.noVisible")}
           </CenterMessage>
         ) : (
           <FileView
@@ -652,10 +649,10 @@ export default function FilesScreen({ id }: { id: string }) {
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-sky-400 bg-sky-950/60 backdrop-blur-sm">
           <div className="rounded-2xl px-10 py-8 text-center">
             <div className="text-lg font-medium text-sky-200">
-              여기에 놓으면 업로드돼요
+              {t("files.drop.title")}
             </div>
             <div className="mt-1 truncate text-sm text-sky-300/80">
-              {currentPath} 에 파일과 폴더가 올라갑니다
+              {t("files.drop.destination", { path: currentPath })}
             </div>
           </div>
         </div>
@@ -679,7 +676,7 @@ export default function FilesScreen({ id }: { id: string }) {
         <ConfirmDialog
           title={confirm.title}
           message={confirm.message}
-          confirmLabel={confirm.confirmLabel ?? "확인"}
+          confirmLabel={confirm.confirmLabel ?? t("common.confirm")}
           danger={confirm.danger}
           onConfirm={confirm.onConfirm}
           onCancel={() => setConfirm(null)}
