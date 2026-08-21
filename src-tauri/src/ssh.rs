@@ -113,6 +113,17 @@ struct TerminalOutput {
     data: Vec<u8>,
 }
 
+/// One frontend input chunk waiting to be fully written and flushed. Keeping
+/// the offset lets a non-blocking write resume after `WouldBlock` without
+/// dropping or duplicating any bytes.
+struct PendingTerminalInput {
+    sequence: u64,
+    data: Vec<u8>,
+    written: usize,
+}
+
+type PendingTerminalInputs = HashMap<String, std::collections::VecDeque<PendingTerminalInput>>;
+
 /// A chunk of a macro run's combined stdout/stderr, streamed as a `macro-output`
 /// event. The frontend accumulates these and parses its own step sentinels out.
 #[derive(Serialize, Clone)]
@@ -890,7 +901,8 @@ fn open_shell(session: &Session, cols: u16, rows: u16, setup: &str) -> Result<Ch
     Ok(channel)
 }
 
-/// Handle one worker request. Assumes the session is in blocking mode.
+/// Handle one worker request. The worker uses blocking mode for every request
+/// except `WriteTerminal`, which only appends to the non-blocking input queue.
 /// Returns `true` when the worker should stop (disconnect or dropped link).
 fn handle_req(
     req: Req,
@@ -899,6 +911,7 @@ fn handle_req(
     app: &AppHandle,
     terminals: &mut HashMap<String, Channel>,
     macros: &mut HashMap<String, Channel>,
+    pending_terminal_inputs: &mut PendingTerminalInputs,
     terminal_input_sequence: &mut u64,
 ) -> bool {
     let terminal_channels = terminals.len();
@@ -1087,6 +1100,7 @@ fn handle_req(
         } => {
             match open_shell(session, cols, rows, &setup) {
                 Ok(channel) => {
+                    pending_terminal_inputs.remove(&id);
                     terminals.insert(id, channel);
                     let _ = resp.send(Ok(()));
                 }
@@ -1099,28 +1113,15 @@ fn handle_req(
         Req::WriteTerminal { id, data } => {
             *terminal_input_sequence = terminal_input_sequence.wrapping_add(1);
             let sequence = *terminal_input_sequence;
-            if let Some(ch) = terminals.get_mut(&id) {
-                if let Err(write_error) = ch.write_all(&data) {
-                    record_terminal_input_error(
-                        app,
-                        "write",
+            if terminals.contains_key(&id) {
+                pending_terminal_inputs
+                    .entry(id)
+                    .or_default()
+                    .push_back(PendingTerminalInput {
                         sequence,
-                        &data,
-                        &write_error,
-                        terminal_channels,
-                        macro_channels,
-                    );
-                } else if let Err(flush_error) = ch.flush() {
-                    record_terminal_input_error(
-                        app,
-                        "flush",
-                        sequence,
-                        &data,
-                        &flush_error,
-                        terminal_channels,
-                        macro_channels,
-                    );
-                }
+                        data,
+                        written: 0,
+                    });
             } else {
                 diagnostics::record(
                     app,
@@ -1145,6 +1146,7 @@ fn handle_req(
             false
         }
         Req::CloseTerminal { id } => {
+            pending_terminal_inputs.remove(&id);
             if let Some(mut ch) = terminals.remove(&id) {
                 let _ = ch.close();
             }
@@ -1177,6 +1179,104 @@ fn handle_req(
         Req::Disconnect => {
             diagnostics::record(app, "INFO", "connection_disconnect_requested", &[]);
             true
+        }
+    }
+}
+
+/// Dispatch one worker request without toggling the whole libssh2 session for
+/// keystrokes. Terminal input only enters a queue; operations that actually use
+/// SFTP or a channel synchronously still run in blocking mode.
+fn dispatch_worker_req(
+    req: Req,
+    session: &Session,
+    sftp: &Sftp,
+    app: &AppHandle,
+    terminals: &mut HashMap<String, Channel>,
+    macros: &mut HashMap<String, Channel>,
+    pending_terminal_inputs: &mut PendingTerminalInputs,
+    terminal_input_sequence: &mut u64,
+) -> bool {
+    let queued_terminal_input = matches!(&req, Req::WriteTerminal { .. });
+    if !queued_terminal_input {
+        session.set_blocking(true);
+    }
+
+    let should_stop = handle_req(
+        req,
+        session,
+        sftp,
+        app,
+        terminals,
+        macros,
+        pending_terminal_inputs,
+        terminal_input_sequence,
+    );
+
+    if !queued_terminal_input && !should_stop {
+        session.set_blocking(false);
+    }
+    should_stop
+}
+
+/// Advance one terminal's queued input while the session remains non-blocking.
+/// `false` means either the queue drained or libssh2 asked us to retry later;
+/// `true` means a real channel error occurred and the caller should close/probe.
+fn drain_terminal_input(
+    app: &AppHandle,
+    channel: &mut Channel,
+    queue: &mut std::collections::VecDeque<PendingTerminalInput>,
+    terminal_channels: usize,
+    macro_channels: usize,
+) -> bool {
+    loop {
+        let Some(input) = queue.front_mut() else {
+            return false;
+        };
+
+        if input.written < input.data.len() {
+            match channel.write(&input.data[input.written..]) {
+                Ok(0) => return false,
+                Ok(written) => {
+                    input.written += written;
+                    continue;
+                }
+                Err(ref write_error) if write_error.kind() == io::ErrorKind::WouldBlock => {
+                    return false;
+                }
+                Err(write_error) => {
+                    record_terminal_input_error(
+                        app,
+                        "write",
+                        input.sequence,
+                        &input.data,
+                        &write_error,
+                        terminal_channels,
+                        macro_channels,
+                    );
+                    return true;
+                }
+            }
+        }
+
+        match channel.flush() {
+            Ok(()) => {
+                queue.pop_front();
+            }
+            Err(ref flush_error) if flush_error.kind() == io::ErrorKind::WouldBlock => {
+                return false;
+            }
+            Err(flush_error) => {
+                record_terminal_input_error(
+                    app,
+                    "flush",
+                    input.sequence,
+                    &input.data,
+                    &flush_error,
+                    terminal_channels,
+                    macro_channels,
+                );
+                return true;
+            }
         }
     }
 }
@@ -1314,22 +1414,31 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
     // Streaming exec channels for in-flight macro runs (keyed by run id). Polled
     // with the same non-blocking read-and-batch mechanism as terminals.
     let mut macros: HashMap<String, Channel> = HashMap::new();
+    let mut pending_terminal_inputs: PendingTerminalInputs = HashMap::new();
     let mut terminal_input_sequence = 0u64;
     let mut buf = [0u8; TERM_BUF];
     let mut next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
 
+    // Streaming I/O stays non-blocking between worker requests. Previously the
+    // session flipped mode twice every 15 ms; libssh2 could then be interrupted
+    // between EAGAIN-driven channel state-machine calls by a blocking write.
+    session.set_blocking(false);
+
     'outer: loop {
-        // 1. Handle every command that's already queued (blocking mode).
+        // 1. Handle every command that's already queued. Keystrokes only enter
+        //    the non-blocking input queue; synchronous file/control operations
+        //    temporarily switch the session to blocking mode.
         loop {
             match cmd_rx.try_recv() {
                 Ok(req) => {
-                    if handle_req(
+                    if dispatch_worker_req(
                         req,
                         &session,
                         &sftp,
                         &app,
                         &mut terminals,
                         &mut macros,
+                        &mut pending_terminal_inputs,
                         &mut terminal_input_sequence,
                     ) {
                         break 'outer;
@@ -1340,13 +1449,26 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
             }
         }
 
-        // 2. Poll terminals and macro runs for output, batching each channel into
-        //    one event. Both share one non-blocking window over the session.
+        // 2. Advance queued terminal writes, then poll terminal/macro output.
+        //    All streaming operations remain in the same non-blocking mode.
         if !terminals.is_empty() || !macros.is_empty() {
-            session.set_blocking(false);
-
             let mut closed_terms: Vec<String> = Vec::new();
+            let terminal_channels = terminals.len();
+            let macro_channels = macros.len();
+            for (id, queue) in pending_terminal_inputs.iter_mut() {
+                let failed = terminals.get_mut(id).is_some_and(|channel| {
+                    drain_terminal_input(&app, channel, queue, terminal_channels, macro_channels)
+                });
+                if failed {
+                    closed_terms.push(id.clone());
+                }
+            }
+            pending_terminal_inputs.retain(|_, queue| !queue.is_empty());
+
             for (id, channel) in terminals.iter_mut() {
+                if closed_terms.contains(id) {
+                    continue;
+                }
                 let (data, closed) = drain_channel(&app, "terminal", channel, &mut buf);
                 if !data.is_empty() {
                     let _ = app.emit(
@@ -1379,13 +1501,12 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
                 }
             }
 
-            session.set_blocking(true);
-
             // EOF can mean a normal shell exit, but it is also how libssh2 may
             // surface a dead transport. Probe immediately so a dropped SSH
             // connection is not left looking like only one terminal ended until
             // the user happens to perform a later SFTP operation.
             if !closed_terms.is_empty() || !closed_macros.is_empty() {
+                session.set_blocking(true);
                 if let Err(probe_error) = sftp.realpath(Path::new(".")) {
                     record_connection_lost(
                         &app,
@@ -1399,9 +1520,11 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
                     let _ = app.emit("connection-lost", ());
                     break 'outer;
                 }
+                session.set_blocking(false);
             }
 
             for id in closed_terms {
+                pending_terminal_inputs.remove(&id);
                 terminals.remove(&id);
                 let _ = app.emit("terminal-closed", id);
             }
@@ -1415,6 +1538,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
         //    policy in libssh2; without this call an otherwise idle connection
         //    can still be reaped by the server, NAT, VPN, or firewall.
         if Instant::now() >= next_keepalive {
+            session.set_blocking(true);
             match session.keepalive_send() {
                 Ok(seconds_to_next) => {
                     // libssh2 reports when it needs to be called again. Clamp a
@@ -1441,6 +1565,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
                     next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
                 }
             }
+            session.set_blocking(false);
         }
 
         // 4. Wait for the next request, terminal poll, or keepalive deadline.
@@ -1451,13 +1576,14 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
         let wait = worker_wait_timeout(has_streaming_channels, until_keepalive);
         match cmd_rx.recv_timeout(wait) {
             Ok(req) => {
-                if handle_req(
+                if dispatch_worker_req(
                     req,
                     &session,
                     &sftp,
                     &app,
                     &mut terminals,
                     &mut macros,
+                    &mut pending_terminal_inputs,
                     &mut terminal_input_sequence,
                 ) {
                     break 'outer;
@@ -1469,6 +1595,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
     }
 
     // Close all terminal + macro channels, then the session.
+    session.set_blocking(true);
     for (_, mut ch) in terminals.drain() {
         let _ = ch.close();
     }
