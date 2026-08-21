@@ -20,7 +20,7 @@ use ssh2::{Channel, OpenFlags, OpenType, PtyModeOpcode, PtyModes, Session, Sftp}
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::oneshot;
 
-use crate::error;
+use crate::{diagnostics, error};
 
 /// How often the worker polls terminal channels for output while any are open.
 const TERMINAL_POLL: Duration = Duration::from_millis(15);
@@ -393,9 +393,48 @@ fn establish_session(params: ConnectParams) -> Result<Session, String> {
 /// On error we probe the link with a cheap SFTP round-trip (`realpath`). If
 /// that fails too, the connection is gone, so we notify the frontend and signal
 /// the worker to stop. Returns `true` when the worker should break its loop.
+fn ssh_error_code(error: &ssh2::Error) -> String {
+    match error.code() {
+        ssh2::ErrorCode::Session(code) => format!("session:{code}"),
+        ssh2::ErrorCode::SFTP(code) => format!("sftp:{code}"),
+    }
+}
+
+fn record_connection_lost(
+    app: &AppHandle,
+    trigger: &str,
+    operation: &str,
+    probe_error: &ssh2::Error,
+    primary_error: Option<&ssh2::Error>,
+    terminal_channels: usize,
+    macro_channels: usize,
+) {
+    let mut fields = vec![
+        ("trigger", trigger.to_owned()),
+        ("operation", operation.to_owned()),
+        ("probe_error_code", ssh_error_code(probe_error)),
+        ("probe_error_message", probe_error.message().to_owned()),
+        ("terminal_channels", terminal_channels.to_string()),
+        ("macro_channels", macro_channels.to_string()),
+    ];
+
+    if let Some(primary_error) = primary_error {
+        fields.push(("primary_error_code", ssh_error_code(primary_error)));
+        fields.push((
+            "primary_error_message",
+            primary_error.message().to_owned(),
+        ));
+    }
+
+    diagnostics::record(app, "ERROR", "connection_lost", &fields);
+}
+
 fn send_and_check<T>(
     sftp: &Sftp,
     app: &AppHandle,
+    operation: &'static str,
+    terminal_channels: usize,
+    macro_channels: usize,
     result: Result<T, String>,
     resp: oneshot::Sender<Result<T, String>>,
 ) -> bool {
@@ -405,7 +444,16 @@ fn send_and_check<T>(
             false
         }
         Err(msg) => {
-            if sftp.realpath(Path::new(".")).is_err() {
+            if let Err(probe_error) = sftp.realpath(Path::new(".")) {
+                record_connection_lost(
+                    app,
+                    "request_error_probe_failed",
+                    operation,
+                    &probe_error,
+                    None,
+                    terminal_channels,
+                    macro_channels,
+                );
                 let _ = app.emit("connection-lost", ());
                 let _ = resp.send(Err(error::disconnected_error()));
                 true
@@ -817,16 +865,35 @@ fn handle_req(
     terminals: &mut HashMap<String, Channel>,
     macros: &mut HashMap<String, Channel>,
 ) -> bool {
+    let terminal_channels = terminals.len();
+    let macro_channels = macros.len();
+
     match req {
         Req::Canonicalize { path, resp } => {
             let result = sftp
                 .realpath(Path::new(&path))
                 .map(|p| p.to_string_lossy().into_owned())
                 .map_err(|_| error::sftp_error("경로를 확인하는"));
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "canonicalize",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::ListDir { path, resp } => {
-            send_and_check(sftp, app, read_dir_entries(sftp, &path), resp)
+            send_and_check(
+                sftp,
+                app,
+                "list_dir",
+                terminal_channels,
+                macro_channels,
+                read_dir_entries(sftp, &path),
+                resp,
+            )
         }
         Req::Download {
             id,
@@ -835,7 +902,15 @@ fn handle_req(
             resp,
         } => {
             let result = download_file(sftp, app, &id, &remote_path, &local_path);
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "download",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::Upload {
             id,
@@ -844,23 +919,55 @@ fn handle_req(
             resp,
         } => {
             let result = upload_file(sftp, app, &id, &local_path, &remote_path);
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "upload",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::Rename { from, to, resp } => {
             let result = sftp
                 .rename(Path::new(&from), Path::new(&to), None)
                 .map_err(|_| error::sftp_error("이름을 바꾸는"));
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "rename",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::Mkdir { path, resp } => {
             let result = sftp
                 .mkdir(Path::new(&path), 0o755)
                 .map_err(|_| error::sftp_error("폴더를 만드는"));
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "mkdir",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::CreateFile { path, resp } => {
             let result = create_empty_file(sftp, &path);
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "create_file",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::Delete {
             path,
@@ -873,18 +980,50 @@ fn handle_req(
                 sftp.unlink(Path::new(&path))
                     .map_err(|_| error::sftp_error("파일을 삭제하는"))
             };
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "delete",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::Copy { src, dst, resp } => {
             let result = exec_copy(session, &src, &dst);
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "copy",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::RunOnce { command, resp } => {
             let result = exec_capture(session, &command);
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "run_once",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::ReadFile { path, resp } => {
-            send_and_check(sftp, app, read_file_contents(sftp, &path), resp)
+            send_and_check(
+                sftp,
+                app,
+                "read_file",
+                terminal_channels,
+                macro_channels,
+                read_file_contents(sftp, &path),
+                resp,
+            )
         }
         Req::WriteFile {
             path,
@@ -893,7 +1032,15 @@ fn handle_req(
             resp,
         } => {
             let result = write_file_contents(sftp, &path, &contents, &encoding);
-            send_and_check(sftp, app, result, resp)
+            send_and_check(
+                sftp,
+                app,
+                "write_file",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
         }
         Req::OpenTerminal {
             id,
@@ -956,7 +1103,10 @@ fn handle_req(
             let _ = app.emit("macro-closed", MacroClosed { run_id });
             false
         }
-        Req::Disconnect => true,
+        Req::Disconnect => {
+            diagnostics::record(app, "INFO", "connection_disconnect_requested", &[]);
+            true
+        }
     }
 }
 
@@ -964,12 +1114,26 @@ fn handle_req(
 /// into one `acc`. Returns `(bytes, closed)` — `closed` is true if the channel
 /// reached EOF / errored. Shared by terminal polling and macro-run polling so
 /// both use the exact same non-blocking read-and-batch mechanism.
-fn drain_channel(channel: &mut Channel, buf: &mut [u8]) -> (Vec<u8>, bool) {
+fn drain_channel(
+    app: &AppHandle,
+    channel_kind: &'static str,
+    channel: &mut Channel,
+    buf: &mut [u8],
+) -> (Vec<u8>, bool) {
     let mut acc: Vec<u8> = Vec::new();
     let mut closed = false;
     loop {
         match channel.read(buf) {
             Ok(0) => {
+                diagnostics::record(
+                    app,
+                    "INFO",
+                    "channel_ended",
+                    &[
+                        ("channel_kind", channel_kind.to_owned()),
+                        ("reason", "eof".to_owned()),
+                    ],
+                );
                 closed = true;
                 break;
             }
@@ -981,7 +1145,17 @@ fn drain_channel(channel: &mut Channel, buf: &mut [u8]) -> (Vec<u8>, bool) {
                 }
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-            Err(_) => {
+            Err(read_error) => {
+                diagnostics::record(
+                    app,
+                    "WARN",
+                    "channel_read_failed",
+                    &[
+                        ("channel_kind", channel_kind.to_owned()),
+                        ("io_error_kind", format!("{:?}", read_error.kind())),
+                        ("error_message", read_error.to_string()),
+                    ],
+                );
                 closed = true;
                 break;
             }
@@ -1045,7 +1219,16 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
     // Open the SFTP subsystem once and reuse it for every request.
     let sftp = match session.sftp() {
         Ok(sftp) => sftp,
-        Err(_) => {
+        Err(sftp_error) => {
+            diagnostics::record(
+                &app,
+                "ERROR",
+                "connection_worker_start_failed",
+                &[
+                    ("error_code", ssh_error_code(&sftp_error)),
+                    ("error_message", sftp_error.message().to_owned()),
+                ],
+            );
             // Couldn't start SFTP: fail every queued request so callers unblock.
             while let Ok(req) = cmd_rx.recv() {
                 if !reply_err(req, error::sftp_error("파일 작업을 준비하는")) {
@@ -1084,7 +1267,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
 
             let mut closed_terms: Vec<String> = Vec::new();
             for (id, channel) in terminals.iter_mut() {
-                let (data, closed) = drain_channel(channel, &mut buf);
+                let (data, closed) = drain_channel(&app, "terminal", channel, &mut buf);
                 if !data.is_empty() {
                     let _ = app.emit(
                         "terminal-output",
@@ -1101,7 +1284,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
 
             let mut closed_macros: Vec<String> = Vec::new();
             for (run_id, channel) in macros.iter_mut() {
-                let (data, closed) = drain_channel(channel, &mut buf);
+                let (data, closed) = drain_channel(&app, "macro", channel, &mut buf);
                 if !data.is_empty() {
                     let _ = app.emit(
                         "macro-output",
@@ -1122,11 +1305,20 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
             // surface a dead transport. Probe immediately so a dropped SSH
             // connection is not left looking like only one terminal ended until
             // the user happens to perform a later SFTP operation.
-            if (!closed_terms.is_empty() || !closed_macros.is_empty())
-                && sftp.realpath(Path::new(".")).is_err()
-            {
-                let _ = app.emit("connection-lost", ());
-                break 'outer;
+            if !closed_terms.is_empty() || !closed_macros.is_empty() {
+                if let Err(probe_error) = sftp.realpath(Path::new(".")) {
+                    record_connection_lost(
+                        &app,
+                        "channel_closed_probe_failed",
+                        "channel_poll",
+                        &probe_error,
+                        None,
+                        terminals.len(),
+                        macros.len(),
+                    );
+                    let _ = app.emit("connection-lost", ());
+                    break 'outer;
+                }
             }
 
             for id in closed_terms {
@@ -1150,10 +1342,19 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
                     next_keepalive =
                         Instant::now() + Duration::from_secs(u64::from(seconds_to_next.max(1)));
                 }
-                Err(_) => {
+                Err(keepalive_error) => {
                     // Avoid declaring a disconnect for a keepalive-specific
                     // failure if a real SFTP round-trip still succeeds.
-                    if sftp.realpath(Path::new(".")).is_err() {
+                    if let Err(probe_error) = sftp.realpath(Path::new(".")) {
+                        record_connection_lost(
+                            &app,
+                            "keepalive_probe_failed",
+                            "keepalive",
+                            &probe_error,
+                            Some(&keepalive_error),
+                            terminals.len(),
+                            macros.len(),
+                        );
                         let _ = app.emit("connection-lost", ());
                         break 'outer;
                     }
@@ -1208,7 +1409,8 @@ pub async fn connect(
 
     // Hand the session to a dedicated worker thread.
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || worker_loop(session, rx, app));
+    let worker_app = app.clone();
+    std::thread::spawn(move || worker_loop(session, rx, worker_app));
     *state.tx.lock().unwrap() = Some(tx);
 
     // Resolve the home directory as a first real SFTP round-trip.
@@ -1218,6 +1420,16 @@ pub async fn connect(
         resp: resp_tx,
     })?;
     let home = resp_rx.await.map_err(|_| error::disconnected_error())??;
+
+    diagnostics::record(
+        &app,
+        "INFO",
+        "connection_established",
+        &[(
+            "keepalive_interval_seconds",
+            KEEPALIVE_INTERVAL_SECS.to_string(),
+        )],
+    );
 
     Ok(ConnectResult { home })
 }

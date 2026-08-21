@@ -1,5 +1,6 @@
 mod commands_config;
 mod dashboard_config;
+mod diagnostics;
 mod error;
 mod macros;
 mod settings;
@@ -13,6 +14,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionManager::new())
         .setup(|app| {
+            diagnostics::record(
+                app.handle(),
+                "INFO",
+                "app_started",
+                &[("version", env!("CARGO_PKG_VERSION").to_string())],
+            );
+
             #[cfg(target_os = "windows")]
             {
                 use tauri::Manager;
