@@ -113,9 +113,9 @@ struct TerminalOutput {
     data: Vec<u8>,
 }
 
-/// One frontend input chunk waiting to be fully written and flushed. Keeping
-/// the offset lets a non-blocking write resume after `WouldBlock` without
-/// dropping or duplicating any bytes.
+/// One frontend input chunk waiting to be fully written. Keeping the offset
+/// lets a non-blocking write resume after `WouldBlock` without dropping or
+/// duplicating any bytes.
 struct PendingTerminalInput {
     sequence: u64,
     data: Vec<u8>,
@@ -896,7 +896,6 @@ fn open_shell(session: &Session, cols: u16, rows: u16, setup: &str) -> Result<Ch
         .map_err(|_| "셸을 시작하지 못했어요.".to_string())?;
     channel
         .write_all(setup.as_bytes())
-        .and_then(|_| channel.flush())
         .map_err(|_| "터미널을 초기화하지 못했어요.".to_string())?;
     Ok(channel)
 }
@@ -1258,26 +1257,10 @@ fn drain_terminal_input(
             }
         }
 
-        match channel.flush() {
-            Ok(()) => {
-                queue.pop_front();
-            }
-            Err(ref flush_error) if flush_error.kind() == io::ErrorKind::WouldBlock => {
-                return false;
-            }
-            Err(flush_error) => {
-                record_terminal_input_error(
-                    app,
-                    "flush",
-                    input.sequence,
-                    &input.data,
-                    &flush_error,
-                    terminal_channels,
-                    macro_channels,
-                );
-                return true;
-            }
-        }
+        // `ssh2::Channel::flush()` maps to libssh2_channel_flush_ex(), which
+        // discards buffered incoming channel data; it is not an output flush.
+        // A successful channel write has already handed these bytes to libssh2.
+        queue.pop_front();
     }
 }
 
