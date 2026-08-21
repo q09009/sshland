@@ -15,14 +15,13 @@ import type { IDisposable, IMarker, Terminal } from "@xterm/xterm";
  */
 
 /**
- * Bash setup sent once when a terminal opens. `String.raw` keeps the `\033`
- * etc. as literal backslash sequences for the remote shell (not JS escapes).
- * DEBUG traps don't fire inside functions (no `functrace`), so the `__ssl_a`
- * guard is what keeps the C marker to exactly one emit per command.
+ * Minimal setup sent once when a terminal opens. Shell integration hooks are
+ * intentionally disabled while we A/B test the recurring transport failure.
+ * Keep echo restoration because the PTY starts with echo disabled so that this
+ * setup command itself is not printed in the terminal.
  */
 export const SHELL_INTEGRATION_SETUP =
-  String.raw`stty echo 2>/dev/null; printf '\033[2K\r'; __ssl_pe(){ if [ -n "$__ssl_a" ]; then printf '\033]133;C\007'; __ssl_a=; fi; }; __ssl_pc(){ local s=$?; printf '\033]133;D;%s\007' "$s"; printf '\033]133;A\007'; __ssl_a=1; }; PROMPT_COMMAND='__ssl_pc'; PS1="$PS1"'\[\e]133;B\a\]'; trap '__ssl_pe' DEBUG` +
-  "\n";
+  String.raw`stty echo 2>/dev/null; printf '\033[2K\r'` + "\n";
 
 /** One captured command: what was typed, its output, and its exit code. */
 export interface CommandBlock {
