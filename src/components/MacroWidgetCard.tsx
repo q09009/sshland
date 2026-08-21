@@ -18,6 +18,7 @@ import {
   parseMacroStream,
   stripSentinels,
 } from "../lib/macroRun";
+import { useI18n } from "../i18n";
 
 /** How long to wait after SIGTERM before escalating to SIGKILL. */
 const STOP_GRACE_MS = 2000;
@@ -70,6 +71,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
   // without depending on parseMacroStream/steps at all.
   const [rawOutput, setRawOutput] = useState("");
   const rawViewRef = useRef<HTMLPreElement>(null);
+  const { t } = useI18n();
 
   const runIdRef = useRef<string | null>(null);
   const tokenRef = useRef<string>("");
@@ -154,7 +156,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
     try {
       await runMacro(runId, buildMacroScript(macro, token));
     } catch (e) {
-      setError(typeof e === "string" ? e : "매크로를 실행하지 못했어요.");
+      setError(typeof e === "string" ? e : t("macro.error.run"));
       setRunning(false);
       runIdRef.current = null;
     }
@@ -206,7 +208,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
     });
 
   const labelFor = (id: string) =>
-    macro.steps.find((s) => s.id === id)?.label || "(이름 없음)";
+    macro.steps.find((s) => s.id === id)?.label || t("macro.unnamed");
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -216,7 +218,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
           disabled={running || macro.steps.length === 0}
           className="rounded-md bg-sky-600 px-2.5 py-1 text-2xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
         >
-          {running ? "실행 중…" : "▶ 실행"}
+          {running ? t("macro.running") : t("macro.run")}
         </button>
         {running && (
           <button
@@ -224,14 +226,14 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
             disabled={stopping}
             className="rounded-md border border-red-500/40 px-2.5 py-1 text-2xs font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-40"
           >
-            {stopping ? "중지 중…" : "■ 중지"}
+            {stopping ? t("macro.stopping") : t("macro.stop")}
           </button>
         )}
         {error && <span className="truncate text-2xs text-red-300">{error}</span>}
       </div>
 
       {macro.steps.length === 0 ? (
-        <p className="text-2xs text-slate-500">단계가 없어요. 매크로를 편집해 추가하세요.</p>
+        <p className="text-2xs text-slate-500">{t("macro.noSteps")}</p>
       ) : (
         <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-auto">
           {steps.map((st) => {
@@ -277,7 +279,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
       {(running || rawOutput.trim() !== "") && (
         <div className="mt-2 flex shrink-0 flex-col overflow-hidden rounded border border-ink-700/40">
           <div className="border-b border-ink-700/40 bg-ink-800 px-2 py-0.5 text-2xs uppercase tracking-wide text-slate-500">
-            실시간 출력
+            {t("macro.liveOutput")}
           </div>
           <pre
             ref={rawViewRef}

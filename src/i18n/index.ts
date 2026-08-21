@@ -5,6 +5,7 @@ import { ko, type TranslationKey } from "./ko";
 
 export type SupportedLanguage = Exclude<AppLanguage, "system">;
 export type TranslationParams = Record<string, string | number>;
+export type Translator = (key: TranslationKey, params?: TranslationParams) => string;
 
 const dictionaries = { ko, en } as const;
 

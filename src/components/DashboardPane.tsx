@@ -9,6 +9,7 @@ import WidgetCard from "./WidgetCard";
 import MacroCard from "./MacroCard";
 import WidgetPicker from "./WidgetPicker";
 import MacroEditor from "./MacroEditor";
+import { useI18n } from "../i18n";
 
 /**
  * A dashboard pane: a customizable, responsive grid of cards. Monitoring/process
@@ -32,6 +33,7 @@ export default function DashboardPane({ id }: { id: string }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   // A brand-new macro being authored before it's saved + added to the grid.
   const [creating, setCreating] = useState<Macro | null>(null);
+  const { t } = useI18n();
 
   const moveWidget = useDashboardLayout((s) => s.moveWidget);
   const { itemProps, isDragging } = useReorder(widgets.length, moveWidget);
@@ -67,10 +69,10 @@ export default function DashboardPane({ id }: { id: string }) {
 
   usePaneMenuRegistration(id, [
     {
-      label: "위젯",
+      label: t("dashboard.menu"),
       items: [
-        { label: "위젯 추가", onClick: () => setPickerOpen(true) },
-        { label: "새 매크로 만들기", onClick: handleCreateMacro },
+        { label: t("dashboard.addWidget"), onClick: () => setPickerOpen(true) },
+        { label: t("dashboard.createMacro"), onClick: handleCreateMacro },
       ],
     },
   ]);
@@ -84,16 +86,16 @@ export default function DashboardPane({ id }: { id: string }) {
         <div className="flex h-full w-full flex-col items-center justify-center text-center">
           <DashboardMark />
           <p className="mt-4 text-sm font-medium text-slate-300">
-            대시보드가 비어 있어요
+            {t("dashboard.empty.title")}
           </p>
           <p className="mt-1 max-w-64 text-2xs leading-relaxed text-slate-500">
-            필요한 서버 상태만 골라 현재 작업 공간에 배치할 수 있어요.
+            {t("dashboard.empty.description")}
           </p>
           <button
             onClick={() => setPickerOpen(true)}
             className="mt-4 rounded-lg border border-sky-500/70 px-3.5 py-1.5 text-xs font-medium text-sky-300 transition-colors duration-fast ease-standard hover:bg-sky-500/10"
           >
-            위젯 추가
+            {t("dashboard.addWidget")}
           </button>
         </div>
       ) : (
@@ -109,7 +111,7 @@ export default function DashboardPane({ id }: { id: string }) {
             onClick={() => setPickerOpen(true)}
             className="dashboard-add-card flex min-h-10 items-center justify-center rounded-lg border border-dashed border-ink-700/70 text-xs text-slate-500 hover:border-sky-500/60 hover:text-slate-300"
           >
-            ＋ 위젯 추가
+            ＋ {t("dashboard.addWidget")}
           </button>
         </div>
       )}

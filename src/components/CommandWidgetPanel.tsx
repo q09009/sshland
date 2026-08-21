@@ -8,6 +8,7 @@ import {
   parseKeyValue,
   parseRegex,
 } from "../lib/parsers";
+import { useI18n } from "../i18n";
 
 /** A captured command whose output matched a config, ready to render. */
 export interface CommandResult {
@@ -30,6 +31,7 @@ export default function CommandWidgetPanel({
   onClose: () => void;
 }) {
   const [raw, setRaw] = useState(false);
+  const { t } = useI18n();
 
   return (
     <div className="flex max-h-[45%] shrink-0 flex-col border-t border-ink-700 bg-ink-800">
@@ -41,14 +43,14 @@ export default function CommandWidgetPanel({
           <button
             onClick={() => setRaw((v) => !v)}
             className="rounded px-2 py-0.5 text-2xs text-slate-400 hover:bg-ink-700 hover:text-slate-100"
-            title="GUI ↔ 원본 텍스트 전환"
+            title={t("commandWidget.toggle")}
           >
-            {raw ? "GUI로 보기" : "원본 보기"}
+            {raw ? t("commandWidget.viewGui") : t("commandWidget.viewRaw")}
           </button>
           <button
             onClick={onClose}
             className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
-            aria-label="닫기"
+            aria-label={t("common.close")}
           >
             ✕
           </button>

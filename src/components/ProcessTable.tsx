@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ColumnsData, leadingNumber } from "../lib/parsers";
+import { useI18n } from "../i18n";
 
 /**
  * The process-manager widget's table. Unlike the generic table renderer it
@@ -50,6 +51,7 @@ export default function ProcessTable({
   const rows = useMemo(() => toProcessRows(data), [data]);
   // Default: highest CPU first.
   const [sort, setSort] = useState<Sort>({ col: "cpu", dir: -1 });
+  const { t } = useI18n();
 
   const sorted = useMemo(() => {
     if (!rows) return [];
@@ -77,7 +79,7 @@ export default function ProcessTable({
           <Th col="pid" label="PID" sort={sort} onClick={toggle} />
           <Th col="cpu" label="CPU%" sort={sort} onClick={toggle} />
           <Th col="mem" label="MEM%" sort={sort} onClick={toggle} />
-          <Th col="command" label="명령" sort={sort} onClick={toggle} wide />
+          <Th col="command" label={t("dashboard.process.command")} sort={sort} onClick={toggle} wide />
           {onKill && <th className="border-b border-ink-700 px-1.5 py-1" />}
         </tr>
       </thead>
@@ -103,7 +105,7 @@ export default function ProcessTable({
               <td className="px-1 py-0.5 text-right">
                 <button
                   onClick={() => onKill(p.pid, p.command)}
-                  title="프로세스 종료"
+                  title={t("dashboard.process.kill")}
                   className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-red-500/20 hover:text-red-300"
                 >
                   ✕

@@ -8,6 +8,8 @@ import { MIN_REFRESH_SECONDS, clampInterval } from "../lib/dashboardTypes";
 import { commandsDirPath, openCommandsDir } from "../api";
 import { useI18n } from "../i18n";
 import type { AppLanguage } from "../lib/settings";
+import type { TranslationKey } from "../i18n/ko";
+import { dashboardWidgetLabel } from "../lib/dashboardWidgetText";
 
 /**
  * Full settings surface: a modal overlay covering the pane tiling, with a
@@ -17,16 +19,16 @@ import type { AppLanguage } from "../lib/settings";
  */
 interface Section {
   id: string;
-  label: string;
+  label: TranslationKey;
   render: () => React.ReactNode;
 }
 
 const SECTIONS: Section[] = [
-  { id: "command-log", label: "명령어 로그", render: () => <CommandLogSection /> },
-  { id: "command-gui", label: "명령어 GUI", render: () => <CommandGuiSection /> },
-  { id: "dashboard", label: "대시보드", render: () => <DashboardSection /> },
-  { id: "general", label: "일반", render: () => <GeneralSection /> },
-  { id: "about", label: "정보", render: () => <AboutSection /> },
+  { id: "command-log", label: "settings.section.commandLog", render: () => <CommandLogSection /> },
+  { id: "command-gui", label: "settings.section.commandGui", render: () => <CommandGuiSection /> },
+  { id: "dashboard", label: "settings.section.dashboard", render: () => <DashboardSection /> },
+  { id: "general", label: "settings.section.general", render: () => <GeneralSection /> },
+  { id: "about", label: "settings.section.about", render: () => <AboutSection /> },
   // Future: { id: "shortcuts", label: "단축키", ... },
   //         { id: "theme", label: "테마", ... }
 ];
@@ -35,6 +37,7 @@ export default function SettingsPanel() {
   const open = useAppStore((s) => s.settingsOpen);
   const close = useAppStore((s) => s.closeSettings);
   const [active, setActive] = useState(SECTIONS[0].id);
+  const { t } = useI18n();
 
   // Close on Escape while open.
   useEffect(() => {
@@ -65,7 +68,7 @@ export default function SettingsPanel() {
         {/* Category sidebar */}
         <nav className="flex w-44 shrink-0 flex-col border-r border-ink-700/70 bg-ink-800 p-2">
           <div className="px-2 py-2 text-sm font-semibold text-slate-200">
-            설정
+            {t("settings.title")}
           </div>
           {SECTIONS.map((s) => (
             <button
@@ -77,7 +80,7 @@ export default function SettingsPanel() {
                   : "text-slate-400 hover:bg-ink-700 hover:text-slate-200"
               }`}
             >
-              {s.label}
+              {t(s.label)}
             </button>
           ))}
         </nav>
@@ -86,8 +89,8 @@ export default function SettingsPanel() {
         <div className="relative flex-1 overflow-y-auto p-6">
           <button
             onClick={close}
-            title="닫기"
-            aria-label="닫기"
+            title={t("common.close")}
+            aria-label={t("common.close")}
             className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-ink-700 hover:text-slate-100"
           >
             ✕
@@ -108,12 +111,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function CommandLogSection() {
   const enabled = useSettings((s) => s.settings.commandLogEnabled);
   const set = useSettings((s) => s.set);
+  const { t } = useI18n();
   return (
     <div>
-      <SectionTitle>명령어 로그</SectionTitle>
+      <SectionTitle>{t("settings.section.commandLog")}</SectionTitle>
       <SettingRow
-        label="파일 조작 시 명령어 로그 표시"
-        description="파일 조작을 실제 터미널 명령어(scp/rm/mv 등)로 화면 아래 바에 보여줍니다."
+        label={t("settings.commandLog.label")}
+        description={t("settings.commandLog.description")}
       >
         <Toggle
           checked={enabled}
@@ -131,6 +135,7 @@ function CommandGuiSection() {
   const reload = useCommandConfigs((s) => s.load);
   const [dir, setDir] = useState<string | null>(null);
   const [reloading, setReloading] = useState(false);
+  const { t } = useI18n();
 
   useEffect(() => {
     commandsDirPath()
@@ -146,10 +151,10 @@ function CommandGuiSection() {
 
   return (
     <div>
-      <SectionTitle>명령어 GUI</SectionTitle>
+      <SectionTitle>{t("settings.section.commandGui")}</SectionTitle>
       <SettingRow
-        label="명령어 결과를 GUI 위젯으로 표시"
-        description="터미널 명령 출력이 등록된 규칙과 맞으면 표·카드·목록으로 보여줍니다. 끄면 항상 원본 텍스트만."
+        label={t("settings.commandGui.label")}
+        description={t("settings.commandGui.description")}
       >
         <Toggle
           checked={enabled}
@@ -158,7 +163,7 @@ function CommandGuiSection() {
       </SettingRow>
 
       <div className="mt-4 rounded-lg border border-ink-700/60 bg-ink-800/50 px-4 py-3">
-        <div className="text-sm text-slate-200">사용자 설정 폴더</div>
+        <div className="text-sm text-slate-200">{t("settings.commandGui.folder")}</div>
         <div className="mt-1 break-all font-mono text-2xs text-slate-500">
           {dir ?? "…"}
         </div>
@@ -167,25 +172,24 @@ function CommandGuiSection() {
             onClick={() => openCommandsDir().catch(() => {})}
             className="rounded-lg bg-sky-500/15 px-3 py-1 text-xs text-sky-200 hover:bg-sky-500/25"
           >
-            폴더 열기
+            {t("common.openFolder")}
           </button>
           <button
             onClick={doReload}
             disabled={reloading}
             className="rounded-lg border border-ink-700 px-3 py-1 text-xs text-slate-300 hover:bg-ink-700 disabled:opacity-50"
           >
-            {reloading ? "불러오는 중…" : "다시 불러오기"}
+            {reloading ? t("common.reloading") : t("common.reload")}
           </button>
         </div>
         <p className="mt-2 text-2xs leading-relaxed text-slate-500">
-          이 폴더에 TOML 파일을 추가·수정한 뒤 "다시 불러오기"를 누르세요. 같은
-          파일명은 기본 제공 설정을 덮어씁니다.
+          {t("settings.commandGui.folderHelp")}
         </p>
       </div>
 
       <div className="mt-4">
         <div className="mb-2 text-xs font-medium text-slate-400">
-          등록된 명령어 ({configs.length})
+          {t("settings.commandGui.registered", { count: configs.length })}
         </div>
         <ul className="flex flex-col gap-1">
           {configs.map((c) => (
@@ -204,7 +208,7 @@ function CommandGuiSection() {
                     : "bg-ink-700 text-slate-400"
                 }`}
               >
-                {c.source === "user" ? "사용자" : "기본"}
+                {c.source === "user" ? t("common.user") : t("common.builtIn")}
               </span>
             </li>
           ))}
@@ -221,6 +225,7 @@ function DashboardSection() {
   const configs = useDashboardWidgetConfigs((s) => s.configs);
   const reload = useDashboardWidgetConfigs((s) => s.load);
   const [intervalText, setIntervalText] = useState(String(defaultInterval));
+  const { t } = useI18n();
 
   useEffect(() => setIntervalText(String(defaultInterval)), [defaultInterval]);
   useEffect(() => {
@@ -236,10 +241,10 @@ function DashboardSection() {
 
   return (
     <div>
-      <SectionTitle>대시보드</SectionTitle>
+      <SectionTitle>{t("settings.section.dashboard")}</SectionTitle>
       <SettingRow
-        label="대시보드 pane 사용"
-        description="pane 헤더의 📊 버튼으로 서버 상태 위젯 대시보드를 열 수 있게 합니다. 끄면 버튼이 숨겨집니다."
+        label={t("settings.dashboard.enabled")}
+        description={t("settings.dashboard.enabledDescription")}
       >
         <Toggle
           checked={enabled}
@@ -248,8 +253,8 @@ function DashboardSection() {
       </SettingRow>
 
       <SettingRow
-        label="새 위젯 기본 새로고침 주기"
-        description="위젯을 추가할 때 쓰는 기본 주기(초)예요. 위젯이 자체 주기를 지정하면 그 값이 우선합니다. 주기가 짧을수록 서버에 명령이 더 자주 실행돼요."
+        label={t("settings.dashboard.interval")}
+        description={t("settings.dashboard.intervalDescription")}
       >
         <span className="flex items-center gap-1 text-sm text-slate-300">
           <input
@@ -263,13 +268,13 @@ function DashboardSection() {
             }}
             className="w-16 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1 text-right text-slate-100 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
           />
-          <span className="text-slate-500">초</span>
+          <span className="text-slate-500">{t("common.seconds")}</span>
         </span>
       </SettingRow>
 
       <div className="mt-4">
         <div className="mb-2 text-xs font-medium text-slate-400">
-          사용 가능한 위젯 ({configs.length})
+          {t("settings.dashboard.available", { count: configs.length })}
         </div>
         <ul className="flex flex-col gap-1">
           {configs.map((c) => (
@@ -278,7 +283,7 @@ function DashboardSection() {
               className="flex items-center gap-2 rounded-md border border-ink-700/50 bg-ink-900/40 px-3 py-1.5 text-xs"
             >
               <span className="select-none">{c.icon ?? "📊"}</span>
-              <span className="text-slate-200">{c.label}</span>
+              <span className="text-slate-200">{dashboardWidgetLabel(c, t)}</span>
               <span className="text-slate-500">{c.render}</span>
               <span
                 className={`ml-auto rounded px-1.5 py-0.5 text-2xs ${
@@ -287,7 +292,7 @@ function DashboardSection() {
                     : "bg-ink-700 text-slate-400"
                 }`}
               >
-                {c.source === "user" ? "사용자" : "기본"}
+                {c.source === "user" ? t("common.user") : t("common.builtIn")}
               </span>
             </li>
           ))}
@@ -304,7 +309,7 @@ function GeneralSection() {
   const { t } = useI18n();
   return (
     <div>
-      <SectionTitle>일반</SectionTitle>
+      <SectionTitle>{t("settings.section.general")}</SectionTitle>
       <SettingRow
         label={t("settings.language.label")}
         description={t("settings.language.description")}
@@ -320,8 +325,8 @@ function GeneralSection() {
         </select>
       </SettingRow>
       <SettingRow
-        label="시계에 초 표시"
-        description="상단 상태바 시계를 HH:MM:SS 로 표시합니다."
+        label={t("settings.clock.label")}
+        description={t("settings.clock.description")}
       >
         <Toggle
           checked={showSeconds}
@@ -338,6 +343,7 @@ function AboutSection() {
     version: string;
     tauri: string;
   } | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     let alive = true;
@@ -353,23 +359,22 @@ function AboutSection() {
 
   return (
     <div>
-      <SectionTitle>정보</SectionTitle>
+      <SectionTitle>{t("settings.section.about")}</SectionTitle>
       <div className="flex items-center gap-4">
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-500/15 text-2xl">
           🌐
         </div>
         <div>
           <div className="text-base font-semibold text-slate-100">
-            {info?.name ?? "SSHland"}
+            sshland
           </div>
           <div className="text-sm text-slate-400">
-            버전 {info?.version ?? "…"}
+            {t("settings.about.version", { version: info?.version ?? "…" })}
           </div>
         </div>
       </div>
       <p className="mt-4 max-w-md text-sm leading-relaxed text-slate-400">
-        초보자를 위한 SSH/SFTP GUI 클라이언트. 파일 관리, 터미널, 타일링 pane을
-        가볍게 제공합니다.
+        {t("settings.about.description")}
       </p>
       <dl className="mt-4 space-y-1 text-sm text-slate-500">
         <div className="flex gap-2">

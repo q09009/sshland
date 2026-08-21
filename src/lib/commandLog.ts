@@ -47,7 +47,8 @@ function withTrailingSlash(p: string): string {
 /** Format a single operation as its equivalent terminal command. */
 export function operationToCommandString(
   op: FileOperation,
-  remote: RemoteTarget
+  remote: RemoteTarget,
+  language: "ko" | "en" = "en",
 ): string {
   const host = `${remote.user}@${remote.host}`;
   switch (op.type) {
@@ -70,7 +71,7 @@ export function operationToCommandString(
     case "save":
       // Saving edits has no single natural shell equivalent (echo/redirect
       // would be misleading), so show a plain descriptive line instead.
-      return `(편집기로 저장) ${shellArg(op.path)}`;
+      return `${language === "ko" ? "(편집기로 저장)" : "(saved in editor)"} ${shellArg(op.path)}`;
     case "kill":
       // A real, working command (unlike `save`): the dashboard process manager
       // runs exactly this over a one-shot exec.

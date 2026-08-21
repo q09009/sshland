@@ -4,7 +4,6 @@ import {
   DashboardWidgetInstance,
   useDashboardLayout,
   WIDGET_SIZES,
-  WidgetSize,
 } from "../lib/dashboardLayout";
 import { findMacro, useMacros } from "../lib/macros";
 import { buildExportScript } from "../lib/macroRun";
@@ -19,8 +18,7 @@ import {
   DashboardCardFrame,
   DashboardCardHeader,
 } from "./DashboardCardFrame";
-
-const SIZE_LABEL: Record<WidgetSize, string> = { small: "소", medium: "중", large: "대" };
+import { useI18n } from "../i18n";
 
 /**
  * Grid card for a macro-backed dashboard widget. Same frame as WidgetCard
@@ -46,6 +44,7 @@ export default function MacroCard({
   const [editing, setEditing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
+  const { t } = useI18n();
 
   // Auto-dismiss the export confirmation after a few seconds.
   useEffect(() => {
@@ -64,11 +63,11 @@ export default function MacroCard({
     if (!macro) return;
     setExporting(false);
     writeRemoteFile(path, buildExportScript(macro), "UTF-8")
-      .then(() => setToast({ ok: true, text: `내보냈어요: ${path}` }))
+      .then(() => setToast({ ok: true, text: t("macro.export.success", { path }) }))
       .catch((e) =>
         setToast({
           ok: false,
-          text: typeof e === "string" ? e : "내보내지 못했어요.",
+          text: typeof e === "string" ? e : t("macro.export.error"),
         })
       );
   };
@@ -82,20 +81,20 @@ export default function MacroCard({
     <DashboardCardFrame size={instance.size} drag={drag}>
       <DashboardCardHeader
         drag={drag}
-        title={<>⚙ {macro?.name ?? "삭제된 매크로"}</>}
+        title={<>⚙ {macro?.name ?? t("macro.deleted")}</>}
         titleHint={macro?.name}
       >
           {macro && (
             <>
               <DashboardCardAction
                 onClick={() => setExporting(true)}
-                title="서버로 .sh 내보내기"
+                title={t("macro.export.title")}
               >
                 ⬆
               </DashboardCardAction>
               <DashboardCardAction
                 onClick={() => setEditing(true)}
-                title="매크로 편집"
+                title={t("macro.edit")}
               >
                 ✎
               </DashboardCardAction>
@@ -103,14 +102,14 @@ export default function MacroCard({
           )}
           <DashboardCardAction
             onClick={cycleSize}
-            title="카드 크기 변경"
+            title={t("dashboard.card.resize")}
             className="text-2xs"
           >
-            {SIZE_LABEL[instance.size]}
+            {t(`dashboard.card.size.${instance.size}` as const)}
           </DashboardCardAction>
           <DashboardCardAction
             onClick={() => removeWidget(instance.instanceId)}
-            title="위젯 제거"
+            title={t("dashboard.card.remove")}
             danger
           >
             ✕
@@ -135,7 +134,7 @@ export default function MacroCard({
           <MacroWidgetCard macro={macro} />
         ) : (
           <div className="flex h-full items-center justify-center px-2 text-center text-2xs text-red-300/80">
-            이 매크로를 찾을 수 없어요. 삭제되었을 수 있어요.
+            {t("macro.missing")}
           </div>
         )}
       </DashboardCardBody>
@@ -153,10 +152,10 @@ export default function MacroCard({
 
       {exporting && macro && (
         <PromptDialog
-          title="서버로 .sh 내보내기"
+          title={t("macro.export.title")}
           initialValue={defaultExportPath()}
-          placeholder="예: /home/user/deploy.sh"
-          confirmLabel="내보내기"
+          placeholder={t("macro.export.placeholder")}
+          confirmLabel={t("macro.export.action")}
           onConfirm={doExport}
           onCancel={() => setExporting(false)}
         />

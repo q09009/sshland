@@ -6,7 +6,6 @@ import {
   MIN_REFRESH_SECONDS,
   useDashboardLayout,
   WIDGET_SIZES,
-  WidgetSize,
 } from "../lib/dashboardLayout";
 import { operationToCommandString } from "../lib/commandLog";
 import { ReorderItemProps } from "../lib/reorder";
@@ -19,12 +18,8 @@ import {
   DashboardCardFrame,
   DashboardCardHeader,
 } from "./DashboardCardFrame";
-
-const SIZE_LABEL: Record<WidgetSize, string> = {
-  small: "소",
-  medium: "중",
-  large: "대",
-};
+import { useI18n } from "../i18n";
+import { dashboardWidgetLabel } from "../lib/dashboardWidgetText";
 
 /**
  * One dashboard widget card: polls its command on a timer and renders the result
@@ -61,6 +56,7 @@ export default function WidgetCard({
   const [killing, setKilling] = useState(false);
   const connection = useAppStore((s) => s.connection);
   const logCommand = useAppStore((s) => s.logCommand);
+  const { language, t } = useI18n();
 
   // Keep the latest poll behaviour in a ref so the interval effect only depends
   // on the command + interval (not on every state change).
@@ -79,7 +75,7 @@ export default function WidgetCard({
       })
       .catch((e) => {
         if (!mounted.current) return;
-        setError(typeof e === "string" ? e : "명령을 실행하지 못했어요.");
+        setError(typeof e === "string" ? e : t("dashboard.error.command"));
       })
       .finally(() => {
         if (mounted.current) setLoading(false);
@@ -119,7 +115,8 @@ export default function WidgetCard({
           logCommand(
             operationToCommandString(
               { type: "kill", pid, force },
-              { user: connection.username, host: connection.host }
+              { user: connection.username, host: connection.host },
+              language,
             )
           );
         }
@@ -128,7 +125,7 @@ export default function WidgetCard({
       })
       .catch((e) => {
         if (mounted.current) {
-          setError(typeof e === "string" ? e : "프로세스를 종료하지 못했어요.");
+          setError(typeof e === "string" ? e : t("dashboard.error.kill"));
         }
         setKillTarget(null);
       })
@@ -144,10 +141,10 @@ export default function WidgetCard({
         title={
           <>
             {config?.icon ? `${config.icon} ` : ""}
-            {config?.label ?? instance.widgetId}
+            {config ? dashboardWidgetLabel(config, t) : instance.widgetId}
           </>
         }
-        titleHint={config?.label}
+        titleHint={config ? dashboardWidgetLabel(config, t) : undefined}
         busy={loading}
       >
           <IntervalInput
@@ -156,20 +153,20 @@ export default function WidgetCard({
           />
           <DashboardCardAction
             onClick={cycleSize}
-            title="카드 크기 변경"
+            title={t("dashboard.card.resize")}
             className="text-2xs"
           >
-            {SIZE_LABEL[instance.size]}
+            {t(`dashboard.card.size.${instance.size}` as const)}
           </DashboardCardAction>
           <DashboardCardAction
             onClick={() => pollRef.current()}
-            title="지금 새로고침"
+            title={t("dashboard.card.refreshNow")}
           >
             ⟳
           </DashboardCardAction>
           <DashboardCardAction
             onClick={() => removeWidget(instance.instanceId)}
-            title="위젯 제거"
+            title={t("dashboard.card.remove")}
             danger
           >
             ✕
@@ -179,12 +176,12 @@ export default function WidgetCard({
       <DashboardCardBody>
         {!config ? (
           <CardMessage tone="error">
-            위젯 설정을 찾을 수 없어요. 제거하거나 설정 파일을 확인해주세요.
+            {t("dashboard.card.missing")}
           </CardMessage>
         ) : error ? (
           <CardMessage tone="error">{error}</CardMessage>
         ) : output == null ? (
-          <CardMessage tone="muted">불러오는 중…</CardMessage>
+          <CardMessage tone="muted">{t("dashboard.card.loading")}</CardMessage>
         ) : (
           <WidgetView
             config={config}
@@ -217,6 +214,7 @@ function IntervalInput({
   onCommit: (seconds: number) => void;
 }) {
   const [text, setText] = useState(String(seconds));
+  const { t } = useI18n();
   useEffect(() => setText(String(seconds)), [seconds]);
 
   const commit = () => {
@@ -237,10 +235,10 @@ function IntervalInput({
         onKeyDown={(e) => {
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
         }}
-        title={`새로고침 주기 (최소 ${MIN_REFRESH_SECONDS}초)`}
+        title={t("dashboard.card.interval", { seconds: MIN_REFRESH_SECONDS })}
         className="w-9 rounded bg-ink-900 px-1 py-0.5 text-right text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-600/50"
       />
-      <span className="pl-0.5">초</span>
+      <span className="pl-0.5">{t("common.seconds")}</span>
     </span>
   );
 }

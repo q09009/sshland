@@ -167,7 +167,8 @@ export default function EditorPane({
         logCommand(
           operationToCommandString(
             { type: "save", path: filePath },
-            { user: connection.username, host: connection.host }
+            { user: connection.username, host: connection.host },
+            language,
           )
         );
       }
@@ -179,7 +180,7 @@ export default function EditorPane({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [filePath, markDirty, logCommand, connection]);
+  }, [filePath, markDirty, logCommand, connection, language]);
 
   const saveRef = useRef(doSave);
   saveRef.current = doSave;

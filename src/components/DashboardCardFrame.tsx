@@ -1,6 +1,7 @@
 import { ButtonHTMLAttributes, ReactNode } from "react";
 import { WidgetSize } from "../lib/dashboardLayout";
 import { ReorderItemProps } from "../lib/reorder";
+import { useI18n } from "../i18n";
 
 export function DashboardCardFrame({
   size,
@@ -37,11 +38,12 @@ export function DashboardCardHeader({
   busy?: boolean;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <header className="dashboard-card-header flex h-8 shrink-0 items-center gap-1.5 px-2 text-xs text-slate-400">
       <span
         onMouseDown={drag.onHandleMouseDown}
-        title="드래그해서 위치 이동"
+        title={t("dashboard.card.move")}
         className="cursor-grab px-0.5 text-slate-600 hover:text-slate-300 active:cursor-grabbing select-none"
       >
         ⠿
@@ -52,7 +54,7 @@ export function DashboardCardHeader({
       >
         {title}
       </span>
-      {busy && <span className="text-2xs text-sky-400">갱신 중</span>}
+      {busy && <span className="text-2xs text-sky-400">{t("dashboard.card.refreshing")}</span>}
       <span className="flex shrink-0 items-center gap-0.5">{children}</span>
     </header>
   );

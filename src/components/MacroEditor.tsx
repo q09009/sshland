@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Macro, MacroStep } from "../api";
 import { newMacroStep } from "../lib/macros";
 import { moveItem, useReorder } from "../lib/reorder";
+import { useI18n } from "../i18n";
 
 /**
  * Modal for creating or editing a macro: a name plus an ordered list of steps
@@ -22,6 +23,7 @@ export default function MacroEditor({
 }) {
   const [name, setName] = useState(initial.name);
   const [steps, setSteps] = useState<MacroStep[]>(initial.steps);
+  const { t } = useI18n();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -73,40 +75,40 @@ export default function MacroEditor({
       >
         <div className="flex items-center justify-between border-b border-ink-700/60 px-4 py-3">
           <h2 className="text-base font-semibold text-slate-100">
-            {initial.steps.length || initial.name ? "매크로 편집" : "새 매크로"}
+            {initial.steps.length || initial.name ? t("macro.edit") : t("macro.editor.new")}
           </h2>
           <button
             onClick={onCancel}
             className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
-            aria-label="닫기"
+            aria-label={t("common.close")}
           >
             ✕
           </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto p-4">
-          <label className="block text-xs text-slate-400">이름</label>
+          <label className="block text-xs text-slate-400">{t("common.name")}</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="예: 서비스 재시작"
+            placeholder={t("macro.editor.namePlaceholder")}
             spellCheck={false}
             className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
           />
 
           <div className="mt-4 mb-1 flex items-center justify-between">
-            <span className="text-xs text-slate-400">단계 (순서대로 실행)</span>
+            <span className="text-xs text-slate-400">{t("macro.editor.steps")}</span>
             <button
               onClick={addStep}
               className="rounded-md bg-sky-500/15 px-2 py-1 text-2xs text-sky-200 hover:bg-sky-500/25"
             >
-              ＋ 단계 추가
+              {t("macro.editor.addStep")}
             </button>
           </div>
 
           {steps.length === 0 ? (
             <p className="rounded-lg border border-dashed border-ink-700 px-3 py-6 text-center text-2xs text-slate-500">
-              아직 단계가 없어요. "단계 추가"로 명령을 하나씩 넣으세요.
+              {t("macro.editor.noSteps")}
             </p>
           ) : (
             <ul className="flex flex-col gap-2">
@@ -122,7 +124,7 @@ export default function MacroEditor({
                   >
                     <span
                       onMouseDown={drag.onHandleMouseDown}
-                      title="드래그해서 순서 변경"
+                      title={t("macro.editor.reorder")}
                       className="mt-1.5 cursor-grab select-none px-0.5 text-slate-500 hover:text-slate-300 active:cursor-grabbing"
                     >
                       ⠿
@@ -134,21 +136,21 @@ export default function MacroEditor({
                       <input
                         value={st.label}
                         onChange={(e) => setStep(st.id, { label: e.target.value })}
-                        placeholder="설명 (선택) — 예: 서버로 이동"
+                        placeholder={t("macro.editor.stepLabelPlaceholder")}
                         spellCheck={false}
                         className="w-full rounded border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-slate-200 placeholder-slate-600 focus:border-sky-600 focus:outline-none"
                       />
                       <input
                         value={st.command}
                         onChange={(e) => setStep(st.id, { command: e.target.value })}
-                        placeholder="명령 — 예: cd /var/www && git pull"
+                        placeholder={t("macro.editor.commandPlaceholder")}
                         spellCheck={false}
                         className="w-full rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-sky-600 focus:outline-none"
                       />
                     </div>
                     <button
                       onClick={() => removeStep(st.id)}
-                      title="단계 삭제"
+                      title={t("macro.editor.deleteStep")}
                       className="mt-1 rounded px-1.5 py-0.5 text-slate-500 hover:bg-red-500/20 hover:text-red-300"
                     >
                       ✕
@@ -160,9 +162,7 @@ export default function MacroEditor({
           )}
 
           <p className="mt-3 text-2xs leading-relaxed text-slate-600">
-            각 단계는 한 줄 명령이에요. 여러 줄 스크립트·반복문·heredoc은 아직
-            지원하지 않아요. 단계는 한 셸에서 순서대로 실행되므로 cd·환경변수가
-            다음 단계로 이어져요.
+            {t("macro.editor.help")}
           </p>
         </div>
 
@@ -171,14 +171,14 @@ export default function MacroEditor({
             onClick={onCancel}
             className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700"
           >
-            취소
+            {t("common.cancel")}
           </button>
           <button
             onClick={save}
             disabled={!canSave}
             className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
           >
-            저장
+            {t("common.save")}
           </button>
         </div>
       </div>

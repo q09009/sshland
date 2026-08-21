@@ -43,7 +43,7 @@ export default function FilesScreen({ id }: { id: string }) {
   const logCommand = useAppStore((s) => s.logCommand);
   const fsVersion = useAppStore((s) => s.fsVersion);
   const openEditor = useAppStore((s) => s.openEditor);
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const tRef = useRef(t);
   tRef.current = t;
 
@@ -352,7 +352,7 @@ export default function FilesScreen({ id }: { id: string }) {
       operationToCommandString(op, {
         user: connection.username,
         host: connection.host,
-      })
+      }, language)
     );
   }
 

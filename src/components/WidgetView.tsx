@@ -10,6 +10,7 @@ import {
   parseRegex,
 } from "../lib/parsers";
 import ProcessTable from "./ProcessTable";
+import { useI18n } from "../i18n";
 
 /**
  * Renders one dashboard widget's raw command output as a GUI body, using the
@@ -32,10 +33,11 @@ export default function WidgetView({
   onKill?: (pid: string, name: string) => void;
 }) {
   const body = renderWidget(config, output, onKill);
+  const { t } = useI18n();
   return (
     body ?? (
       <pre className="max-h-full overflow-auto whitespace-pre font-mono text-2xs text-slate-300">
-        {output.trim() || "(빈 출력)"}
+        {output.trim() || t("dashboard.emptyOutput")}
       </pre>
     )
   );

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePaneMenuStore } from "../lib/paneMenus";
 import { useAppStore } from "../store";
+import { useI18n } from "../i18n";
 
 const EMPTY_MENUS: never[] = [];
 
@@ -23,6 +24,7 @@ export default function CommandPalette() {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useI18n();
 
   const commands = useMemo<PaletteCommand[]>(
     () =>
@@ -104,7 +106,7 @@ export default function CommandPalette() {
     >
       <div
         role="dialog"
-        aria-label="명령 팔레트"
+        aria-label={t("palette.label")}
         className="w-full max-w-xl overflow-hidden rounded-xl border border-ink-700 bg-ink-800 shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -136,8 +138,8 @@ export default function CommandPalette() {
               run(filtered[active]);
             }
           }}
-          placeholder="현재 pane의 명령 검색…"
-          aria-label="명령 검색"
+          placeholder={t("palette.placeholder")}
+          aria-label={t("palette.search")}
           spellCheck={false}
           className="w-full border-b border-ink-700 bg-ink-900 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-sky-500"
         />
@@ -145,7 +147,7 @@ export default function CommandPalette() {
         <div className="max-h-80 overflow-y-auto p-1" role="listbox">
           {filtered.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-slate-500">
-              일치하는 명령이 없어요.
+              {t("palette.empty")}
             </div>
           ) : (
             filtered.map((command, index) => (
