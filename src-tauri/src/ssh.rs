@@ -429,6 +429,41 @@ fn record_connection_lost(
     diagnostics::record(app, "ERROR", "connection_lost", &fields);
 }
 
+fn terminal_input_kind(data: &[u8]) -> &'static str {
+    if data.is_empty() {
+        "empty"
+    } else if data.iter().all(u8::is_ascii_control) {
+        "control"
+    } else if data.is_ascii() {
+        "ascii"
+    } else {
+        "utf8_or_binary"
+    }
+}
+
+fn record_terminal_input_error(
+    app: &AppHandle,
+    stage: &'static str,
+    sequence: u64,
+    data: &[u8],
+    input_error: &io::Error,
+    terminal_channels: usize,
+    macro_channels: usize,
+) {
+    let fields = [
+        ("stage", stage.to_owned()),
+        ("input_sequence", sequence.to_string()),
+        ("input_bytes", data.len().to_string()),
+        ("input_kind", terminal_input_kind(data).to_owned()),
+        ("io_error_kind", format!("{:?}", input_error.kind())),
+        ("io_error_message", input_error.to_string()),
+        ("terminal_channels", terminal_channels.to_string()),
+        ("macro_channels", macro_channels.to_string()),
+    ];
+
+    diagnostics::record(app, "ERROR", "terminal_input_failed", &fields);
+}
+
 fn send_and_check<T>(
     sftp: &Sftp,
     app: &AppHandle,
@@ -864,6 +899,7 @@ fn handle_req(
     app: &AppHandle,
     terminals: &mut HashMap<String, Channel>,
     macros: &mut HashMap<String, Channel>,
+    terminal_input_sequence: &mut u64,
 ) -> bool {
     let terminal_channels = terminals.len();
     let macro_channels = macros.len();
@@ -1061,9 +1097,44 @@ fn handle_req(
             false
         }
         Req::WriteTerminal { id, data } => {
+            *terminal_input_sequence = terminal_input_sequence.wrapping_add(1);
+            let sequence = *terminal_input_sequence;
             if let Some(ch) = terminals.get_mut(&id) {
-                let _ = ch.write_all(&data);
-                let _ = ch.flush();
+                if let Err(write_error) = ch.write_all(&data) {
+                    record_terminal_input_error(
+                        app,
+                        "write",
+                        sequence,
+                        &data,
+                        &write_error,
+                        terminal_channels,
+                        macro_channels,
+                    );
+                } else if let Err(flush_error) = ch.flush() {
+                    record_terminal_input_error(
+                        app,
+                        "flush",
+                        sequence,
+                        &data,
+                        &flush_error,
+                        terminal_channels,
+                        macro_channels,
+                    );
+                }
+            } else {
+                diagnostics::record(
+                    app,
+                    "WARN",
+                    "terminal_input_dropped",
+                    &[
+                        ("reason", "channel_missing".to_owned()),
+                        ("input_sequence", sequence.to_string()),
+                        ("input_bytes", data.len().to_string()),
+                        ("input_kind", terminal_input_kind(&data).to_owned()),
+                        ("terminal_channels", terminal_channels.to_string()),
+                        ("macro_channels", macro_channels.to_string()),
+                    ],
+                );
             }
             false
         }
@@ -1243,6 +1314,7 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
     // Streaming exec channels for in-flight macro runs (keyed by run id). Polled
     // with the same non-blocking read-and-batch mechanism as terminals.
     let mut macros: HashMap<String, Channel> = HashMap::new();
+    let mut terminal_input_sequence = 0u64;
     let mut buf = [0u8; TERM_BUF];
     let mut next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
 
@@ -1251,7 +1323,15 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
         loop {
             match cmd_rx.try_recv() {
                 Ok(req) => {
-                    if handle_req(req, &session, &sftp, &app, &mut terminals, &mut macros) {
+                    if handle_req(
+                        req,
+                        &session,
+                        &sftp,
+                        &app,
+                        &mut terminals,
+                        &mut macros,
+                        &mut terminal_input_sequence,
+                    ) {
                         break 'outer;
                     }
                 }
@@ -1371,7 +1451,15 @@ fn worker_loop(session: Session, cmd_rx: mpsc::Receiver<Req>, app: AppHandle) {
         let wait = worker_wait_timeout(has_streaming_channels, until_keepalive);
         match cmd_rx.recv_timeout(wait) {
             Ok(req) => {
-                if handle_req(req, &session, &sftp, &app, &mut terminals, &mut macros) {
+                if handle_req(
+                    req,
+                    &session,
+                    &sftp,
+                    &app,
+                    &mut terminals,
+                    &mut macros,
+                    &mut terminal_input_sequence,
+                ) {
                     break 'outer;
                 }
             }
@@ -1690,6 +1778,14 @@ pub async fn disconnect(state: State<'_, SessionManager>) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_input_classification_never_records_content() {
+        assert_eq!(terminal_input_kind(&[]), "empty");
+        assert_eq!(terminal_input_kind(b"\r"), "control");
+        assert_eq!(terminal_input_kind(b"hello\r"), "ascii");
+        assert_eq!(terminal_input_kind("한글".as_bytes()), "utf8_or_binary");
+    }
 
     #[test]
     fn utf8_text_decodes_as_utf8() {
