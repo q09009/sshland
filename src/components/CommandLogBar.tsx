@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "../store";
 import { useSettings } from "../lib/settings";
 import { formatClock } from "../lib/format";
+import { useI18n } from "../i18n";
 
 /**
  * Thin one-line bar at the very bottom of the window (a separate layer below
@@ -15,6 +16,7 @@ export default function CommandLogBar() {
   const [open, setOpen] = useState(false);
   const latest = log[0] ?? null;
   const canOpen = log.length > 0;
+  const { t } = useI18n();
 
   // Close the history popup on Escape.
   useEffect(() => {
@@ -42,7 +44,7 @@ export default function CommandLogBar() {
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute inset-x-0 bottom-full z-40 max-h-64 overflow-y-auto border-t border-ink-700 bg-ink-800 shadow-2xl">
             <div className="sticky top-0 border-b border-ink-700/60 bg-ink-800 px-3 py-1.5 text-2xs text-slate-500">
-              명령어 기록 (최근 {log.length}개)
+              {t("commandLog.history", { count: log.length })}
             </div>
             <ul className="py-1">
               {log.map((e) => (
@@ -65,7 +67,7 @@ export default function CommandLogBar() {
       <button
         type="button"
         onClick={() => canOpen && setOpen((v) => !v)}
-        title={canOpen ? "명령어 기록 보기" : undefined}
+        title={canOpen ? t("commandLog.view") : undefined}
         className={`flex h-7 w-full items-center gap-2 border-t border-ink-700/70 bg-ink-800 px-3 text-left font-mono text-xs text-slate-400 ${
           canOpen ? "hover:bg-ink-700/40" : "cursor-default"
         }`}
@@ -75,7 +77,7 @@ export default function CommandLogBar() {
           <span className="truncate">{latest.command}</span>
         ) : (
           <span className="truncate text-slate-600">
-            파일 조작 시 여기에 명령어가 표시돼요
+            {t("commandLog.empty")}
           </span>
         )}
         {canOpen && (

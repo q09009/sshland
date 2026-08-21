@@ -5,6 +5,7 @@ import { useSettings } from "../lib/settings";
 import { formatClockAtOffset, formatElapsed } from "../lib/format";
 import { usePaneMenuStore } from "../lib/paneMenus";
 import Menu from "./Menu";
+import { useI18n } from "../i18n";
 
 const TRANSFER_COMPLETE_VISIBLE_MS = 3000;
 
@@ -31,6 +32,7 @@ function TransferStatus() {
   const batches = useAppStore((s) => s.uploadBatches);
   const dismissTransfer = useAppStore((s) => s.dismissTransfer);
   const dismissBatch = useAppStore((s) => s.dismissBatch);
+  const { t } = useI18n();
 
   const completedTransferIds = transfers
     .filter((transfer) => transfer.status === "done")
@@ -79,17 +81,19 @@ function TransferStatus() {
       return (
         <div
           className="flex max-w-52 items-center gap-1.5 text-red-400"
-          title={failed.error ?? `${failed.name} 전송에 실패했어요.`}
+          title={failed.error ?? t("status.transferFailedTitle", { name: failed.name })}
           role="status"
           aria-live="polite"
         >
           <span aria-hidden="true">!</span>
-          <span className="max-w-36 truncate">{failed.name} 전송 실패</span>
+          <span className="max-w-36 truncate">
+            {t("status.transferFailed", { name: failed.name })}
+          </span>
           <button
             onClick={() => dismissTransfer(failed.id)}
             className="rounded px-1 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
-            title="전송 오류 닫기"
-            aria-label={`${failed.name} 전송 오류 닫기`}
+            title={t("status.dismissTransferError", { name: failed.name })}
+            aria-label={t("status.dismissTransferError", { name: failed.name })}
           >
             ✕
           </button>
@@ -102,8 +106,11 @@ function TransferStatus() {
     if (!completedBatch && !completed) return null;
 
     const label = completedBatch
-      ? `${completedBatch.total}개 업로드 완료`
-      : `${completed?.kind === "upload" ? "↑" : "↓"} ${completed?.name} 완료`;
+      ? t("status.uploadBatchComplete", { count: completedBatch.total })
+      : t("status.transferComplete", {
+          direction: completed?.kind === "upload" ? "↑" : "↓",
+          name: completed?.name ?? "",
+        });
     return (
       <div
         className="flex max-w-52 items-center gap-1.5 text-emerald-400"
@@ -139,12 +146,12 @@ function TransferStatus() {
   const singleTransfer =
     activeTransfers.length === 1 ? activeTransfers[0] : null;
   const label = batch
-    ? `업로드 ${batch.done}/${batch.total}`
+    ? t("status.uploadProgress", { done: batch.done, total: batch.total })
     : singleTransfer
     ? `${singleTransfer.kind === "upload" ? "↑" : "↓"} ${singleTransfer.name}`
     : activeTransfers.length > 1
-      ? `${activeTransfers.length}개 전송`
-      : "전송 중";
+      ? t("status.transferCount", { count: activeTransfers.length })
+      : t("status.transferring");
 
   return (
     <div
@@ -178,11 +185,12 @@ function TransferStatus() {
 
 function SettingsButton() {
   const openSettings = useAppStore((s) => s.openSettings);
+  const { t } = useI18n();
   return (
     <button
       onClick={openSettings}
-      title="설정"
-      aria-label="설정"
+      title={t("status.settings")}
+      aria-label={t("status.settings")}
       className="rounded p-1 text-slate-400 hover:bg-ink-700 hover:text-slate-100"
     >
       <GearIcon />
@@ -260,6 +268,7 @@ function ConnectionInfo() {
   const status = useAppStore((s) => s.connectionStatus);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
   const showSeconds = useSettings((s) => s.settings.clockShowSeconds);
+  const { language, t } = useI18n();
 
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -344,8 +353,8 @@ function ConnectionInfo() {
         showSeconds
       )
     : serverClockFailed
-      ? "확인할 수 없음"
-      : "불러오는 중…";
+      ? t("status.unavailable")
+      : t("status.loading");
 
   return (
     <div ref={ref} className="relative min-w-0 justify-self-center">
@@ -368,10 +377,10 @@ function ConnectionInfo() {
 
       {open && connection && (
         <div className="motion-popover absolute left-1/2 top-full z-40 mt-1.5 w-56 -translate-x-1/2 rounded-lg border border-ink-700 bg-ink-800 p-3 text-xs shadow-popover">
-          <Row label="서버 시각" value={serverTime} />
+          <Row label={t("status.serverTime")} value={serverTime} />
           <Row
-            label="경과"
-            value={formatElapsed(now - connection.connectedAt)}
+            label={t("status.elapsed")}
+            value={formatElapsed(now - connection.connectedAt, language)}
             last
           />
           <hr className="hr my-2.5" />
@@ -379,7 +388,7 @@ function ConnectionInfo() {
             onClick={() => void handleDisconnect()}
             className="text-left text-red-400 hover:text-red-300"
           >
-            연결 종료
+            {t("status.disconnect")}
           </button>
         </div>
       )}

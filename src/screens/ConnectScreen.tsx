@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { connect } from "../api";
 import { useAppStore } from "../store";
 import { useSettings } from "../lib/settings";
+import { useI18n } from "../i18n";
 
 type AuthKind = "password" | "key";
 
@@ -13,6 +14,7 @@ export default function ConnectScreen() {
   const settingsLoaded = useSettings((s) => s.loaded);
   const lastConnection = useSettings((s) => s.settings.lastConnection);
   const saveSetting = useSettings((s) => s.set);
+  const { t } = useI18n();
 
   const [host, setHost] = useState("");
   const [port, setPort] = useState("22");
@@ -50,19 +52,19 @@ export default function ConnectScreen() {
     const selected = await open({
       multiple: false,
       directory: false,
-      title: "개인키 파일 선택",
+      title: t("connect.keyDialogTitle"),
     });
     if (typeof selected === "string") setKeyPath(selected);
   }
 
   function validate(): string | null {
-    if (!host.trim()) return "서버 주소를 입력해주세요.";
+    if (!host.trim()) return t("connect.validation.host");
     const portNum = Number(port);
     if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535)
-      return "포트 번호는 1부터 65535 사이여야 해요.";
-    if (!username.trim()) return "사용자명을 입력해주세요.";
-    if (authKind === "password" && !password) return "비밀번호를 입력해주세요.";
-    if (authKind === "key" && !keyPath) return "개인키 파일을 선택해주세요.";
+      return t("connect.validation.port");
+    if (!username.trim()) return t("connect.validation.username");
+    if (authKind === "password" && !password) return t("connect.validation.password");
+    if (authKind === "key" && !keyPath) return t("connect.validation.key");
     return null;
   }
 
@@ -104,9 +106,9 @@ export default function ConnectScreen() {
         home: result.home,
       });
     } catch (err) {
-      // Commands reject with a friendly Korean string.
+      // Commands reject with a localized, beginner-friendly message.
       setError(
-        typeof err === "string" ? err : "접속에 실패했어요. 다시 시도해주세요."
+        typeof err === "string" ? err : t("connect.error.generic")
       );
     } finally {
       setBusy(false);
@@ -142,13 +144,13 @@ export default function ConnectScreen() {
         <div className="flex flex-col gap-4">
           {/* Destination group */}
           <div>
-            <span className="mb-2 block text-2xs text-slate-500">목적지</span>
+            <span className="mb-2 block text-2xs text-slate-500">{t("connect.destination")}</span>
             <div className="flex gap-3">
               <div className="flex-1">
-                <Field label="서버 주소">
+                <Field label={t("connect.host")}>
                   <input
                     className={inputClass}
-                    placeholder="예: 192.168.0.10"
+                    placeholder={t("connect.hostPlaceholder")}
                     value={host}
                     onChange={(e) => setHost(e.target.value)}
                     spellCheck={false}
@@ -156,7 +158,7 @@ export default function ConnectScreen() {
                 </Field>
               </div>
               <div className="w-[92px]">
-                <Field label="포트">
+                <Field label={t("connect.port")}>
                   <input
                     className={inputClass}
                     inputMode="numeric"
@@ -169,10 +171,10 @@ export default function ConnectScreen() {
           </div>
 
           {/* Username */}
-          <Field label="사용자명">
+          <Field label={t("connect.username")}>
             <input
               className={inputClass}
-              placeholder="예: root"
+              placeholder={t("connect.usernamePlaceholder")}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               spellCheck={false}
@@ -182,7 +184,7 @@ export default function ConnectScreen() {
           {/* Auth method segmented toggle */}
           <div>
             <span id="auth-label" className="mb-1.5 block text-xs font-medium text-slate-400">
-              인증 방식
+              {t("connect.authMethod")}
             </span>
             <div
               role="radiogroup"
@@ -190,10 +192,10 @@ export default function ConnectScreen() {
               className="grid grid-cols-2 gap-1 rounded-lg bg-ink-900 p-1"
             >
               <SegButton active={isPassword} onClick={() => setAuthKind("password")}>
-                비밀번호
+                {t("connect.password")}
               </SegButton>
               <SegButton active={!isPassword} onClick={() => setAuthKind("key")}>
-                개인키
+                {t("connect.privateKey")}
               </SegButton>
             </div>
           </div>
@@ -204,7 +206,7 @@ export default function ConnectScreen() {
             style={{ height: isPassword ? 76 : 172 }}
           >
             <div className={passGroupClass} aria-hidden={!isPassword}>
-              <Field label="비밀번호">
+              <Field label={t("connect.password")}>
                 <input
                   className={inputClass}
                   type="password"
@@ -221,7 +223,7 @@ export default function ConnectScreen() {
               <div className="flex flex-col gap-3.5">
                 <div>
                   <span className="mb-1.5 block text-xs font-medium text-slate-400">
-                    개인키 파일
+                    {t("connect.privateKeyFile")}
                   </span>
                   <button
                     type="button"
@@ -233,16 +235,16 @@ export default function ConnectScreen() {
                     <FolderIcon />
                     <span className="truncate">
                       {keyFileName ?? (
-                        <span className="text-slate-500">파일 선택…</span>
+                        <span className="text-slate-500">{t("connect.chooseFile")}</span>
                       )}
                     </span>
                   </button>
                 </div>
-                <Field label="암호 (선택 사항)">
+                <Field label={t("connect.passphraseOptional")}>
                   <input
                     className={inputClass}
                     type="password"
-                    placeholder="없으면 비워두세요"
+                    placeholder={t("connect.passphrasePlaceholder")}
                     value={passphrase}
                     onChange={(e) => setPassphrase(e.target.value)}
                     autoComplete="off"
@@ -256,8 +258,7 @@ export default function ConnectScreen() {
           {/* Security note */}
           <p className="m-0 flex items-center gap-2 text-2xs text-slate-500">
             <LockIcon />
-            비밀번호는 저장하지 않아요. 다음에는 서버 주소·포트·사용자명만
-            자동으로 채워드려요.
+            {t("connect.securityNote")}
           </p>
 
           {error && (
@@ -278,11 +279,11 @@ export default function ConnectScreen() {
             {busy ? (
               <>
                 <Spinner />
-                접속하는 중…
+                {t("connect.connecting")}
               </>
             ) : (
               <>
-                접속하기
+                {t("connect.submit")}
                 <ArrowIcon />
               </>
             )}

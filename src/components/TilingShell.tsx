@@ -6,6 +6,7 @@ import PaneView from "./PaneView";
 import ShortcutsHelp from "./ShortcutsHelp";
 import DragLayer from "./DragLayer";
 import CommandPalette from "./CommandPalette";
+import { useI18n } from "../i18n";
 
 /** Hosts the pane tree, global tiling shortcuts, and connection-wide events. */
 export default function TilingShell() {
@@ -15,6 +16,7 @@ export default function TilingShell() {
   const requestClose = useAppStore((s) => s.requestClose);
   const updateTransfer = useAppStore((s) => s.updateTransfer);
   const returnToConnect = useAppStore((s) => s.returnToConnect);
+  const { t } = useI18n();
 
   // Tiling keyboard shortcuts.
   useEffect(() => {
@@ -70,12 +72,12 @@ export default function TilingShell() {
   useEffect(() => {
     const unlisten = listen("connection-lost", () => {
       void disconnect().catch(() => {});
-      returnToConnect("서버와의 연결이 끊어졌어요. 다시 접속해주세요.");
+      returnToConnect(t("connection.lost"));
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [returnToConnect]);
+  }, [returnToConnect, t]);
 
   return (
     <div className="h-full w-full">

@@ -13,6 +13,7 @@ import FilesScreen from "../screens/FilesScreen";
 import TerminalPane from "./TerminalPane";
 import EditorPane from "./EditorPane";
 import DashboardPane from "./DashboardPane";
+import { useI18n } from "../i18n";
 
 /**
  * Renders the pane tree as a FLAT list of absolutely-positioned leaves plus
@@ -229,10 +230,15 @@ function PaneHeader({
   const requestClose = useAppStore((s) => s.requestClose);
   const canClose = useAppStore((s) => leafCount(s.paneTree) > 1);
   const dashboardEnabled = useSettings((s) => s.settings.dashboardEnabled);
+  const { t } = useI18n();
   const isFm = node.content === "file-manager";
   const isDashboard = node.content === "dashboard";
 
-  const label = isFm ? "파일관리자" : isDashboard ? "대시보드" : "터미널";
+  const label = isFm
+    ? t("pane.fileManager")
+    : isDashboard
+      ? t("pane.dashboard")
+      : t("pane.terminal");
 
   return (
     <div className="flex h-7 shrink-0 items-center justify-between border-b border-ink-700/60 bg-ink-800 pl-2.5 pr-1 text-xs text-slate-400">
@@ -245,7 +251,7 @@ function PaneHeader({
         {isDashboard ? (
           <button
             onClick={() => setPaneContent(node.id, "file-manager")}
-            title="파일관리자로 전환"
+            title={t("pane.switchToFileManager")}
             className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
           >
             📁
@@ -256,7 +262,7 @@ function PaneHeader({
               onClick={() =>
                 setPaneContent(node.id, isFm ? "terminal" : "file-manager")
               }
-              title={isFm ? "터미널로 전환" : "파일관리자로 전환"}
+              title={isFm ? t("pane.switchToTerminal") : t("pane.switchToFileManager")}
               className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
             >
               ⇄
@@ -264,7 +270,7 @@ function PaneHeader({
             {dashboardEnabled && (
               <button
                 onClick={() => setPaneContent(node.id, "dashboard")}
-                title="대시보드로 전환"
+                title={t("pane.switchToDashboard")}
                 className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200"
               >
                 📊
@@ -275,7 +281,7 @@ function PaneHeader({
         <button
           onClick={() => requestClose(node.id)}
           disabled={!canClose}
-          title="pane 닫기"
+          title={t("pane.close")}
           className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-30 disabled:hover:bg-transparent"
         >
           ✕

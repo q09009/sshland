@@ -5,6 +5,7 @@ import {
   KeyboardEvent,
   ReactNode,
 } from "react";
+import { useI18n } from "../i18n";
 
 export function FormField({
   id,
@@ -21,13 +22,14 @@ export function FormField({
   error?: string;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <div className="min-w-0">
       <div className="mb-1.5 flex items-baseline justify-between gap-3">
         <label htmlFor={id} className="text-xs font-medium text-slate-300">
           {label}
         </label>
-        {optional && <span className="text-2xs text-slate-500">선택 사항</span>}
+        {optional && <span className="text-2xs text-slate-500">{t("common.optional")}</span>}
       </div>
       {children}
       {(error || hint) && (

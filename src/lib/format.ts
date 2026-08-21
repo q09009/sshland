@@ -15,17 +15,21 @@ export function formatSize(bytes: number, isDir: boolean): string {
 }
 
 /**
- * Format a session's elapsed time (given in ms) like "1시간 12분", "12분", or
- * "1분 미만". Minute granularity keeps the status bar minimal; computed entirely
+ * Format a session's elapsed time (given in ms) with minute granularity. This
+ * keeps the status bar minimal and is computed entirely
  * locally — never asks the server for the time.
  */
-export function formatElapsed(ms: number): string {
+export function formatElapsed(ms: number, language: "ko" | "en"): string {
   const totalMinutes = Math.floor(ms / 60000);
-  if (totalMinutes < 1) return "1분 미만";
+  if (totalMinutes < 1) return language === "ko" ? "1분 미만" : "Under 1 min";
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  if (hours > 0) return `${hours}시간 ${minutes}분`;
-  return `${minutes}분`;
+  if (language === "ko") {
+    if (hours > 0) return `${hours}시간 ${minutes}분`;
+    return `${minutes}분`;
+  }
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes} min`;
 }
 
 /**
