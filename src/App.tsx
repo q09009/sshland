@@ -8,11 +8,17 @@ import { useAppStore } from "./store";
 import { useSettings } from "./lib/settings";
 import { useCommandConfigs } from "./lib/commandConfigs";
 import { useDashboardLayout } from "./lib/dashboardLayout";
+import { useI18n } from "./i18n";
 
 function App() {
   const screen = useAppStore((s) => s.screen);
   const loadSettings = useSettings((s) => s.load);
   const loadCommandConfigs = useCommandConfigs((s) => s.load);
+  const { language } = useI18n();
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   // Load persisted settings and command-GUI configs once at startup, then seed
   // the dashboard layout from the loaded settings (so it survives a restart).

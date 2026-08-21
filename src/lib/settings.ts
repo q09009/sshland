@@ -18,12 +18,16 @@ export interface LastConnection {
   keyPath: string;
 }
 
+export type AppLanguage = "system" | "ko" | "en";
+
 /**
  * User-facing app settings. Persisted as a JSON blob on disk (see the Rust
  * `settings` module). To add a setting: add a field here, a default below, and
  * a control in the settings panel — no backend change needed.
  */
 export interface AppSettings {
+  /** Interface language, or the current OS language when set to system. */
+  language: AppLanguage;
   /** Show the bottom command-log bar (file ops as CLI commands). */
   commandLogEnabled: boolean;
   /** Render matching terminal command output as GUI widgets (off = raw only). */
@@ -41,6 +45,7 @@ export interface AppSettings {
 }
 
 const DEFAULTS: AppSettings = {
+  language: "system",
   commandLogEnabled: true,
   commandGuiEnabled: true,
   clockShowSeconds: false,

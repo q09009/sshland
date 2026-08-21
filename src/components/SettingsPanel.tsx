@@ -6,6 +6,8 @@ import { useCommandConfigs } from "../lib/commandConfigs";
 import { useDashboardWidgetConfigs } from "../lib/dashboardWidgetConfigs";
 import { MIN_REFRESH_SECONDS, clampInterval } from "../lib/dashboardTypes";
 import { commandsDirPath, openCommandsDir } from "../api";
+import { useI18n } from "../i18n";
+import type { AppLanguage } from "../lib/settings";
 
 /**
  * Full settings surface: a modal overlay covering the pane tiling, with a
@@ -297,10 +299,26 @@ function DashboardSection() {
 
 function GeneralSection() {
   const showSeconds = useSettings((s) => s.settings.clockShowSeconds);
+  const language = useSettings((s) => s.settings.language);
   const set = useSettings((s) => s.set);
+  const { t } = useI18n();
   return (
     <div>
       <SectionTitle>일반</SectionTitle>
+      <SettingRow
+        label={t("settings.language.label")}
+        description={t("settings.language.description")}
+      >
+        <select
+          value={language}
+          onChange={(event) => set("language", event.target.value as AppLanguage)}
+          className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+        >
+          <option value="system">{t("language.system")}</option>
+          <option value="ko">{t("language.ko")}</option>
+          <option value="en">{t("language.en")}</option>
+        </select>
+      </SettingRow>
       <SettingRow
         label="시계에 초 표시"
         description="상단 상태바 시계를 HH:MM:SS 로 표시합니다."
