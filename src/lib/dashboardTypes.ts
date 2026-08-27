@@ -6,6 +6,7 @@
 
 /** Card size class within the dashboard grid. */
 export type WidgetSize = "small" | "medium" | "large";
+export type DashboardViewMode = "simple" | "detailed";
 
 /**
  * One placed widget on the dashboard: a reference to a widget config (by its
@@ -22,6 +23,8 @@ export interface DashboardWidgetInstance {
   /** Where widgetId resolves. Absent (older layouts) means "widget". */
   source?: "widget" | "macro";
   size: WidgetSize;
+  /** Beginner-friendly summary or the original full table. Absent older values default to simple. */
+  viewMode?: DashboardViewMode;
   /** Poll interval in seconds (widget source only); never below MIN_REFRESH_SECONDS. */
   refreshIntervalSeconds: number;
 }

@@ -3,6 +3,7 @@ import { useSettings } from "./settings";
 import { moveItem } from "./reorder";
 import {
   clampInterval,
+  DashboardViewMode,
   DashboardWidgetInstance,
   MIN_REFRESH_SECONDS,
   WIDGET_SIZES,
@@ -17,7 +18,7 @@ export {
   MIN_REFRESH_SECONDS,
   WIDGET_SIZES,
 };
-export type { DashboardWidgetInstance, WidgetSize };
+export type { DashboardViewMode, DashboardWidgetInstance, WidgetSize };
 
 interface DashboardLayoutState {
   /** The single shared dashboard layout (persisted in a later step). */
@@ -34,6 +35,8 @@ interface DashboardLayoutState {
   moveWidget: (from: number, to: number) => void;
   /** Set a widget instance's card size. */
   setSize: (instanceId: string, size: WidgetSize) => void;
+  /** Switch between the beginner-friendly summary and original detailed view. */
+  setViewMode: (instanceId: string, mode: DashboardViewMode) => void;
   /** Set a widget instance's poll interval (clamped to the minimum). */
   setRefreshInterval: (instanceId: string, seconds: number) => void;
 }
@@ -65,6 +68,12 @@ export const useDashboardLayout = create<DashboardLayoutState>((set, get) => {
       set({
         widgets: widgets.map((w) => ({
           ...w,
+          viewMode:
+            w.source === "macro"
+              ? undefined
+              : w.viewMode === "detailed"
+                ? "detailed"
+                : "simple",
           refreshIntervalSeconds: clampInterval(w.refreshIntervalSeconds),
         })),
       }),
@@ -76,6 +85,7 @@ export const useDashboardLayout = create<DashboardLayoutState>((set, get) => {
           widgetId,
           source: "widget",
           size: "medium",
+          viewMode: "simple",
           refreshIntervalSeconds: clampInterval(refreshIntervalSeconds),
         },
       ]),
@@ -99,6 +109,12 @@ export const useDashboardLayout = create<DashboardLayoutState>((set, get) => {
       mutate((widgets) =>
         widgets.map((w) =>
           w.instanceId === instanceId ? { ...w, size } : w
+        )
+      ),
+    setViewMode: (instanceId, viewMode) =>
+      mutate((widgets) =>
+        widgets.map((w) =>
+          w.instanceId === instanceId ? { ...w, viewMode } : w
         )
       ),
     setRefreshInterval: (instanceId, seconds) =>

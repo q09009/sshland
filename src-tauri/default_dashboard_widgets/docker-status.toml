@@ -1,0 +1,13 @@
+# Docker status only — no lifecycle actions. The sentinel lines let the friendly
+# renderer distinguish an absent CLI from an unavailable daemon/socket without
+# relying on stderr, which one-shot dashboard commands intentionally do not expose.
+id = "docker-status"
+label = "Docker 컨테이너"
+icon = "🐳"
+description = "컨테이너가 실행 중인지와 health 상태를 보여줘요."
+command = "if ! command -v docker >/dev/null 2>&1; then echo '__SSHLAND_DOCKER__:missing'; elif ! docker info >/dev/null 2>&1; then echo '__SSHLAND_DOCKER__:unavailable'; else docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}'; fi"
+parser = "columns"
+render = "table"
+simple_view = "docker"
+category = "monitoring"
+refresh_interval_seconds = 10

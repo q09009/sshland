@@ -11,6 +11,7 @@ import { operationToCommandString } from "../lib/commandLog";
 import { ReorderItemProps } from "../lib/reorder";
 import { useAppStore } from "../store";
 import WidgetView from "./WidgetView";
+import type { PreviousDashboardSample } from "./SimpleDashboardView";
 import { KillProcessDialog } from "./Modal";
 import {
   DashboardCardAction,
@@ -44,11 +45,13 @@ export default function WidgetCard({
 
   const removeWidget = useDashboardLayout((s) => s.removeWidget);
   const setSize = useDashboardLayout((s) => s.setSize);
+  const setViewMode = useDashboardLayout((s) => s.setViewMode);
   const setRefreshInterval = useDashboardLayout((s) => s.setRefreshInterval);
 
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [previousSample, setPreviousSample] = useState<PreviousDashboardSample | null>(null);
 
   // Process-manager kill flow: which process is pending a confirm, and whether
   // the kill exec is in flight.
@@ -62,6 +65,8 @@ export default function WidgetCard({
   // on the command + interval (not on every state change).
   const mounted = useRef(true);
   const pollRef = useRef<() => void>(() => {});
+  const latestSampleRef = useRef<{ output: string; at: number } | null>(null);
+  const networkMeasureTimerRef = useRef<number | null>(null);
   const command = config?.command ?? "";
 
   pollRef.current = () => {
@@ -70,8 +75,31 @@ export default function WidgetCard({
     pollWidgetCommand(command)
       .then((out) => {
         if (!mounted.current) return;
+        const now = Date.now();
+        const previous = latestSampleRef.current;
+        setPreviousSample(
+          previous
+            ? {
+                output: previous.output,
+                elapsedSeconds: Math.max(0.001, (now - previous.at) / 1000),
+              }
+            : null,
+        );
+        latestSampleRef.current = { output: out, at: now };
         setOutput(out);
         setError(null);
+        // Current network throughput needs two counter snapshots. Take the
+        // second one quickly without sleeping in the remote command/SSH worker.
+        if (
+          config?.simpleView === "network" &&
+          previous == null &&
+          networkMeasureTimerRef.current == null
+        ) {
+          networkMeasureTimerRef.current = window.setTimeout(() => {
+            networkMeasureTimerRef.current = null;
+            pollRef.current();
+          }, 1000);
+        }
       })
       .catch((e) => {
         if (!mounted.current) return;
@@ -86,12 +114,21 @@ export default function WidgetCard({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      if (networkMeasureTimerRef.current != null) {
+        window.clearTimeout(networkMeasureTimerRef.current);
+      }
     };
   }, []);
 
   const intervalSeconds = instance.refreshIntervalSeconds;
   useEffect(() => {
     if (!command) return;
+    latestSampleRef.current = null;
+    setPreviousSample(null);
+    if (networkMeasureTimerRef.current != null) {
+      window.clearTimeout(networkMeasureTimerRef.current);
+      networkMeasureTimerRef.current = null;
+    }
     const run = () => pollRef.current();
     run(); // poll immediately, then on the interval
     const handle = window.setInterval(run, intervalSeconds * 1000);
@@ -102,6 +139,7 @@ export default function WidgetCard({
     const i = WIDGET_SIZES.indexOf(instance.size);
     setSize(instance.instanceId, WIDGET_SIZES[(i + 1) % WIDGET_SIZES.length]);
   };
+  const viewMode = instance.viewMode ?? "simple";
 
   // Send the kill, log the real command, and re-poll immediately on success so
   // the process list reflects the change without waiting for the next tick.
@@ -147,6 +185,26 @@ export default function WidgetCard({
         titleHint={config ? dashboardWidgetLabel(config, t) : undefined}
         busy={loading}
       >
+          {config?.simpleView && (
+            <DashboardCardAction
+              onClick={() =>
+                setViewMode(
+                  instance.instanceId,
+                  viewMode === "simple" ? "detailed" : "simple",
+                )
+              }
+              title={
+                viewMode === "simple"
+                  ? t("dashboard.card.switchToDetailed")
+                  : t("dashboard.card.switchToSimple")
+              }
+              className="text-2xs"
+            >
+              {viewMode === "simple"
+                ? t("dashboard.card.simple")
+                : t("dashboard.card.detailed")}
+            </DashboardCardAction>
+          )}
           <IntervalInput
             seconds={intervalSeconds}
             onCommit={(s) => setRefreshInterval(instance.instanceId, s)}
@@ -186,6 +244,8 @@ export default function WidgetCard({
           <WidgetView
             config={config}
             output={output}
+            viewMode={viewMode}
+            previousSample={previousSample}
             onKill={(pid, name) => setKillTarget({ pid, name })}
           />
         )}

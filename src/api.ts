@@ -303,6 +303,8 @@ export interface DashboardWidgetConfig {
   icon?: string;
   /** One-line description shown in the picker. */
   description?: string;
+  /** Optional built-in beginner-friendly view; parser/render stays detailed. */
+  simpleView?: "disk" | "network" | "process" | "docker";
   category: "monitoring" | "process-manager";
   /**
    * Suggested poll interval. Optional — when a widget omits it, the app's global

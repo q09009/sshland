@@ -11,6 +11,10 @@ import {
 } from "../lib/parsers";
 import ProcessTable from "./ProcessTable";
 import { useI18n } from "../i18n";
+import SimpleDashboardView, {
+  type PreviousDashboardSample,
+} from "./SimpleDashboardView";
+import type { DashboardViewMode } from "../lib/dashboardLayout";
 
 /**
  * Renders one dashboard widget's raw command output as a GUI body, using the
@@ -25,14 +29,29 @@ import { useI18n } from "../i18n";
 export default function WidgetView({
   config,
   output,
+  viewMode = "detailed",
+  previousSample,
   onKill,
 }: {
   config: DashboardWidgetConfig;
   output: string;
+  viewMode?: DashboardViewMode;
+  previousSample?: PreviousDashboardSample | null;
   /** Kill request from a process-manager row (card orchestrates confirm+exec). */
   onKill?: (pid: string, name: string) => void;
 }) {
-  const body = renderWidget(config, output, onKill);
+  const simpleBody =
+    config.simpleView &&
+    (viewMode === "simple" ||
+      (config.simpleView === "docker" && output.startsWith("__SSHLAND_DOCKER__"))) ? (
+      <SimpleDashboardView
+        kind={config.simpleView}
+        output={output}
+        previousSample={previousSample}
+        onKill={onKill}
+      />
+    ) : null;
+  const body = simpleBody ?? renderWidget(config, output, onKill);
   const { t } = useI18n();
   return (
     body ?? (

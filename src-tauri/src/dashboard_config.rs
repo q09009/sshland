@@ -58,11 +58,16 @@ const DEFAULT_WIDGETS: &[(&str, &str)] = &[
         "process-manager",
         include_str!("../default_dashboard_widgets/process-manager.toml"),
     ),
+    (
+        "docker-status",
+        include_str!("../default_dashboard_widgets/docker-status.toml"),
+    ),
 ];
 
 const PARSERS: &[&str] = &["columns", "keyvalue", "regex"];
 const RENDERS: &[&str] = &["gauge", "table", "keyvalue-card", "list"];
 const CATEGORIES: &[&str] = &["monitoring", "process-manager"];
+const SIMPLE_VIEWS: &[&str] = &["disk", "network", "process", "docker"];
 
 /// Raw shape as written in a TOML file.
 #[derive(Deserialize)]
@@ -82,6 +87,9 @@ struct RawWidget {
     icon: Option<String>,
     /// One-line description shown in the picker (optional).
     description: Option<String>,
+    /// Optional built-in beginner-friendly renderer. The normal parser/render
+    /// pair remains the detailed view and is never replaced.
+    simple_view: Option<String>,
     category: String,
     /// Suggested poll interval. Optional: when a widget omits it, the app's
     /// global default interval (a setting) is used when the widget is added.
@@ -114,6 +122,8 @@ pub struct DashboardWidgetConfig {
     icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    simple_view: Option<String>,
     category: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     refresh_interval_seconds: Option<u64>,
@@ -134,6 +144,11 @@ fn parse_widget(name: &str, source: &str, text: &str) -> Result<DashboardWidgetC
     if !CATEGORIES.contains(&raw.category.as_str()) {
         return Err(format!("unknown category '{}'", raw.category));
     }
+    if let Some(simple_view) = raw.simple_view.as_deref() {
+        if !SIMPLE_VIEWS.contains(&simple_view) {
+            return Err(format!("unknown simple_view '{simple_view}'"));
+        }
+    }
     if raw.parser == "regex" && raw.capture_pattern.is_none() {
         return Err("parser 'regex' requires capture_pattern".to_string());
     }
@@ -151,6 +166,7 @@ fn parse_widget(name: &str, source: &str, text: &str) -> Result<DashboardWidgetC
         unit: raw.unit,
         icon: raw.icon,
         description: raw.description,
+        simple_view: raw.simple_view,
         category: raw.category,
         refresh_interval_seconds: raw.refresh_interval_seconds,
     })
@@ -241,6 +257,18 @@ mod tests {
     }
 
     #[test]
+    fn bundled_docker_status_is_read_only_and_has_a_simple_view() {
+        let text = include_str!("../default_dashboard_widgets/docker-status.toml");
+        let cfg = parse_widget("docker-status", "default", text).expect("docker should parse");
+        assert_eq!(cfg.simple_view.as_deref(), Some("docker"));
+        assert_eq!(cfg.refresh_interval_seconds, Some(10));
+        assert!(cfg.command.contains("docker ps -a"));
+        assert!(!cfg.command.contains("docker stop"));
+        assert!(!cfg.command.contains("docker restart"));
+        assert!(!cfg.command.contains("docker rm"));
+    }
+
+    #[test]
     fn every_bundled_default_parses() {
         for (name, text) in DEFAULT_WIDGETS {
             parse_widget(name, "default", text)
@@ -269,6 +297,13 @@ mod tests {
             "x",
             "user",
             "id='a'\nlabel='A'\ncommand='true'\nparser='columns'\nrender='table'\ncategory='nope'\nrefresh_interval_seconds=5"
+        )
+        .is_err());
+        // unknown beginner-friendly renderer
+        assert!(parse_widget(
+            "x",
+            "user",
+            "id='a'\nlabel='A'\ncommand='true'\nparser='columns'\nrender='table'\ncategory='monitoring'\nsimple_view='nope'"
         )
         .is_err());
     }

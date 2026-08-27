@@ -30,6 +30,10 @@ const BUILT_IN_TEXT: Record<
     label: "dashboard.widget.process.label",
     description: "dashboard.widget.process.description",
   },
+  "docker-status": {
+    label: "dashboard.widget.docker.label",
+    description: "dashboard.widget.docker.description",
+  },
 };
 
 function builtInText(config: DashboardWidgetConfig) {
