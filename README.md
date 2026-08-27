@@ -69,7 +69,7 @@
 | macOS | 아직 검증하지 않았습니다. |
 | 원격 서버 | Linux 계열 SSH 서버를 기준으로 합니다. 기본 대시보드와 명령 GUI는 `sh`, `df`, `ps` 같은 일반적인 Linux 명령을 사용합니다. |
 | Docker | 선택 사항입니다. 서버에 Docker가 없거나 실행 권한이 없으면 Docker 위젯만 사용할 수 없음 상태로 표시됩니다. |
-| 배포 방식 | 아직 GitHub Release나 공식 설치 파일이 없습니다. 현재는 소스에서 직접 실행하거나 빌드합니다. |
+| 배포 방식 | https://github.com/q09009/sshland/releases/tag/v0.1.0 |
 
 ## 기술 구성
 
