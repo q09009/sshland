@@ -639,7 +639,7 @@ fn append_upload_plan(
             .map_err(|_| {
                 error::with_detail("errors.uploadFolderRead", local.display().to_string())
             })?;
-        children.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        children.sort_by_key(|item| item.file_name());
 
         for child in children {
             let child_name = child.file_name();

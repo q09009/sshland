@@ -79,7 +79,7 @@ pub fn list_macros(app: AppHandle) -> Vec<Macro> {
         }
     }
     // Stable order by name so the picker list doesn't jump around.
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|item| item.name.to_lowercase());
     out
 }
 
