@@ -1,11 +1,24 @@
 import { useEffect, useState } from "react";
 import { getName, getVersion, getTauriVersion } from "@tauri-apps/api/app";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../store";
-import { useSettings } from "../lib/settings";
+import {
+  DEFAULT_THEME_SETTINGS,
+  useSettings,
+  type MotionPreference,
+  type TerminalFontPreference,
+  type ThemeSettings,
+  type UiFontPreference,
+} from "../lib/settings";
 import { useCommandConfigs } from "../lib/commandConfigs";
 import { useDashboardWidgetConfigs } from "../lib/dashboardWidgetConfigs";
 import { MIN_REFRESH_SECONDS, clampInterval } from "../lib/dashboardTypes";
-import { commandsDirPath, openCommandsDir } from "../api";
+import {
+  clearThemeBackground,
+  commandsDirPath,
+  importThemeBackground,
+  openCommandsDir,
+} from "../api";
 import { useI18n } from "../i18n";
 import type { AppLanguage } from "../lib/settings";
 import type { TranslationKey } from "../i18n/ko";
@@ -27,10 +40,10 @@ const SECTIONS: Section[] = [
   { id: "command-log", label: "settings.section.commandLog", render: () => <CommandLogSection /> },
   { id: "command-gui", label: "settings.section.commandGui", render: () => <CommandGuiSection /> },
   { id: "dashboard", label: "settings.section.dashboard", render: () => <DashboardSection /> },
+  { id: "theme", label: "settings.section.theme", render: () => <ThemeSection /> },
   { id: "general", label: "settings.section.general", render: () => <GeneralSection /> },
   { id: "about", label: "settings.section.about", render: () => <AboutSection /> },
-  // Future: { id: "shortcuts", label: "단축키", ... },
-  //         { id: "theme", label: "테마", ... }
+  // Future: { id: "shortcuts", label: "단축키", ... }
 ];
 
 export default function SettingsPanel() {
@@ -58,11 +71,11 @@ export default function SettingsPanel() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
       onMouseDown={close}
     >
       <div
-        className="flex h-[70%] max-h-[560px] w-[80%] max-w-3xl overflow-hidden rounded-2xl border border-ink-700 bg-ink-900 shadow-2xl"
+        className="flex h-[70%] max-h-[560px] w-[80%] max-w-3xl overflow-hidden rounded-2xl border border-ink-700 bg-surface-dialog shadow-dialog"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Category sidebar */}
@@ -302,6 +315,242 @@ function DashboardSection() {
   );
 }
 
+function ThemeSection() {
+  const theme = useSettings((state) => state.settings.theme);
+  const set = useSettings((state) => state.set);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const { t } = useI18n();
+
+  const update = (patch: Partial<ThemeSettings>) => {
+    set("theme", { ...theme, ...patch });
+  };
+
+  const chooseBackground = async () => {
+    setImageError(null);
+    setImageBusy(true);
+    try {
+      const selected = await open({
+        title: t("settings.theme.background.choose"),
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: t("settings.theme.background.imageFiles"),
+            extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"],
+          },
+        ],
+      });
+      if (!selected || Array.isArray(selected)) return;
+      const importedPath = await importThemeBackground(selected);
+      update({ backgroundImagePath: importedPath });
+    } catch (error) {
+      setImageError(typeof error === "string" ? error : t("settings.theme.background.error"));
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
+  const removeBackground = async () => {
+    setImageBusy(true);
+    setImageError(null);
+    try {
+      await clearThemeBackground();
+      update({ backgroundImagePath: null });
+    } catch (error) {
+      setImageError(typeof error === "string" ? error : t("settings.theme.background.error"));
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
+  const resetTheme = () => {
+    void clearThemeBackground().catch(() => {});
+    set("theme", { ...DEFAULT_THEME_SETTINGS });
+    setImageError(null);
+  };
+
+  return (
+    <div>
+      <SectionTitle>{t("settings.section.theme")}</SectionTitle>
+      <p className="mb-4 text-sm leading-relaxed text-slate-400">
+        {t("settings.theme.description")}
+      </p>
+
+      <div className="theme-settings-preview mb-4 overflow-hidden rounded-lg border border-ink-700/60">
+        <div className="theme-settings-preview-image" />
+        <div className="theme-settings-preview-overlay" />
+        <div className="relative flex h-full items-end justify-between p-3">
+          <span className="text-sm font-medium text-slate-100">
+            {t("settings.theme.preview")}
+          </span>
+          <span className="h-4 w-12 rounded-full bg-sky-500 shadow-control" />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <SettingRow
+          label={t("settings.theme.background.color")}
+          description={t("settings.theme.background.colorDescription")}
+        >
+          <ColorControl
+            value={theme.backgroundColor}
+            label={t("settings.theme.background.color")}
+            onChange={(backgroundColor) => update({ backgroundColor })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.theme.background.image")}
+          description={
+            theme.backgroundImagePath
+              ? t("settings.theme.background.selected")
+              : t("settings.theme.background.none")
+          }
+        >
+          <div className="flex shrink-0 gap-2">
+            {theme.backgroundImagePath && (
+              <button
+                type="button"
+                disabled={imageBusy}
+                onClick={() => void removeBackground()}
+                className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-700 disabled:opacity-50"
+              >
+                {t("common.delete")}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={imageBusy}
+              onClick={() => void chooseBackground()}
+              className="rounded-lg bg-sky-500/15 px-3 py-1.5 text-xs text-sky-200 hover:bg-sky-500/25 disabled:opacity-50"
+            >
+              {imageBusy
+                ? t("settings.theme.background.importing")
+                : t("settings.theme.background.choose")}
+            </button>
+          </div>
+        </SettingRow>
+
+        {theme.backgroundImagePath && (
+          <SettingRow
+            label={t("settings.theme.background.overlay")}
+            description={t("settings.theme.background.overlayDescription")}
+          >
+            <label className="flex shrink-0 items-center gap-2 text-xs text-slate-400">
+              <input
+                type="range"
+                min="0"
+                max="90"
+                step="5"
+                value={theme.backgroundOverlay}
+                onChange={(event) =>
+                  update({ backgroundOverlay: Number(event.target.value) })
+                }
+                className="accent-sky-500"
+              />
+              <span className="w-8 text-right tabular-nums">
+                {theme.backgroundOverlay}%
+              </span>
+            </label>
+          </SettingRow>
+        )}
+
+        <SettingRow
+          label={t("settings.theme.accent")}
+          description={t("settings.theme.accentDescription")}
+        >
+          <ColorControl
+            value={theme.accentColor}
+            label={t("settings.theme.accent")}
+            onChange={(accentColor) => update({ accentColor })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.theme.motion")}
+          description={t("settings.theme.motionDescription")}
+        >
+          <select
+            value={theme.motion}
+            onChange={(event) =>
+              update({ motion: event.target.value as MotionPreference })
+            }
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+          >
+            <option value="normal">{t("settings.theme.motion.normal")}</option>
+            <option value="reduced">{t("settings.theme.motion.reduced")}</option>
+            <option value="none">{t("settings.theme.motion.none")}</option>
+          </select>
+        </SettingRow>
+
+        <SettingRow label={t("settings.theme.uiFont")}>
+          <select
+            value={theme.uiFont}
+            onChange={(event) =>
+              update({ uiFont: event.target.value as UiFontPreference })
+            }
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+          >
+            <option value="default">{t("settings.theme.font.default")}</option>
+            <option value="system">{t("settings.theme.font.system")}</option>
+            <option value="segoe">Segoe UI</option>
+          </select>
+        </SettingRow>
+
+        <SettingRow label={t("settings.theme.terminalFont")}>
+          <select
+            value={theme.terminalFont}
+            onChange={(event) =>
+              update({ terminalFont: event.target.value as TerminalFontPreference })
+            }
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 font-mono text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+          >
+            <option value="default">{t("settings.theme.font.default")}</option>
+            <option value="cascadia">Cascadia Code</option>
+            <option value="d2coding">D2Coding</option>
+            <option value="consolas">Consolas</option>
+            <option value="system">{t("settings.theme.font.systemMono")}</option>
+          </select>
+        </SettingRow>
+      </div>
+
+      {imageError && <p className="mt-3 text-xs text-red-300">{imageError}</p>}
+
+      <button
+        type="button"
+        onClick={resetTheme}
+        className="mt-4 rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-700"
+      >
+        {t("settings.theme.reset")}
+      </button>
+    </div>
+  );
+}
+
+function ColorControl({
+  value,
+  label,
+  onChange,
+}: {
+  value: string;
+  label: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex shrink-0 items-center gap-2">
+      <input
+        type="color"
+        value={value}
+        aria-label={label}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 w-10 cursor-pointer rounded border border-ink-700 bg-transparent p-0.5"
+      />
+      <span className="w-16 font-mono text-xs text-slate-400">{value}</span>
+    </label>
+  );
+}
+
 function GeneralSection() {
   const showSeconds = useSettings((s) => s.settings.clockShowSeconds);
   const language = useSettings((s) => s.settings.language);
@@ -429,7 +678,7 @@ function Toggle({
       }`}
     >
       <span
-        className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${
+        className={`h-5 w-5 rounded-full bg-control-knob shadow-control transition-transform ${
           checked ? "translate-x-5" : "translate-x-0"
         }`}
       />

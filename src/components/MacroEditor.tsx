@@ -66,11 +66,11 @@ export default function MacroEditor({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 p-6"
       onMouseDown={onCancel}
     >
       <div
-        className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-800 shadow-2xl"
+        className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-ink-700 bg-surface-dialog shadow-dialog"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-ink-700/60 px-4 py-3">
@@ -176,7 +176,7 @@ export default function MacroEditor({
           <button
             onClick={save}
             disabled={!canSave}
-            className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-on-accent hover:bg-sky-500 disabled:opacity-50"
           >
             {t("common.save")}
           </button>

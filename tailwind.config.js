@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 
-// All literal values live in :root (src/index.css). Here we only wire Tailwind's
-// utility names to those CSS variables, so `bg-ink-900`, `text-slate-400`,
+// Shared visual values live in :root (src/index.css). Here we only wire
+// Tailwind utility names to those CSS variables, so `bg-ink-900`, `text-slate-400`,
 // `rounded-lg`, `text-2xs`, etc. resolve to the central tokens. Colors use the
 // `rgb(var(--x) / <alpha-value>)` form so opacity modifiers (e.g. `/60`) work.
 const rgb = (name) => `rgb(var(${name}) / <alpha-value>)`;
@@ -34,10 +34,13 @@ export default {
           950: rgb("--color-sky-950"),
         },
         emerald: {
+          300: rgb("--color-emerald-300"),
+          400: rgb("--color-emerald-400"),
           500: rgb("--color-emerald-500"),
         },
         amber: {
           400: rgb("--color-amber-400"),
+          500: rgb("--color-amber-500"),
         },
         red: {
           200: rgb("--color-red-200"),
@@ -46,6 +49,16 @@ export default {
           500: rgb("--color-red-500"),
           600: rgb("--color-red-600"),
           950: rgb("--color-red-950"),
+        },
+        overlay: rgb("--color-overlay"),
+        "on-accent": rgb("--color-on-accent"),
+        "control-knob": rgb("--color-control-knob"),
+        symlink: rgb("--color-symlink"),
+        surface: {
+          pane: rgb("--color-surface-pane"),
+          card: rgb("--color-surface-card"),
+          popover: rgb("--color-surface-popover"),
+          dialog: rgb("--color-surface-dialog"),
         },
       },
       fontFamily: {
@@ -59,7 +72,9 @@ export default {
         sm: ["var(--text-sm)", { lineHeight: "var(--leading-sm)" }],
         base: ["var(--text-base)", { lineHeight: "var(--leading-base)" }],
         lg: ["var(--text-lg)", { lineHeight: "var(--leading-lg)" }],
+        xl: ["var(--text-xl)", { lineHeight: "var(--leading-xl)" }],
         "2xl": ["var(--text-2xl)", { lineHeight: "var(--leading-2xl)" }],
+        "3xl": ["var(--text-3xl)", { lineHeight: "var(--leading-3xl)" }],
       },
       borderRadius: {
         none: "0px",

@@ -19,6 +19,82 @@ export interface LastConnection {
 }
 
 export type AppLanguage = "system" | "ko" | "en";
+export type MotionPreference = "normal" | "reduced" | "none";
+export type UiFontPreference = "default" | "system" | "segoe";
+export type TerminalFontPreference =
+  | "default"
+  | "cascadia"
+  | "d2coding"
+  | "consolas"
+  | "system";
+
+export interface ThemeSettings {
+  /** Solid color painted below the optional background image. */
+  backgroundColor: string;
+  /** App-owned copy of the selected image, or null for a solid background. */
+  backgroundImagePath: string | null;
+  /** Dark overlay over a background image, as an integer percentage. */
+  backgroundOverlay: number;
+  /** Base accent color; the rest of the accent ramp is derived at runtime. */
+  accentColor: string;
+  motion: MotionPreference;
+  uiFont: UiFontPreference;
+  terminalFont: TerminalFontPreference;
+}
+
+export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
+  backgroundColor: "#161826",
+  backgroundImagePath: null,
+  backgroundOverlay: 55,
+  accentColor: "#9184d9",
+  motion: "normal",
+  uiFont: "default",
+  terminalFont: "default",
+};
+
+function normalizeTheme(value: Partial<ThemeSettings> | null | undefined): ThemeSettings {
+  const source = value ?? {};
+  const hex = /^#[0-9a-f]{6}$/i;
+  const overlay = Number(source.backgroundOverlay);
+  const motion: MotionPreference[] = ["normal", "reduced", "none"];
+  const uiFonts: UiFontPreference[] = ["default", "system", "segoe"];
+  const terminalFonts: TerminalFontPreference[] = [
+    "default",
+    "cascadia",
+    "d2coding",
+    "consolas",
+    "system",
+  ];
+
+  return {
+    backgroundColor:
+      typeof source.backgroundColor === "string" && hex.test(source.backgroundColor)
+        ? source.backgroundColor.toLowerCase()
+        : DEFAULT_THEME_SETTINGS.backgroundColor,
+    backgroundImagePath:
+      typeof source.backgroundImagePath === "string"
+        ? source.backgroundImagePath
+        : null,
+    backgroundOverlay: Number.isFinite(overlay)
+      ? Math.min(90, Math.max(0, Math.round(overlay)))
+      : DEFAULT_THEME_SETTINGS.backgroundOverlay,
+    accentColor:
+      typeof source.accentColor === "string" && hex.test(source.accentColor)
+        ? source.accentColor.toLowerCase()
+        : DEFAULT_THEME_SETTINGS.accentColor,
+    motion: motion.includes(source.motion as MotionPreference)
+      ? (source.motion as MotionPreference)
+      : DEFAULT_THEME_SETTINGS.motion,
+    uiFont: uiFonts.includes(source.uiFont as UiFontPreference)
+      ? (source.uiFont as UiFontPreference)
+      : DEFAULT_THEME_SETTINGS.uiFont,
+    terminalFont: terminalFonts.includes(
+      source.terminalFont as TerminalFontPreference,
+    )
+      ? (source.terminalFont as TerminalFontPreference)
+      : DEFAULT_THEME_SETTINGS.terminalFont,
+  };
+}
 
 /**
  * User-facing app settings. Persisted as a JSON blob on disk (see the Rust
@@ -40,6 +116,8 @@ export interface AppSettings {
   dashboardDefaultInterval: number;
   /** The single shared dashboard layout (which widgets, order, sizes, intervals). */
   dashboardLayout: DashboardWidgetInstance[];
+  /** Small, curated set of visual customization options. */
+  theme: ThemeSettings;
   /** Last successful connection, for pre-filling the connect form. */
   lastConnection: LastConnection | null;
 }
@@ -52,6 +130,7 @@ const DEFAULTS: AppSettings = {
   dashboardEnabled: true,
   dashboardDefaultInterval: 5,
   dashboardLayout: [],
+  theme: DEFAULT_THEME_SETTINGS,
   lastConnection: null,
 };
 
@@ -65,6 +144,18 @@ interface SettingsState {
   set: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 }
 
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleSave(settings: AppSettings) {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    void saveSettings(settings as unknown as Record<string, unknown>).catch(() => {
+      // Persistence is best-effort; the in-memory value still applies.
+    });
+  }, 150);
+}
+
 export const useSettings = create<SettingsState>((setState, get) => ({
   settings: DEFAULTS,
   loaded: false,
@@ -73,7 +164,14 @@ export const useSettings = create<SettingsState>((setState, get) => ({
     try {
       const raw = await loadSettings();
       // Merge over defaults so missing/older keys fall back gracefully.
-      setState({ settings: { ...DEFAULTS, ...(raw as Partial<AppSettings>) } });
+      const persisted = raw as Partial<AppSettings>;
+      setState({
+        settings: {
+          ...DEFAULTS,
+          ...persisted,
+          theme: normalizeTheme(persisted.theme),
+        },
+      });
     } catch {
       // Keep defaults if the file can't be read.
     } finally {
@@ -83,8 +181,9 @@ export const useSettings = create<SettingsState>((setState, get) => ({
   set: (key, value) => {
     const next = { ...get().settings, [key]: value };
     setState({ settings: next });
-    void saveSettings(next as unknown as Record<string, unknown>).catch(() => {
-      // Persistence is best-effort; the in-memory value still applies.
-    });
+    // Theme sliders/color pickers can emit many updates in a short burst. A
+    // tiny debounce keeps only the newest complete JSON blob and avoids older
+    // writes racing with newer ones.
+    scheduleSave(next);
   },
 }));

@@ -16,7 +16,7 @@ export default function DragLayer() {
   if (!dragItem) return null;
   return (
     <div
-      className="pointer-events-none fixed z-50 rounded-md border border-sky-500 bg-ink-800/95 px-2 py-1 text-xs text-slate-100 shadow-xl"
+      className="pointer-events-none fixed z-50 rounded-md border border-sky-500 bg-ink-800/95 px-2 py-1 text-xs text-slate-100 shadow-popover"
       style={{ left: pos.x + 12, top: pos.y + 12 }}
     >
       {dragItem.isDir ? "📁 " : "📄 "}

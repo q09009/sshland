@@ -130,7 +130,7 @@ export default function ConnectScreen() {
   }`;
 
   return (
-    <div className="flex h-full items-center justify-center bg-ink-900 px-10 pb-14 pt-10 text-slate-100">
+    <div className="flex h-full items-center justify-center bg-transparent px-10 pb-14 pt-10 text-slate-100">
       <form onSubmit={handleSubmit} className="flex w-full max-w-[440px] flex-col gap-5">
         {/* Wordmark */}
         <div className="flex flex-col gap-2.5">

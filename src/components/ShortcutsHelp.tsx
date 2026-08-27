@@ -15,7 +15,7 @@ export default function ShortcutsHelp() {
   return (
     <div className="fixed bottom-3 right-3 z-30 flex flex-col items-end">
       {open && (
-        <div className="mb-2 w-64 rounded-xl border border-ink-700 bg-ink-800 p-3 shadow-2xl">
+        <div className="mb-2 w-64 rounded-xl border border-ink-700 bg-surface-popover p-3 shadow-popover">
           <div className="mb-2 text-xs font-medium text-slate-400">
             {t("shortcuts.title")}
           </div>
@@ -34,7 +34,7 @@ export default function ShortcutsHelp() {
       <button
         onClick={() => setOpen((v) => !v)}
         title={t("shortcuts.help")}
-        className="flex h-8 w-8 items-center justify-center rounded-full border border-ink-700 bg-ink-800 text-slate-400 shadow-lg hover:text-slate-100"
+        className="flex h-8 w-8 items-center justify-center rounded-full border border-ink-700 bg-ink-800 text-slate-400 shadow-control hover:text-slate-100"
       >
         ?
       </button>

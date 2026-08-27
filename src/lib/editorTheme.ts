@@ -28,9 +28,9 @@ export function editorTheme() {
     {
       "&": {
         color: slate200,
-        backgroundColor: ink900,
+        backgroundColor: "transparent",
         height: "100%",
-        fontSize: "13px",
+        fontSize: token("--text-editor"),
       },
       ".cm-content": {
         fontFamily: token("--font-terminal"),
@@ -39,7 +39,7 @@ export function editorTheme() {
       ".cm-cursor, .cm-dropCursor": { borderLeftColor: sky400 },
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
         { backgroundColor: ink700 },
-      ".cm-activeLine": { backgroundColor: "rgb(255 255 255 / 0.03)" },
+      ".cm-activeLine": { backgroundColor: rgba("--color-slate-100", 0.03) },
       ".cm-gutters": {
         backgroundColor: ink900,
         color: slate500,
@@ -49,7 +49,7 @@ export function editorTheme() {
       ".cm-activeLineGutter": { backgroundColor: ink800, color: slate400 },
       ".cm-scroller": {
         fontFamily: token("--font-terminal"),
-        lineHeight: "1.5",
+        lineHeight: token("--leading-editor"),
       },
       ".cm-foldPlaceholder": {
         backgroundColor: ink800,
@@ -77,7 +77,7 @@ export function editorTheme() {
         backgroundColor: ink900,
         color: slate200,
         border: `1px solid ${ink700}`,
-        borderRadius: "4px",
+        borderRadius: token("--radius"),
         padding: "2px 6px",
       },
       ".cm-textfield:focus": { outline: `1px solid ${sky400}` },
@@ -86,7 +86,7 @@ export function editorTheme() {
         backgroundImage: "none",
         color: slate200,
         border: "none",
-        borderRadius: "4px",
+        borderRadius: token("--radius"),
         padding: "2px 8px",
       },
       ".cm-button:hover": { backgroundColor: ink600 },
@@ -95,7 +95,7 @@ export function editorTheme() {
         backgroundColor: ink800,
         color: slate200,
         border: `1px solid ${ink700}`,
-        borderRadius: "6px",
+        borderRadius: token("--radius-editor-tooltip"),
       },
       ".cm-tooltip-autocomplete ul li[aria-selected]": {
         backgroundColor: rgba("--color-sky-400", 0.2),

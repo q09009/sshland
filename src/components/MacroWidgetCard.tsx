@@ -216,7 +216,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
         <button
           onClick={run}
           disabled={running || macro.steps.length === 0}
-          className="rounded-md bg-sky-600 px-2.5 py-1 text-2xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+          className="rounded-md bg-sky-600 px-2.5 py-1 text-2xs font-medium text-on-accent hover:bg-sky-500 disabled:opacity-40"
         >
           {running ? t("macro.running") : t("macro.run")}
         </button>

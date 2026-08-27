@@ -48,7 +48,7 @@ export default function ContextMenu({
     <div
       ref={ref}
       style={{ left: pos.x, top: pos.y }}
-      className="fixed z-40 min-w-[140px] overflow-hidden rounded-lg border border-ink-700 bg-ink-800 py-1 shadow-2xl"
+      className="fixed z-40 min-w-[140px] overflow-hidden rounded-lg border border-ink-700 bg-surface-popover py-1 shadow-popover"
     >
       {items.map((item) => (
         <button

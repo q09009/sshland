@@ -6,16 +6,21 @@
  * ============================================================================
  * DESIGN TOKENS — single source of truth for the whole app.
  * ============================================================================
- * Every literal color / radius / font value lives here. Components reference
- * these only through Tailwind utility classes (bg-ink-900, text-slate-400,
- * rounded-lg, …) whose values are wired to these vars in tailwind.config.js.
- * A future restyle edits values here; nothing in the components changes.
+ * Shared color / radius / font values live here. Components reference them
+ * through Tailwind utilities (bg-ink-900, text-slate-400, rounded-lg, …) or
+ * through the JS token readers used by xterm and CodeMirror. A few genuinely
+ * one-off layout dimensions remain local to their component.
  *
  * Dark theme only for now. Colors are stored as space-separated RGB channels
  * so Tailwind can apply opacity modifiers, e.g. `rgb(var(--color-sky-500) / .2)`
  * for `bg-sky-500/20`.
  */
 :root {
+  /* --- App backdrop (user-customizable subset) --- */
+  --app-background-color: #161826;
+  --app-background-image: none;
+  --app-background-overlay-opacity: 0.55;
+
   /* --- Neutral surfaces (custom "ink" scale) ---
      Repointed to the Nocturne design system (claude.ai/design import,
      "sshland-workspace-concepts" E — final direction): ink-900 = Nocturne
@@ -46,13 +51,32 @@
 
   /* --- Status --- */
   --color-emerald-500: 95 217 154; /* Nocturne's connected-dot green */
+  --color-emerald-300: 110 231 183;
+  --color-emerald-400: 52 211 153;
   --color-amber-400: 251 191 36;
+  --color-amber-500: 245 158 11;
   --color-red-200: 254 202 202;
   --color-red-300: 252 165 165;
   --color-red-400: 248 113 113;
   --color-red-500: 239 68 68;
   --color-red-600: 220 38 38;
   --color-red-950: 69 10 10;
+
+  /* --- Semantic roles and surfaces --- */
+  --color-overlay: 0 0 0;
+  --color-on-accent: 255 255 255;
+  --color-control-knob: 255 255 255;
+  --color-symlink: 45 212 191;
+  --color-surface-pane: var(--color-ink-900);
+  --color-surface-card: var(--color-ink-800);
+  --color-surface-popover: var(--color-ink-800);
+  --color-surface-dialog: var(--color-ink-900);
+  --color-border-default: var(--color-ink-700);
+  --color-text-primary: var(--color-slate-100);
+  --color-text-secondary: var(--color-slate-300);
+  --color-text-muted: var(--color-slate-500);
+  --opacity-surface-pane: 0.94;
+  --blur-surface-pane: 0.5rem;
 
   /* --- Typography --- */
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
@@ -62,6 +86,9 @@
   /* Terminal (xterm) monospace stack — read from JS in TerminalPane. */
   --font-terminal: "Cascadia Code", "D2Coding", Consolas, "Courier New",
     monospace;
+  --text-editor: 13px;
+  --text-terminal: 13px;
+  --leading-editor: 1.5;
 
   /* Type scale (size / line-height) — mirrors Tailwind defaults, centralized. */
   --text-2xs: 11px;
@@ -73,8 +100,12 @@
   --leading-base: 1.5rem;
   --text-lg: 1.125rem;
   --leading-lg: 1.75rem;
+  --text-xl: 1.25rem;
+  --leading-xl: 1.75rem;
   --text-2xl: 1.5rem;
   --leading-2xl: 2rem;
+  --text-3xl: 1.875rem;
+  --leading-3xl: 2.25rem;
 
   /* --- Motion --- short, spatial, and shared across every surface. */
   --duration-instant: 90ms;
@@ -94,6 +125,7 @@
   --radius-xl: 0.75rem;
   --radius-2xl: 1rem;
   --radius-full: 9999px;
+  --radius-editor-tooltip: 0.375rem;
 
   /* --- Shared elevation --- */
   --shadow-control: 0 1px 2px rgb(0 0 0 / 0.16);
@@ -127,7 +159,97 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
+  background: var(--app-background-color);
   -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  position: relative;
+  isolation: isolate;
+}
+
+.theme-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--app-background-color);
+}
+
+.theme-backdrop-image,
+.theme-backdrop-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.theme-backdrop-image {
+  background-image: var(--app-background-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.theme-backdrop-overlay {
+  background: rgb(var(--color-ink-900));
+  opacity: var(--app-background-overlay-opacity);
+}
+
+html:not([data-theme-has-image="true"]) .theme-backdrop-overlay {
+  opacity: 0;
+}
+
+.theme-settings-preview {
+  position: relative;
+  height: 7rem;
+  background: var(--app-background-color);
+}
+
+.theme-settings-preview-image,
+.theme-settings-preview-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.theme-settings-preview-image {
+  background-image: var(--app-background-image);
+  background-position: center;
+  background-size: cover;
+}
+
+.theme-settings-preview-overlay {
+  background: rgb(var(--color-ink-900));
+  opacity: var(--app-background-overlay-opacity);
+}
+
+html:not([data-theme-has-image="true"]) .theme-settings-preview-overlay {
+  opacity: 0;
+}
+
+:root[data-motion="reduced"] {
+  --duration-instant: 45ms;
+  --duration-fast: 70ms;
+  --duration-normal: 110ms;
+  --duration-slow: 150ms;
+  --distance-spatial: 0.1875rem;
+  --scale-spatial-enter: 0.995;
+}
+
+:root[data-motion="none"] {
+  --duration-instant: 0ms;
+  --duration-fast: 0ms;
+  --duration-normal: 0ms;
+  --duration-slow: 0ms;
+  --distance-spatial: 0rem;
+  --scale-spatial-enter: 1;
+}
+
+html[data-motion="none"] *,
+html[data-motion="none"] *::before,
+html[data-motion="none"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
 
 /* Highlight a folder / pane that a dragged item would drop into. */
@@ -142,7 +264,8 @@ body {
 .pane-surface {
   border: 1px solid rgb(var(--color-ink-700) / 0.72);
   border-radius: var(--radius-pane);
-  background: rgb(var(--color-ink-900));
+  background: rgb(var(--color-surface-pane) / var(--opacity-surface-pane));
+  backdrop-filter: blur(var(--blur-surface-pane));
   box-shadow: var(--shadow-pane-rest);
   transition-property: border-color, box-shadow;
   transition-duration: var(--duration-fast);
@@ -214,7 +337,7 @@ body {
   grid-column: span 6;
   border: 1px solid rgb(var(--color-ink-700) / 0.66);
   border-radius: var(--radius-dashboard-card);
-  background: rgb(var(--color-ink-800) / 0.72);
+  background: rgb(var(--color-surface-card) / 0.72);
   box-shadow: var(--shadow-dashboard-card);
   transition-property: border-color, box-shadow, opacity, transform;
   transition-duration: var(--duration-normal);
@@ -296,7 +419,7 @@ body {
   from {
     opacity: 0;
     translate: 0 calc(var(--distance-spatial) * -0.5);
-    scale: 0.985;
+    scale: var(--scale-spatial-enter);
   }
   to {
     opacity: 1;

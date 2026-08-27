@@ -79,7 +79,7 @@ export default function DashboardPane({ id }: { id: string }) {
 
   return (
     <div
-      className="dashboard-canvas h-full w-full overflow-auto bg-ink-900"
+      className="dashboard-canvas h-full w-full overflow-auto bg-transparent"
       data-pane-id={id}
     >
       {widgets.length === 0 ? (

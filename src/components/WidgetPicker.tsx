@@ -37,7 +37,7 @@ export default function WidgetPicker({
 
   return (
     <div
-      className="motion-dialog-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="motion-dialog-backdrop fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 p-6"
       onMouseDown={onClose}
     >
       <div

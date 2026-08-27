@@ -42,7 +42,7 @@ export default function CommandLogBar() {
         <>
           {/* Click-away layer */}
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute inset-x-0 bottom-full z-40 max-h-64 overflow-y-auto border-t border-ink-700 bg-ink-800 shadow-2xl">
+          <div className="absolute inset-x-0 bottom-full z-40 max-h-64 overflow-y-auto border-t border-ink-700 bg-surface-popover shadow-popover">
             <div className="sticky top-0 border-b border-ink-700/60 bg-ink-800 px-3 py-1.5 text-2xs text-slate-500">
               {t("commandLog.history", { count: log.length })}
             </div>

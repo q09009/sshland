@@ -574,7 +574,7 @@ export default function FilesScreen({ id }: { id: string }) {
   return (
     <div
       ref={rootRef}
-      className="relative flex h-full flex-col bg-ink-900 text-slate-100"
+      className="relative flex h-full flex-col bg-transparent text-slate-100"
     >
       {/* Navigation row: up / home / refresh + breadcrumb */}
       <div className="flex items-center gap-1 border-b border-ink-700/60 bg-ink-800/60 px-2 py-1">
@@ -659,7 +659,7 @@ export default function FilesScreen({ id }: { id: string }) {
       )}
 
       {opError && (
-        <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-red-500/40 bg-red-950/90 px-4 py-2.5 text-sm text-red-200 shadow-xl">
+        <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-red-500/40 bg-red-950/90 px-4 py-2.5 text-sm text-red-200 shadow-popover">
           {opError}
         </div>
       )}
@@ -720,7 +720,7 @@ function ToolButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:bg-ink-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+      className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:bg-ink-700 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
     >
       <svg
         className="h-4 w-4"

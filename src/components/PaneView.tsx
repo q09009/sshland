@@ -27,7 +27,7 @@ export default function PaneView({ node }: { node: PaneNode }) {
 
   return (
     <div
-      className="pane-stage relative h-full w-full overflow-hidden bg-ink-900"
+      className="pane-stage relative h-full w-full overflow-hidden bg-transparent"
       data-resizing={resizing || undefined}
     >
       {leaves.map(({ node: leaf, rect }, i) => (

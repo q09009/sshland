@@ -70,6 +70,16 @@ export function upload(
   return invokeCommand<UploadResult>("upload", { id, localPath, remotePath });
 }
 
+/** Copy a selected image into the app-owned theme folder. */
+export function importThemeBackground(sourcePath: string): Promise<string> {
+  return invokeCommand<string>("import_theme_background", { sourcePath });
+}
+
+/** Remove the app-owned theme background image. */
+export function clearThemeBackground(): Promise<void> {
+  return invokeCommand<void>("clear_theme_background");
+}
+
 /** Rename or move a remote entry. */
 export function rename(from: string, to: string): Promise<void> {
   return invokeCommand<void>("rename", { from, to });

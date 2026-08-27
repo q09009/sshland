@@ -47,6 +47,7 @@ import { useAppStore } from "../store";
 import { operationToCommandString } from "../lib/commandLog";
 import { baseName } from "../lib/path";
 import { editorTheme, editorHighlight } from "../lib/editorTheme";
+import { pixelToken, THEME_CHANGE_EVENT } from "../lib/theme";
 import { languageLabel, loadLanguageForFile } from "../lib/languages";
 import {
   ConfirmDialog,
@@ -85,6 +86,7 @@ export default function EditorPane({
   const langCompartmentRef = useRef(new Compartment());
   const wrapCompartmentRef = useRef(new Compartment());
   const fontCompartmentRef = useRef(new Compartment());
+  const themeCompartmentRef = useRef(new Compartment());
   const lineEndingCompartmentRef = useRef(new Compartment());
   const positionRef = useRef<HTMLSpanElement>(null);
   // The last saved/loaded contents; the doc is "dirty" when it differs.
@@ -104,10 +106,24 @@ export default function EditorPane({
   const [encoding, setEncoding] = useState("UTF-8");
   const [lineEnding, setLineEnding] = useState("LF");
   const [wordWrap, setWordWrap] = useState(false);
-  const [fontSize, setFontSize] = useState(13);
+  const defaultEditorFontSize = pixelToken("--text-editor", 13);
+  const [fontSize, setFontSize] = useState(defaultEditorFontSize);
   const [reloading, setReloading] = useState(false);
   const [reloadConfirm, setReloadConfirm] = useState(false);
   const [fileConflict, setFileConflict] = useState(false);
+
+  useEffect(() => {
+    const refreshTheme = () => {
+      viewRef.current?.dispatch({
+        effects: themeCompartmentRef.current.reconfigure([
+          syntaxHighlighting(editorHighlight()),
+          editorTheme(),
+        ]),
+      });
+    };
+    window.addEventListener(THEME_CHANGE_EVENT, refreshTheme);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, refreshTheme);
+  }, []);
 
   const closePane = useAppStore((s) => s.closePane);
   const requestClose = useAppStore((s) => s.requestClose);
@@ -283,7 +299,7 @@ export default function EditorPane({
     setFontSize((current) => {
       const next =
         amount === "reset"
-          ? 13
+          ? defaultEditorFontSize
           : Math.min(20, Math.max(10, current + amount));
       viewRef.current?.dispatch({
         effects: fontCompartmentRef.current.reconfigure(
@@ -292,7 +308,7 @@ export default function EditorPane({
       });
       return next;
     });
-  }, []);
+  }, [defaultEditorFontSize]);
 
   useEffect(() => {
     let disposed = false;
@@ -329,7 +345,10 @@ export default function EditorPane({
               indentOnInput(),
               autocompletion(),
               highlightSelectionMatches(),
-              syntaxHighlighting(editorHighlight()),
+              themeCompartmentRef.current.of([
+                syntaxHighlighting(editorHighlight()),
+                editorTheme(),
+              ]),
               lineEndingCompartmentRef.current.of(
                 EditorState.lineSeparator.of(separator)
               ),
@@ -399,7 +418,6 @@ export default function EditorPane({
                 ...completionKeymap,
                 indentWithTab,
               ]),
-              editorTheme(),
               // Recompute dirty on edits. Compare length first (cheap) and only
               // stringify the (<=5MB) doc when lengths match, so typing in a big
               // file doesn't serialize it on every keystroke.
@@ -611,7 +629,7 @@ export default function EditorPane({
       label: t("editor.fontReset"),
       shortcut: "Ctrl+0",
       onClick: () => changeFontSize("reset"),
-      disabled: !ready || fontSize === 13,
+      disabled: !ready || fontSize === defaultEditorFontSize,
     },
   ];
 
@@ -623,7 +641,7 @@ export default function EditorPane({
   ]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-ink-900">
+    <div className="flex h-full w-full flex-col bg-transparent">
       <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-ink-700/60 bg-ink-800 pl-2 pr-1 text-xs text-slate-400">
         <span className="flex min-w-0 items-center gap-1.5" title={filePath}>
           {focused && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" />}
@@ -712,7 +730,7 @@ export default function EditorPane({
             <span className="text-sm text-red-300">{error}</span>
             <button
               onClick={downloadInstead}
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-500"
+              className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm text-on-accent hover:bg-sky-500"
             >
               {t("common.download")}
             </button>

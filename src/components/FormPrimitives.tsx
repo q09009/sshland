@@ -77,7 +77,7 @@ export function Button({
 }) {
   const variantClass =
     variant === "primary"
-      ? "bg-sky-600 text-white hover:bg-sky-500 focus-visible:ring-sky-400/50"
+      ? "bg-sky-600 text-on-accent hover:bg-sky-500 focus-visible:ring-sky-400/50"
       : "border border-ink-700 bg-ink-800 text-slate-300 hover:bg-ink-700 focus-visible:ring-sky-500/40";
 
   return (

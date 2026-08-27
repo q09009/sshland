@@ -11,7 +11,12 @@ import {
   writeTerminal,
 } from "../api";
 import { useAppStore } from "../store";
-import { colorToken, token } from "../lib/theme";
+import {
+  colorToken,
+  pixelToken,
+  THEME_CHANGE_EVENT,
+  token,
+} from "../lib/theme";
 import {
   attachShellIntegration,
   SHELL_INTEGRATION_SETUP,
@@ -26,7 +31,7 @@ import { useI18n } from "../i18n";
 /** xterm color theme, sourced from the central design tokens (see index.css). */
 function terminalTheme() {
   return {
-    background: colorToken("--color-ink-900"),
+    background: "rgba(0, 0, 0, 0)",
     foreground: colorToken("--color-slate-200"),
     cursor: colorToken("--color-sky-400"),
     selectionBackground: colorToken("--color-ink-700"),
@@ -88,10 +93,11 @@ export default function TerminalPane({ id }: { id: string }) {
 
     const term = new Terminal({
       fontFamily: token("--font-terminal"),
-      fontSize: 13,
+      fontSize: pixelToken("--text-terminal", 13),
       cursorBlink: true,
       theme: terminalTheme(),
       scrollback: 5000,
+      allowTransparency: true,
       allowProposedApi: true, // for buffer markers + inline decorations
     });
     const fit = new FitAddon();
@@ -99,6 +105,18 @@ export default function TerminalPane({ id }: { id: string }) {
     term.open(host);
     fit.fit();
     termRef.current = term;
+
+    const refreshTheme = () => {
+      term.options.theme = terminalTheme();
+      term.options.fontFamily = token("--font-terminal");
+      term.options.fontSize = pixelToken("--text-terminal", 13);
+      try {
+        fit.fit();
+      } catch {
+        // The pane may be between layouts while a setting is changed.
+      }
+    };
+    window.addEventListener(THEME_CHANGE_EVENT, refreshTheme);
 
     const encoder = new TextEncoder();
     let disposed = false;
@@ -139,7 +157,7 @@ export default function TerminalPane({ id }: { id: string }) {
         el.style.color = colorToken("--color-ink-900");
         el.style.background = colorToken("--color-sky-400");
         el.style.textAlign = "center";
-        el.style.borderRadius = "2px";
+        el.style.borderRadius = token("--radius-sm");
         el.onclick = () => setOpenId(resultId);
       });
     });
@@ -231,6 +249,7 @@ export default function TerminalPane({ id }: { id: string }) {
     return () => {
       disposed = true;
       observer.disconnect();
+      window.removeEventListener(THEME_CHANGE_EVENT, refreshTheme);
       if (resizeTimer != null) clearTimeout(resizeTimer);
       if (flushTimerRef.current != null) clearTimeout(flushTimerRef.current);
       dataSub.dispose();
@@ -248,7 +267,7 @@ export default function TerminalPane({ id }: { id: string }) {
     : null;
 
   return (
-    <div className="flex h-full w-full flex-col bg-ink-900">
+    <div className="flex h-full w-full flex-col bg-transparent">
       <div ref={hostRef} className="min-h-0 flex-1 p-1" />
       {openResult && (
         <CommandWidgetPanel

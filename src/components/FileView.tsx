@@ -172,7 +172,7 @@ function FileIcon({
   }
   return (
     <svg
-      className={`shrink-0 ${entry.isSymlink ? "text-teal-400" : "text-slate-500"} ${className}`}
+      className={`shrink-0 ${entry.isSymlink ? "text-symlink" : "text-slate-500"} ${className}`}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

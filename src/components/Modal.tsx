@@ -3,8 +3,8 @@ import { useI18n } from "../i18n";
 
 function Backdrop({ children }: { children: ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6">
-      <div className="w-full max-w-sm rounded-2xl border border-ink-700 bg-ink-800 p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 p-6">
+      <div className="w-full max-w-sm rounded-2xl border border-ink-700 bg-surface-dialog p-6 shadow-dialog">
         {children}
       </div>
     </div>
@@ -49,7 +49,7 @@ export function ConfirmDialog({
         </button>
         <button
           onClick={onConfirm}
-          className={`rounded-lg px-3.5 py-2 text-sm font-medium text-white ${
+          className={`rounded-lg px-3.5 py-2 text-sm font-medium text-on-accent ${
             danger ? "bg-red-600 hover:bg-red-500" : "bg-sky-600 hover:bg-sky-500"
           }`}
         >
@@ -110,7 +110,7 @@ export function UnsavedChangesDialog({
         <button
           onClick={onSave}
           disabled={saving}
-          className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+          className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-on-accent hover:bg-sky-500 disabled:opacity-50"
         >
           {saving ? t("common.saving") : t("common.save")}
         </button>
@@ -161,7 +161,7 @@ export function FileConflictDialog({
         <button
           onClick={onReload}
           disabled={busy}
-          className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+          className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-on-accent hover:bg-sky-500 disabled:opacity-50"
         >
           {t("modal.conflict.reload")}
         </button>
@@ -236,7 +236,7 @@ export function KillProcessDialog({
         <button
           onClick={onKill}
           disabled={busy}
-          className="rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+          className="rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-on-accent hover:bg-red-500 disabled:opacity-50"
         >
           {busy ? t("modal.kill.killing") : t("modal.kill.kill")}
         </button>
@@ -305,7 +305,7 @@ export function PromptDialog({
           <button
             type="submit"
             disabled={!value.trim()}
-            className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-on-accent hover:bg-sky-500 disabled:opacity-50"
           >
             {confirmLabel ?? t("common.confirm")}
           </button>

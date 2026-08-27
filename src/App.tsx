@@ -9,6 +9,7 @@ import { useSettings } from "./lib/settings";
 import { useCommandConfigs } from "./lib/commandConfigs";
 import { useDashboardLayout } from "./lib/dashboardLayout";
 import { useI18n } from "./i18n";
+import ThemeController from "./components/ThemeController";
 
 function App() {
   const screen = useAppStore((s) => s.screen);
@@ -31,20 +32,27 @@ function App() {
     void loadCommandConfigs();
   }, [loadSettings, loadCommandConfigs]);
 
-  if (screen === "connect") return <ConnectScreen />;
-
-  // Files screen: a top status bar and a bottom command-log bar layered above
-  // and below the pane tiling area, which fills the remaining space. The
-  // settings overlay covers the tiling when open.
-  return (
-    <div className="flex h-full w-full flex-col">
-      <StatusBar />
-      <div className="min-h-0 flex-1">
-        <TilingShell />
+  const content =
+    screen === "connect" ? (
+      <ConnectScreen />
+    ) : (
+      // Files screen: a top status bar and a bottom command-log bar layered
+      // above and below the pane tiling area, which fills the remaining space.
+      <div className="flex h-full w-full flex-col">
+        <StatusBar />
+        <div className="min-h-0 flex-1">
+          <TilingShell />
+        </div>
+        <CommandLogBar />
+        <SettingsPanel />
       </div>
-      <CommandLogBar />
-      <SettingsPanel />
-    </div>
+    );
+
+  return (
+    <>
+      <ThemeController />
+      <div className="relative z-10 h-full w-full">{content}</div>
+    </>
   );
 }
 

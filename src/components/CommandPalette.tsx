@@ -101,13 +101,13 @@ export default function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-4 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/50 px-4 pt-[12vh]"
       onMouseDown={() => setOpen(false)}
     >
       <div
         role="dialog"
         aria-label={t("palette.label")}
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-ink-700 bg-ink-800 shadow-2xl"
+        className="w-full max-w-xl overflow-hidden rounded-xl border border-ink-700 bg-surface-dialog shadow-dialog"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <input
