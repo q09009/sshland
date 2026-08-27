@@ -1,0 +1,67 @@
+name: Dependency audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+      - package-lock.json
+      - src-tauri/Cargo.toml
+      - src-tauri/Cargo.lock
+      - .github/workflows/dependency-audit.yml
+  pull_request:
+    paths:
+      - package.json
+      - package-lock.json
+      - src-tauri/Cargo.toml
+      - src-tauri/Cargo.lock
+      - .github/workflows/dependency-audit.yml
+  schedule:
+    # Every Monday at 09:20 in Asia/Seoul (00:20 UTC).
+    - cron: "20 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies from the lockfile
+        run: npm ci
+
+      - name: Check for high-severity vulnerabilities
+        run: npm audit --audit-level=high
+
+  cargo:
+    name: RustSec audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Check for RustSec advisories
+        run: cargo audit --file src-tauri/Cargo.lock
