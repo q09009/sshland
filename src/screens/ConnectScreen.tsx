@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { connect } from "../api";
+import { connect, forgetHostKey, isHostKeyError, type HostKeyError } from "../api";
 import { useAppStore } from "../store";
 import { useSettings } from "../lib/settings";
 import { useI18n } from "../i18n";
+import { HostKeyDialog } from "../components/Modal";
 
 type AuthKind = "password" | "key";
 
@@ -26,6 +27,7 @@ export default function ConnectScreen() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hostKeyError, setHostKeyError] = useState<HostKeyError | null>(null);
 
   // Surface a "connection dropped" notice once, then clear it from the store.
   useEffect(() => {
@@ -68,14 +70,7 @@ export default function ConnectScreen() {
     return null;
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (busy) return;
-    const problem = validate();
-    if (problem) {
-      setError(problem);
-      return;
-    }
+  async function attemptConnection(acceptHostFingerprint?: string) {
     setError(null);
     setBusy(true);
     try {
@@ -91,6 +86,7 @@ export default function ConnectScreen() {
                 path: keyPath,
                 passphrase: passphrase || undefined,
               },
+        acceptHostFingerprint,
       });
       // Remember this connection for next time — never the password/passphrase.
       saveSetting("lastConnection", {
@@ -106,10 +102,51 @@ export default function ConnectScreen() {
         home: result.home,
       });
     } catch (err) {
+      if (isHostKeyError(err)) {
+        setHostKeyError(err);
+        return;
+      }
       // Commands reject with a localized, beginner-friendly message.
       setError(
         typeof err === "string" ? err : t("connect.error.generic")
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const problem = validate();
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setHostKeyError(null);
+    await attemptConnection();
+  }
+
+  async function trustHostKey() {
+    if (!hostKeyError || hostKeyError.type !== "unknownHost" || busy) return;
+    const approvedFingerprint = hostKeyError.fingerprint;
+    setHostKeyError(null);
+    await attemptConnection(approvedFingerprint);
+  }
+
+  async function forgetChangedHostKey() {
+    if (!hostKeyError || hostKeyError.type !== "hostKeyChanged" || busy) return;
+    const changedKey = hostKeyError;
+    setError(null);
+    setBusy(true);
+    try {
+      await forgetHostKey(changedKey.host, changedKey.port);
+      // Removing the old entry does not connect. Make the newly presented key
+      // an ordinary first-use prompt so it still needs a separate approval.
+      setHostKeyError({ ...changedKey, type: "unknownHost" });
+    } catch (err) {
+      setHostKeyError(null);
+      setError(typeof err === "string" ? err : t("connect.error.generic"));
     } finally {
       setBusy(false);
     }
@@ -290,6 +327,19 @@ export default function ConnectScreen() {
           </button>
         </div>
       </form>
+      {hostKeyError && (
+        <HostKeyDialog
+          kind={hostKeyError.type}
+          host={hostKeyError.host}
+          port={hostKeyError.port}
+          algorithm={hostKeyError.algorithm}
+          fingerprint={hostKeyError.fingerprint}
+          busy={busy}
+          onTrust={() => void trustHostKey()}
+          onForget={() => void forgetChangedHostKey()}
+          onCancel={() => setHostKeyError(null)}
+        />
+      )}
     </div>
   );
 }

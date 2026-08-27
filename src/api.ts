@@ -18,11 +18,33 @@ export interface ConnectParams {
   port: number;
   username: string;
   auth: AuthMethod;
+  /** Fingerprint explicitly approved after an unknown-host challenge. */
+  acceptHostFingerprint?: string;
 }
 
 export interface ConnectResult {
   /** Absolute path of the starting (home) directory. */
   home: string;
+}
+
+export interface HostKeyError {
+  type: "unknownHost" | "hostKeyChanged";
+  host: string;
+  port: number;
+  algorithm: string;
+  fingerprint: string;
+}
+
+export function isHostKeyError(error: unknown): error is HostKeyError {
+  if (!error || typeof error !== "object") return false;
+  const value = error as Record<string, unknown>;
+  return (
+    (value.type === "unknownHost" || value.type === "hostKeyChanged") &&
+    typeof value.host === "string" &&
+    typeof value.port === "number" &&
+    typeof value.algorithm === "string" &&
+    typeof value.fingerprint === "string"
+  );
 }
 
 export interface FileEntry {
@@ -40,7 +62,21 @@ export interface FileEntry {
 
 /** Open an SSH/SFTP connection. Resolves with the home directory. */
 export function connect(params: ConnectParams): Promise<ConnectResult> {
-  return invokeCommand<ConnectResult>("connect", { params });
+  return invoke<ConnectResult>("connect", { params }).catch((error: unknown) => {
+    if (isHostKeyError(error)) return Promise.reject(error);
+    if (error && typeof error === "object") {
+      const value = error as Record<string, unknown>;
+      if (value.type === "message" && typeof value.message === "string") {
+        return Promise.reject(localizeBackendError(value.message));
+      }
+    }
+    return Promise.reject(localizeBackendError(error));
+  });
+}
+
+/** Forget one saved host key. The next connection still requires approval. */
+export function forgetHostKey(host: string, port: number): Promise<void> {
+  return invokeCommand<void>("forget_host_key", { host, port });
 }
 
 /** List the contents of a directory on the server. */

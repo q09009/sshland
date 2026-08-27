@@ -15,9 +15,13 @@ use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
-use ssh2::{Channel, OpenFlags, OpenType, PtyModeOpcode, PtyModes, Session, Sftp};
-use tauri::{AppHandle, Emitter, State};
+use ssh2::{
+    Channel, CheckResult, HashType, HostKeyType, KnownHostFileKind, OpenFlags, OpenType,
+    PtyModeOpcode, PtyModes, Session, Sftp,
+};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::oneshot;
 
 use crate::{diagnostics, error};
@@ -57,6 +61,10 @@ pub struct ConnectParams {
     pub port: u16,
     pub username: String,
     pub auth: AuthMethod,
+    /// SHA-256 fingerprint the user explicitly approved after a prior probe.
+    /// It is compared against a fresh handshake before anything is persisted.
+    #[serde(default, rename = "acceptHostFingerprint")]
+    pub accept_host_fingerprint: Option<String>,
 }
 
 /// Returned to the frontend after a successful connection.
@@ -64,6 +72,34 @@ pub struct ConnectParams {
 pub struct ConnectResult {
     /// Absolute path of the user's starting (home) directory.
     pub home: String,
+}
+
+/// Structured connection failures let the frontend distinguish a host-key
+/// decision from an ordinary localized error without parsing human text.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ConnectError {
+    UnknownHost {
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+    HostKeyChanged {
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+    Message {
+        message: String,
+    },
+}
+
+impl From<String> for ConnectError {
+    fn from(message: String) -> Self {
+        Self::Message { message }
+    }
 }
 
 /// One file or folder in a directory listing.
@@ -362,8 +398,135 @@ fn tcp_connect(host: &str, port: u16) -> Result<TcpStream, String> {
     })
 }
 
-/// Perform the blocking TCP + SSH handshake + authentication.
-fn establish_session(params: ConnectParams) -> Result<Session, String> {
+fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|dir| dir.join("known_hosts"))
+        .map_err(|_| error::code("errors.knownHostsFolder"))
+}
+
+fn known_host_name(host: &str, port: u16) -> String {
+    if port == 22 {
+        host.to_string()
+    } else {
+        format!("[{host}]:{port}")
+    }
+}
+
+fn host_key_algorithm(key_type: HostKeyType) -> &'static str {
+    match key_type {
+        HostKeyType::Rsa => "RSA",
+        HostKeyType::Dss => "DSA",
+        HostKeyType::Ecdsa256 => "ECDSA P-256",
+        HostKeyType::Ecdsa384 => "ECDSA P-384",
+        HostKeyType::Ecdsa521 => "ECDSA P-521",
+        HostKeyType::Ed25519 => "ED25519",
+        HostKeyType::Unknown => "Unknown",
+    }
+}
+
+fn format_sha256_fingerprint(digest: &[u8]) -> String {
+    format!("SHA256:{}", STANDARD_NO_PAD.encode(digest))
+}
+
+fn host_key_error(
+    changed: bool,
+    host: &str,
+    port: u16,
+    algorithm: &str,
+    fingerprint: &str,
+) -> ConnectError {
+    if changed {
+        ConnectError::HostKeyChanged {
+            host: host.to_string(),
+            port,
+            algorithm: algorithm.to_string(),
+            fingerprint: fingerprint.to_string(),
+        }
+    } else {
+        ConnectError::UnknownHost {
+            host: host.to_string(),
+            port,
+            algorithm: algorithm.to_string(),
+            fingerprint: fingerprint.to_string(),
+        }
+    }
+}
+
+/// Verify the server identity after the SSH handshake and before sending any
+/// user credentials. New hosts use trust-on-first-use: the first call returns
+/// the fingerprint, and a second call must carry that exact approved value.
+fn verify_host_key(
+    session: &Session,
+    host: &str,
+    port: u16,
+    accepted_fingerprint: Option<&str>,
+    path: &Path,
+) -> Result<(), ConnectError> {
+    let (server_key, key_type) = session
+        .host_key()
+        .ok_or_else(|| error::code("errors.hostKeyUnavailable"))?;
+    let server_key = server_key.to_vec();
+    let fingerprint = session
+        .host_key_hash(HashType::Sha256)
+        .map(format_sha256_fingerprint)
+        .ok_or_else(|| error::code("errors.hostKeyUnavailable"))?;
+    let algorithm = host_key_algorithm(key_type);
+
+    let mut known_hosts = session
+        .known_hosts()
+        .map_err(|_| error::code("errors.knownHostsRead"))?;
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {
+            known_hosts
+                .read_file(path, KnownHostFileKind::OpenSSH)
+                .map_err(|_| error::code("errors.knownHostsRead"))?;
+        }
+        Ok(_) => return Err(error::code("errors.knownHostsRead").into()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => return Err(error::code("errors.knownHostsRead").into()),
+    }
+
+    match known_hosts.check_port(host, port, &server_key) {
+        CheckResult::Match => Ok(()),
+        CheckResult::Mismatch => Err(host_key_error(true, host, port, algorithm, &fingerprint)),
+        CheckResult::NotFound => match accepted_fingerprint {
+            Some(accepted) if accepted == fingerprint => {
+                if matches!(key_type, HostKeyType::Unknown) {
+                    return Err(error::code("errors.hostKeyUnavailable").into());
+                }
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|_| error::code("errors.knownHostsFolder"))?;
+                }
+                known_hosts
+                    .add(
+                        &known_host_name(host, port),
+                        &server_key,
+                        "sshland",
+                        key_type.into(),
+                    )
+                    .map_err(|_| error::code("errors.knownHostsWrite"))?;
+                known_hosts
+                    .write_file(path, KnownHostFileKind::OpenSSH)
+                    .map_err(|_| error::code("errors.knownHostsWrite"))?;
+                Ok(())
+            }
+            // The key changed between the confirmation dialog and this fresh
+            // handshake. Never replace the value the user actually reviewed.
+            Some(_) => Err(host_key_error(true, host, port, algorithm, &fingerprint)),
+            None => Err(host_key_error(false, host, port, algorithm, &fingerprint)),
+        },
+        CheckResult::Failure => Err(error::code("errors.knownHostsRead").into()),
+    }
+}
+
+/// Perform the blocking TCP + SSH handshake + host verification +
+/// authentication. Credentials are never sent until verification succeeds.
+fn establish_session(
+    params: ConnectParams,
+    known_hosts_path: PathBuf,
+) -> Result<Session, ConnectError> {
     let stream = tcp_connect(&params.host, params.port)?;
 
     let mut session = Session::new().map_err(|_| error::code("errors.sessionCreate"))?;
@@ -373,6 +536,14 @@ fn establish_session(params: ConnectParams) -> Result<Session, String> {
     session
         .handshake()
         .map_err(|e| error::friendly_ssh(&e, &error::code("errors.handshake")))?;
+
+    verify_host_key(
+        &session,
+        &params.host,
+        params.port,
+        params.accept_host_fingerprint.as_deref(),
+        &known_hosts_path,
+    )?;
 
     match params.auth {
         AuthMethod::Password { password } => {
@@ -393,7 +564,7 @@ fn establish_session(params: ConnectParams) -> Result<Session, String> {
     }
 
     if !session.authenticated() {
-        return Err(error::auth_error());
+        return Err(error::auth_error().into());
     }
 
     // Configure SSH keepalives. The worker calls `keepalive_send` periodically;
@@ -1649,16 +1820,19 @@ pub async fn connect(
     state: State<'_, SessionManager>,
     app: AppHandle,
     params: ConnectParams,
-) -> Result<ConnectResult, String> {
+) -> Result<ConnectResult, ConnectError> {
     // Drop any previous session first.
     if let Some(old) = state.tx.lock().unwrap().take() {
         let _ = old.send(Req::Disconnect);
     }
 
+    let hosts_path = known_hosts_path(&app)?;
+
     // The handshake blocks, so run it off the async runtime's threads.
-    let session = tauri::async_runtime::spawn_blocking(move || establish_session(params))
-        .await
-        .map_err(|_| error::code("errors.internal"))??;
+    let session =
+        tauri::async_runtime::spawn_blocking(move || establish_session(params, hosts_path))
+            .await
+            .map_err(|_| ConnectError::from(error::code("errors.internal")))??;
 
     // Hand the session to a dedicated worker thread.
     let (tx, rx) = mpsc::channel();
@@ -1685,6 +1859,47 @@ pub async fn connect(
     );
 
     Ok(ConnectResult { home })
+}
+
+fn forget_host_key_in_file(path: &Path, host: &str, port: u16) -> Result<(), String> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Err(error::code("errors.knownHostsRead")),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(error::code("errors.knownHostsRead")),
+    }
+
+    let session = Session::new().map_err(|_| error::code("errors.sessionCreate"))?;
+    let mut known_hosts = session
+        .known_hosts()
+        .map_err(|_| error::code("errors.knownHostsRead"))?;
+    known_hosts
+        .read_file(path, KnownHostFileKind::OpenSSH)
+        .map_err(|_| error::code("errors.knownHostsRead"))?;
+
+    let target = known_host_name(host, port);
+    let entries = known_hosts
+        .hosts()
+        .map_err(|_| error::code("errors.knownHostsRead"))?;
+    for entry in entries {
+        if entry.name() == Some(target.as_str()) {
+            known_hosts
+                .remove(&entry)
+                .map_err(|_| error::code("errors.knownHostsWrite"))?;
+        }
+    }
+    known_hosts
+        .write_file(path, KnownHostFileKind::OpenSSH)
+        .map_err(|_| error::code("errors.knownHostsWrite"))?;
+    Ok(())
+}
+
+/// Remove the saved key for one host. A later connection is still blocked as
+/// unknown until the user explicitly reviews and accepts the fresh fingerprint.
+#[tauri::command]
+pub fn forget_host_key(app: AppHandle, host: String, port: u16) -> Result<(), String> {
+    let path = known_hosts_path(&app)?;
+    forget_host_key_in_file(&path, &host, port)
 }
 
 /// List the contents of a directory on the server.
@@ -2080,23 +2295,159 @@ mod tests {
         );
     }
 
+    #[test]
+    fn known_host_name_uses_openssh_port_syntax() {
+        assert_eq!(known_host_name("server.local", 22), "server.local");
+        assert_eq!(known_host_name("server.local", 2222), "[server.local]:2222");
+        assert_eq!(known_host_name("::1", 2200), "[::1]:2200");
+    }
+
+    #[test]
+    fn sha256_fingerprint_uses_openssh_base64_without_padding() {
+        assert_eq!(format_sha256_fingerprint(&[0, 1, 255]), "SHA256:AAH/");
+    }
+
+    #[test]
+    fn host_key_challenge_serializes_for_the_frontend() {
+        let value = serde_json::to_value(host_key_error(
+            false,
+            "server.local",
+            22,
+            "ED25519",
+            "SHA256:abc",
+        ))
+        .expect("challenge should serialize");
+        assert_eq!(value["type"], "unknownHost");
+        assert_eq!(value["host"], "server.local");
+        assert_eq!(value["port"], 22);
+        assert_eq!(value["algorithm"], "ED25519");
+        assert_eq!(value["fingerprint"], "SHA256:abc");
+    }
+
+    #[test]
+    fn approved_fingerprint_deserializes_from_frontend_camel_case() {
+        let params: ConnectParams = serde_json::from_value(serde_json::json!({
+            "host": "server.local",
+            "port": 22,
+            "username": "alice",
+            "auth": { "type": "password", "password": "secret" },
+            "acceptHostFingerprint": "SHA256:abc"
+        }))
+        .expect("frontend connection params should deserialize");
+        assert_eq!(
+            params.accept_host_fingerprint.as_deref(),
+            Some("SHA256:abc")
+        );
+    }
+
+    #[test]
+    fn forgetting_one_host_key_keeps_other_entries() {
+        let fixture = LocalUploadFixture::new();
+        let path = fixture.path.join("known_hosts");
+        let session = Session::new().expect("should create test session");
+        let mut known_hosts = session.known_hosts().expect("should create known-host set");
+        let first_key = b"first fake host key";
+        let second_key = b"second fake host key";
+        known_hosts
+            .add(
+                "server.local",
+                first_key,
+                "test",
+                ssh2::KnownHostKeyFormat::SshRsa,
+            )
+            .expect("should add first key");
+        known_hosts
+            .add(
+                "[other.local]:2222",
+                second_key,
+                "test",
+                ssh2::KnownHostKeyFormat::SshRsa,
+            )
+            .expect("should add second key");
+        known_hosts
+            .write_file(&path, KnownHostFileKind::OpenSSH)
+            .expect("should write fixture");
+
+        forget_host_key_in_file(&path, "server.local", 22).expect("should forget one key");
+
+        let verify_session = Session::new().expect("should create verification session");
+        let mut verify = verify_session
+            .known_hosts()
+            .expect("should create verification set");
+        verify
+            .read_file(&path, KnownHostFileKind::OpenSSH)
+            .expect("should read updated fixture");
+        assert!(matches!(
+            verify.check_port("server.local", 22, first_key),
+            CheckResult::NotFound
+        ));
+        assert!(matches!(
+            verify.check_port("other.local", 2222, second_key),
+            CheckResult::Match
+        ));
+    }
+
     /// Smoke test against Rebex's public read-only SFTP test server.
     /// Ignored by default (needs network); run with:
     ///   cargo test -- --ignored connects_to_public_test_server
     #[test]
     #[ignore]
     fn connects_to_public_test_server() {
-        let params = ConnectParams {
+        let path =
+            std::env::temp_dir().join(format!("sshland-known-hosts-test-{}", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let params = |accepted: Option<String>| ConnectParams {
             host: "test.rebex.net".to_string(),
             port: 22,
             username: "demo".to_string(),
             auth: AuthMethod::Password {
                 password: "password".to_string(),
             },
+            accept_host_fingerprint: accepted,
         };
-        let session = establish_session(params).expect("should authenticate");
+
+        let fingerprint = match establish_session(params(None), path.clone()) {
+            Err(ConnectError::UnknownHost { fingerprint, .. }) => fingerprint,
+            Err(other) => panic!("unexpected first-connection result: {other:?}"),
+            Ok(_) => panic!("an unknown host must not authenticate"),
+        };
+        let session = establish_session(params(Some(fingerprint)), path.clone())
+            .expect("approved fingerprint should authenticate");
         let sftp = session.sftp().expect("should open sftp");
         let home = sftp.realpath(Path::new(".")).expect("should resolve home");
         assert!(!home.to_string_lossy().is_empty());
+        drop(sftp);
+        drop(session);
+
+        // Once saved, the same host key connects without another approval.
+        let reconnect = establish_session(params(None), path.clone())
+            .expect("saved fingerprint should match automatically");
+        assert!(reconnect.authenticated());
+        drop(reconnect);
+
+        // A different key for the same host must be reported as a hard
+        // mismatch, never silently replaced or allowed to authenticate.
+        use base64::Engine as _;
+        let line = fs::read_to_string(&path).expect("should read saved host key");
+        let fields: Vec<_> = line.split_whitespace().collect();
+        assert!(fields.len() >= 3, "known_hosts line should have key fields");
+        let mut fake_key = base64::engine::general_purpose::STANDARD
+            .decode(fields[2])
+            .expect("saved host key should be base64");
+        let last = fake_key.last_mut().expect("host key should not be empty");
+        *last ^= 1;
+        let corrupted = format!(
+            "{} {} {} sshland\n",
+            fields[0],
+            fields[1],
+            base64::engine::general_purpose::STANDARD.encode(fake_key)
+        );
+        fs::write(&path, corrupted).expect("should replace test host key");
+        match establish_session(params(None), path.clone()) {
+            Err(ConnectError::HostKeyChanged { .. }) => {}
+            Err(other) => panic!("unexpected changed-key result: {other:?}"),
+            Ok(_) => panic!("a changed host key must not authenticate"),
+        }
+        let _ = fs::remove_file(path);
     }
 }

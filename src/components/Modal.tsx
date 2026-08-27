@@ -60,6 +60,103 @@ export function ConfirmDialog({
   );
 }
 
+/** SSH server identity prompt shown before any login credentials are sent. */
+export function HostKeyDialog({
+  kind,
+  host,
+  port,
+  algorithm,
+  fingerprint,
+  busy,
+  onTrust,
+  onForget,
+  onCancel,
+}: {
+  kind: "unknownHost" | "hostKeyChanged";
+  host: string;
+  port: number;
+  algorithm: string;
+  fingerprint: string;
+  busy?: boolean;
+  onTrust: () => void;
+  onForget: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  const changed = kind === "hostKeyChanged";
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  return (
+    <Backdrop>
+      <div role="dialog" aria-modal="true" aria-labelledby="host-key-title">
+        <h2
+          id="host-key-title"
+          className={`text-base font-semibold ${changed ? "text-red-300" : "text-slate-100"}`}
+        >
+          {t(changed ? "modal.hostKey.changedTitle" : "modal.hostKey.unknownTitle")}
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-slate-300">
+          {t(changed ? "modal.hostKey.changedMessage" : "modal.hostKey.unknownMessage")}
+        </p>
+
+        <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 rounded-xl border border-ink-700 bg-ink-900 p-3 text-xs">
+          <dt className="text-slate-500">{t("modal.hostKey.server")}</dt>
+          <dd className="min-w-0 break-all font-mono text-slate-200">
+            {host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`}
+          </dd>
+          <dt className="text-slate-500">{t("modal.hostKey.algorithm")}</dt>
+          <dd className="font-mono text-slate-200">{algorithm}</dd>
+          <dt className="text-slate-500">{t("modal.hostKey.fingerprint")}</dt>
+          <dd className="min-w-0 select-all break-all font-mono text-sky-300">
+            {fingerprint}
+          </dd>
+        </dl>
+
+        <p className="mt-3 text-xs leading-5 text-slate-400">
+          {t(changed ? "modal.hostKey.changedHelp" : "modal.hostKey.unknownHelp")}
+        </p>
+
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700 disabled:opacity-50"
+          >
+            {changed ? t("common.close") : t("common.cancel")}
+          </button>
+          {changed ? (
+            <button
+              type="button"
+              onClick={onForget}
+              disabled={busy}
+              className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+            >
+              {busy ? t("modal.hostKey.forgetting") : t("modal.hostKey.forget")}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onTrust}
+              disabled={busy}
+              className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-on-accent hover:bg-sky-500 disabled:opacity-50"
+            >
+              {busy ? t("connect.connecting") : t("modal.hostKey.trust")}
+            </button>
+          )}
+        </div>
+      </div>
+    </Backdrop>
+  );
+}
+
 /**
  * Three-way prompt shown when closing an editor with unsaved changes:
  * save-and-close, discard-and-close, or cancel.

@@ -48,6 +48,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ssh::connect,
+            ssh::forget_host_key,
             ssh::list_dir,
             ssh::download,
             ssh::upload,
