@@ -116,6 +116,58 @@ export function clearThemeBackground(): Promise<void> {
   return invokeCommand<void>("clear_theme_background");
 }
 
+export interface ThemePreset {
+  id: string;
+  name: string;
+  author?: string;
+  description?: string;
+  backgroundColor: string;
+  backgroundImagePath?: string;
+  backgroundOverlay: number;
+  accentColor: string;
+  motion: "normal" | "reduced" | "none";
+  uiFont: "default" | "system" | "segoe";
+  terminalFont: "default" | "cascadia" | "d2coding" | "consolas" | "system";
+  tokens: Record<string, string>;
+}
+
+export interface ThemeExportValues {
+  backgroundColor: string;
+  backgroundImagePath: string | null;
+  backgroundOverlay: number;
+  accentColor: string;
+  motion: "normal" | "reduced" | "none";
+  uiFont: "default" | "system" | "segoe";
+  terminalFont: "default" | "cascadia" | "d2coding" | "consolas" | "system";
+  tokens: Record<string, string>;
+}
+
+/** List validated, shareable TOML themes from the app theme folder. */
+export function loadThemePresets(): Promise<ThemePreset[]> {
+  return invokeCommand<ThemePreset[]>("load_theme_presets");
+}
+
+export function themesDirPath(): Promise<string> {
+  return invokeCommand<string>("themes_dir_path");
+}
+
+export function openThemesDir(): Promise<void> {
+  return invokeCommand<void>("open_themes_dir");
+}
+
+/** Copy a TOML theme and its adjacent background image into the app theme folder. */
+export function importThemePreset(sourcePath: string): Promise<ThemePreset> {
+  return invokeCommand<ThemePreset>("import_theme_preset", { sourcePath });
+}
+
+/** Export only visual theme values; private application settings are never included. */
+export function exportThemePreset(
+  targetPath: string,
+  themeValues: ThemeExportValues,
+): Promise<string> {
+  return invokeCommand<string>("export_theme_preset", { targetPath, themeValues });
+}
+
 /** Rename or move a remote entry. */
 export function rename(from: string, to: string): Promise<void> {
   return invokeCommand<void>("rename", { from, to });

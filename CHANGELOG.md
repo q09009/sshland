@@ -2,9 +2,19 @@
 
 이 문서는 사용자에게 영향을 주는 주요 변경을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 참고하고, 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
-아직 정식 릴리스와 Git 태그는 없습니다. 첫 릴리스를 만들 때 `Unreleased` 항목을 실제 버전과 날짜 아래로 옮깁니다.
-
 ## [Unreleased]
+
+### 추가됨
+
+- 디자인 설정만 담는 공유용 TOML 테마의 가져오기·내보내기·목록 적용
+- 테마와 같은 폴더의 선택적 배경 이미지 공유 및 안전한 경로·형식 검증
+- TOML에서 팔레트·타이포그래피·애니메이션·반경·간격·그림자를 세밀하게 조절하는 고급 디자인 토큰
+
+### 변경됨
+
+- 다음 개발 버전을 `0.1.1`로 올림
+
+## [0.1.0] - 2026-08-28
 
 ### 추가됨
 
@@ -25,5 +35,8 @@
 
 ### 참고
 
-- 현재 버전은 개발 중인 `0.1.0` 프리릴리스입니다.
+- 첫 공개 프리릴리스입니다.
 - Windows를 주 개발 환경으로 사용하며 Fedora Linux에서 수동 실행을 확인했습니다. macOS는 아직 검증하지 않았습니다.
+
+[Unreleased]: https://github.com/q09009/sshland/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/q09009/sshland/releases/tag/v0.1.0

@@ -11,8 +11,9 @@ use tauri::{AppHandle, Manager};
 
 use crate::error;
 
-const MAX_BACKGROUND_BYTES: u64 = 30 * 1024 * 1024;
-const ALLOWED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"];
+pub(crate) const MAX_BACKGROUND_BYTES: u64 = 30 * 1024 * 1024;
+pub(crate) const ALLOWED_EXTENSIONS: &[&str] =
+    &["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"];
 const FILE_STEM: &str = "theme-background";
 
 fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -21,11 +22,21 @@ fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|_| error::code("errors.themeBackgroundFolder"))
 }
 
-fn allowed_extension(path: &Path) -> Option<String> {
+pub(crate) fn allowed_extension(path: &Path) -> Option<String> {
     path.extension()
         .and_then(|value| value.to_str())
         .map(str::to_ascii_lowercase)
         .filter(|value| ALLOWED_EXTENSIONS.contains(&value.as_str()))
+}
+
+/// Validate a prospective background before it is copied into app-owned
+/// storage. Theme preset import/export reuses the exact same boundary.
+pub(crate) fn validate_background_source(source: &Path) -> Result<String, String> {
+    let metadata = fs::metadata(source).map_err(|_| error::code("errors.themeBackgroundRead"))?;
+    if !metadata.is_file() || metadata.len() > MAX_BACKGROUND_BYTES {
+        return Err(error::code("errors.themeBackgroundSize"));
+    }
+    allowed_extension(source).ok_or_else(|| error::code("errors.themeBackgroundFormat"))
 }
 
 fn remove_known_backgrounds(dir: &Path) -> Result<(), String> {
@@ -44,13 +55,7 @@ fn remove_known_backgrounds(dir: &Path) -> Result<(), String> {
 #[tauri::command]
 pub fn import_theme_background(app: AppHandle, source_path: String) -> Result<String, String> {
     let source = Path::new(&source_path);
-    let metadata = fs::metadata(source).map_err(|_| error::code("errors.themeBackgroundRead"))?;
-    if !metadata.is_file() || metadata.len() > MAX_BACKGROUND_BYTES {
-        return Err(error::code("errors.themeBackgroundSize"));
-    }
-
-    let extension =
-        allowed_extension(source).ok_or_else(|| error::code("errors.themeBackgroundFormat"))?;
+    let extension = validate_background_source(source)?;
 
     let dir = config_dir(&app)?;
     fs::create_dir_all(&dir).map_err(|_| error::code("errors.themeBackgroundFolder"))?;

@@ -6,6 +6,7 @@ mod macros;
 mod settings;
 mod ssh;
 mod theme;
+mod theme_presets;
 
 use ssh::SessionManager;
 
@@ -71,6 +72,11 @@ pub fn run() {
             settings::save_settings,
             theme::import_theme_background,
             theme::clear_theme_background,
+            theme_presets::load_theme_presets,
+            theme_presets::themes_dir_path,
+            theme_presets::open_themes_dir,
+            theme_presets::import_theme_preset,
+            theme_presets::export_theme_preset,
             commands_config::load_command_configs,
             commands_config::commands_dir_path,
             commands_config::open_commands_dir,

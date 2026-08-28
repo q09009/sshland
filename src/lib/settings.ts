@@ -3,6 +3,7 @@ import { loadSettings, saveSettings } from "../api";
 // Imported from the leaf types module (no store/component imports) so there is
 // no cycle with the dashboard layout store, which imports this module to persist.
 import type { DashboardWidgetInstance } from "./dashboardTypes";
+import { normalizeThemeTokens, type ThemeTokenValues } from "./themeTokens";
 
 /**
  * The most recent SSH connection, remembered to pre-fill the connect form.
@@ -40,6 +41,8 @@ export interface ThemeSettings {
   motion: MotionPreference;
   uiFont: UiFontPreference;
   terminalFont: TerminalFontPreference;
+  /** Advanced CSS design-token overrides imported from a shareable TOML theme. */
+  tokens: ThemeTokenValues;
 }
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
@@ -50,6 +53,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   motion: "normal",
   uiFont: "default",
   terminalFont: "default",
+  tokens: {},
 };
 
 function normalizeTheme(value: Partial<ThemeSettings> | null | undefined): ThemeSettings {
@@ -93,6 +97,7 @@ function normalizeTheme(value: Partial<ThemeSettings> | null | undefined): Theme
     )
       ? (source.terminalFont as TerminalFontPreference)
       : DEFAULT_THEME_SETTINGS.terminalFont,
+    tokens: normalizeThemeTokens(source.tokens),
   };
 }
 

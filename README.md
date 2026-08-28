@@ -9,7 +9,7 @@
 복잡한 IDE를 대체하기보다 서버에 접속해 파일을 찾고 수정하고, 명령을 실행하고, 상태를 확인하는 일상적인 원격 작업에 집중합니다.
 
 > [!IMPORTANT]
-> 현재 개발 중인 `0.1.0` 프리릴리스입니다. 아직 공식 설치 파일은 배포하지 않으며, 중요한 서버에서 사용하기 전에는 [보안 및 주의사항](#보안-및-주의사항)을 확인해주세요.
+> 최신 공개 버전은 `v0.1.0` 프리릴리스이며 설치 파일은 [GitHub Releases](https://github.com/q09009/sshland/releases/tag/v0.1.0)에서 받을 수 있습니다. 중요한 서버에서 사용하기 전에는 [보안 및 주의사항](#보안-및-주의사항)을 확인해주세요.
 
 ![파일관리자, 터미널, 서버 대시보드를 함께 연 sshland 작업 공간](docs/screenshots/dashboard-public.png)
 
@@ -55,7 +55,7 @@
 ### 인터페이스
 
 - 시스템 언어 자동 선택과 설정에서 전환할 수 있는 한국어·영어 UI
-- 배경색·배경 이미지·강조색·동작 효과·글꼴을 조절하는 테마 설정
+- 배경색·배경 이미지·강조색·동작 효과·글꼴을 조절하고 TOML로 공유하는 테마 설정
 - 서버 시간, 연결 상태, 명령·전송 상태를 한곳에 보여주는 상단·하단 표시줄
 
 한 번에 하나의 SSH 연결만 활성화되며, 화면에 열린 모든 pane은 같은 서버 연결을 공유합니다.
@@ -69,7 +69,7 @@
 | macOS | 아직 검증하지 않았습니다. |
 | 원격 서버 | Linux 계열 SSH 서버를 기준으로 합니다. 기본 대시보드와 명령 GUI는 `sh`, `df`, `ps` 같은 일반적인 Linux 명령을 사용합니다. |
 | Docker | 선택 사항입니다. 서버에 Docker가 없거나 실행 권한이 없으면 Docker 위젯만 사용할 수 없음 상태로 표시됩니다. |
-| 배포 방식 | https://github.com/q09009/sshland/releases/tag/v0.1.0 |
+| 배포 방식 | [GitHub Releases — v0.1.0](https://github.com/q09009/sshland/releases/tag/v0.1.0) |
 
 ## 기술 구성
 
@@ -205,6 +205,42 @@ pane 사이의 경계를 드래그하면 크기를 조절할 수 있습니다. �
 - 설정에서 언어, 명령 GUI, 명령 로그, 대시보드, 시계 표시와 테마를 조정할 수 있습니다.
 - 대시보드 위젯은 설정한 주기에 따라 원격 명령을 실행하므로, 주기를 너무 짧게 설정하면 서버 요청이 늘어날 수 있습니다.
 
+### 7. 디자인 테마 공유하기
+
+설정의 **테마 → 공유 테마**에서 현재 디자인을 `.toml` 파일로 내보내거나, 다른 사람이 만든 테마를 가져와 바로 적용할 수 있습니다. 가져온 테마는 목록에 보관되며 **폴더 열기**로 직접 편집하고 **다시 불러오기**로 반영할 수도 있습니다.
+
+공유 테마의 `[theme]`에는 앱에서 간단히 조절하는 다음 값이 들어갑니다.
+
+- 배경색과 선택적인 배경 이미지
+- 이미지 어둡기와 강조색
+- 애니메이션 단계
+- UI 글꼴과 터미널·편집기 글꼴
+
+`settings.json`은 공유 대상이 아닙니다. 따라서 마지막 서버 주소, 사용자명, 개인키 경로, 대시보드 구성 같은 개인 앱 설정은 테마에 포함되지 않습니다. 비밀번호와 개인키 암호는 원래부터 `settings.json`에도 저장하지 않습니다.
+
+배경 이미지가 있는 테마를 내보내면 TOML 옆에 이미지 한 장이 함께 생성됩니다. 다른 사람에게 전달할 때는 두 파일을 같은 폴더에 둔 채 함께 공유해야 합니다. 테마 파일의 `background_image`는 보안을 위해 절대 경로나 상위 폴더를 가리킬 수 없고, 같은 폴더의 파일명 하나만 사용할 수 있습니다.
+
+앱에서 가져온 테마는 운영체제의 앱 설정 폴더 아래 `themes`에 보관됩니다.
+
+```text
+Windows: %APPDATA%\com.sshland.app\themes\
+Linux:   ~/.config/com.sshland.app/themes/
+```
+
+직접 만들 때는 [전체 테마 예제](docs/theme-example.toml)를 복사해 수정할 수 있습니다. 현재 허용하는 값은 `motion = "normal" | "reduced" | "none"`, `ui_font = "default" | "system" | "segoe"`, `terminal_font = "default" | "cascadia" | "d2coding" | "consolas" | "system"`입니다.
+
+내보낸 파일의 `[tokens]`에서는 현재 SSHland 디자인 토큰을 세부적으로 모두 덮어쓸 수 있습니다.
+
+| 범위 | 예시 |
+| --- | --- |
+| 전체 팔레트와 의미 색상 | `color-ink-900`, `color-slate-400`, `color-surface-pane`, `color-symlink` |
+| 글꼴과 글자 크기 | `font-sans`, `font-terminal`, `text-editor`, `text-sm`, `leading-editor` |
+| 애니메이션 | `duration-fast`, `duration-normal`, `ease-spatial`, `distance-spatial` |
+| 모서리와 표면 효과 | `radius-pane`, `radius-dashboard-card`, `blur-surface-pane`, `opacity-surface-pane` |
+| 간격과 그림자 | `space-pane-gap`, `space-dashboard-gap`, `shadow-pane-focus`, `shadow-dialog` |
+
+`[tokens]` 값은 단순 설정값보다 우선합니다. 앱에서 강조색·애니메이션·UI 글꼴·터미널 글꼴을 다시 변경하면 그 항목과 직접 충돌하는 고급 토큰만 제거하고 새 간단 설정을 적용합니다. 알 수 없는 토큰, 잘못된 단위와 범위, `url()`이나 CSS 선언을 삽입하려는 값이 있는 파일은 안전을 위해 가져오지 않습니다.
+
 ## 보안 및 주의사항
 
 - 비밀번호와 개인키 암호는 설정 파일에 저장하지 않습니다.
@@ -239,6 +275,7 @@ pane 사이의 경계를 드래그하면 크기를 조절할 수 있습니다. �
 ```text
 sshland/
 ├─ .github/                     # CI, Dependabot, 이슈·PR 템플릿
+├─ docs/theme-example.toml      # 공유 디자인 테마 예제
 ├─ docs/screenshots/            # README용 공개 스크린샷
 ├─ src/                         # React UI, pane, 편집기, 대시보드
 ├─ src-tauri/src/               # Rust SSH/SFTP worker와 Tauri commands

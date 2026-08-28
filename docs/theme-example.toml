@@ -1,0 +1,137 @@
+# SSHland shareable design theme
+# Copy this file, edit the values, and import it from Settings > Theme.
+
+schema_version = 1
+name = "Nocturne"
+author = "your-name"
+description = "A muted purple theme for late-night server work."
+
+[theme]
+background_color = "#161826"
+accent_color = "#9184d9"
+background_overlay = 55
+motion = "normal"
+ui_font = "default"
+terminal_font = "default"
+
+# Optional: put one supported image next to this TOML file, then uncomment.
+# background_image = "nocturne-background.webp"
+
+# Advanced design tokens. Every value is a TOML string.
+# These values take priority over the simple theme controls above.
+[tokens]
+
+# Neutral surfaces
+color-ink-900 = "#161826"
+color-ink-800 = "#232532"
+color-ink-700 = "#3f424d"
+color-ink-600 = "#595d6c"
+
+# Text palette
+color-slate-100 = "#e9e9ed"
+color-slate-200 = "#e4e7f5"
+color-slate-300 = "#cfd3e5"
+color-slate-400 = "#9397ab"
+color-slate-500 = "#75798c"
+color-slate-600 = "#595d6c"
+
+# Accent ramp
+color-sky-200 = "#e7e5fe"
+color-sky-300 = "#d2cefd"
+color-sky-400 = "#b5abfc"
+color-sky-500 = "#9184d9"
+color-sky-600 = "#796cbf"
+color-sky-950 = "#2b2741"
+
+# Status colors
+color-emerald-300 = "#6ee7b7"
+color-emerald-400 = "#34d399"
+color-emerald-500 = "#5fd99a"
+color-amber-400 = "#fbbf24"
+color-amber-500 = "#f59e0b"
+color-red-200 = "#fecaca"
+color-red-300 = "#fca5a5"
+color-red-400 = "#f87171"
+color-red-500 = "#ef4444"
+color-red-600 = "#dc2626"
+color-red-950 = "#450a0a"
+
+# Semantic colors
+color-overlay = "#000000"
+color-on-accent = "#ffffff"
+color-control-knob = "#ffffff"
+color-symlink = "#2dd4bf"
+color-surface-pane = "#161826"
+color-surface-card = "#232532"
+color-surface-popover = "#232532"
+color-surface-dialog = "#161826"
+color-border-default = "#3f424d"
+color-text-primary = "#e9e9ed"
+color-text-secondary = "#cfd3e5"
+color-text-muted = "#75798c"
+
+# Fonts and type scale
+font-sans = '"Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Malgun Gothic", sans-serif'
+font-mono = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+font-terminal = '"Cascadia Code", "D2Coding", Consolas, "Courier New", monospace'
+text-editor = "13px"
+text-terminal = "13px"
+leading-editor = "1.5"
+text-2xs = "11px"
+text-xs = "0.75rem"
+leading-xs = "1rem"
+text-sm = "0.875rem"
+leading-sm = "1.25rem"
+text-base = "1rem"
+leading-base = "1.5rem"
+text-lg = "1.125rem"
+leading-lg = "1.75rem"
+text-xl = "1.25rem"
+leading-xl = "1.75rem"
+text-2xl = "1.5rem"
+leading-2xl = "2rem"
+text-3xl = "1.875rem"
+leading-3xl = "2.25rem"
+
+# Motion
+duration-instant = "90ms"
+duration-fast = "140ms"
+duration-normal = "220ms"
+duration-slow = "300ms"
+ease-standard = "cubic-bezier(0.2, 0, 0, 1)"
+ease-spatial = "cubic-bezier(0.22, 1, 0.36, 1)"
+distance-spatial = "0.375rem"
+scale-spatial-enter = "0.985"
+
+# Radius
+radius-sm = "0.125rem"
+radius = "0.25rem"
+radius-md = "0.5rem"
+radius-lg = "0.625rem"
+radius-xl = "0.75rem"
+radius-2xl = "1rem"
+radius-full = "9999px"
+radius-editor-tooltip = "0.375rem"
+
+# Shared surface effects
+opacity-surface-pane = "0.94"
+blur-surface-pane = "0.5rem"
+shadow-control = "0 1px 2px rgb(0 0 0 / 0.16)"
+shadow-popover = "0 16px 36px -18px rgb(0 0 0 / 0.72)"
+shadow-dialog = "0 24px 56px -24px rgb(0 0 0 / 0.82)"
+
+# Pane layout and focus
+space-pane-gap = "0.5rem"
+space-pane-half-gap = "0.25rem"
+space-pane-edge = "0.5rem"
+opacity-pane-divider-hover = "0.35"
+opacity-pane-divider-active = "0.7"
+radius-pane = "0.75rem"
+shadow-pane-rest = "0 1px 2px rgb(0 0 0 / 0.18)"
+shadow-pane-focus = "0 0 0 1px rgb(var(--color-sky-500) / 0.34), 0 8px 24px -16px rgb(var(--color-sky-500) / 0.72)"
+
+# Dashboard layout
+space-dashboard-inset = "0.75rem"
+space-dashboard-gap = "0.625rem"
+radius-dashboard-card = "0.625rem"
+shadow-dashboard-card = "0 1px 2px rgb(0 0 0 / 0.12)"

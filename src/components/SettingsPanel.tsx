@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getName, getVersion, getTauriVersion } from "@tauri-apps/api/app";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../store";
 import {
   DEFAULT_THEME_SETTINGS,
@@ -16,13 +16,25 @@ import { MIN_REFRESH_SECONDS, clampInterval } from "../lib/dashboardTypes";
 import {
   clearThemeBackground,
   commandsDirPath,
+  exportThemePreset,
   importThemeBackground,
+  importThemePreset,
+  loadThemePresets,
   openCommandsDir,
+  openThemesDir,
+  themesDirPath,
+  type ThemePreset,
 } from "../api";
 import { useI18n } from "../i18n";
 import type { AppLanguage } from "../lib/settings";
 import type { TranslationKey } from "../i18n/ko";
 import { dashboardWidgetLabel } from "../lib/dashboardWidgetText";
+import { collectThemeTokens } from "../lib/theme";
+import {
+  ACCENT_THEME_TOKENS,
+  MOTION_THEME_TOKENS,
+  withoutThemeTokenGroups,
+} from "../lib/themeTokens";
 
 /**
  * Full settings surface: a modal overlay covering the pane tiling, with a
@@ -320,10 +332,152 @@ function ThemeSection() {
   const set = useSettings((state) => state.set);
   const [imageBusy, setImageBusy] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [presets, setPresets] = useState<ThemePreset[]>([]);
+  const [presetsPath, setPresetsPath] = useState<string | null>(null);
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presetBusy, setPresetBusy] = useState(false);
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetMessage, setPresetMessage] = useState<string | null>(null);
   const { t } = useI18n();
 
+  useEffect(() => {
+    void Promise.all([loadThemePresets(), themesDirPath()])
+      .then(([loaded, path]) => {
+        setPresets(loaded);
+        setPresetsPath(path);
+      })
+      .catch(() => {});
+  }, []);
+
   const update = (patch: Partial<ThemeSettings>) => {
-    set("theme", { ...theme, ...patch });
+    setSelectedPresetId("");
+    setPresetMessage(null);
+    let tokens = theme.tokens;
+    if (patch.accentColor !== undefined) {
+      tokens = withoutThemeTokenGroups(tokens, ACCENT_THEME_TOKENS);
+    }
+    if (patch.motion !== undefined) {
+      tokens = withoutThemeTokenGroups(tokens, MOTION_THEME_TOKENS);
+    }
+    if (patch.uiFont !== undefined) {
+      tokens = withoutThemeTokenGroups(tokens, ["font-sans"]);
+    }
+    if (patch.terminalFont !== undefined) {
+      tokens = withoutThemeTokenGroups(tokens, ["font-terminal"]);
+    }
+    set("theme", { ...theme, ...patch, tokens });
+  };
+
+  const refreshPresets = async () => {
+    const loaded = await loadThemePresets();
+    setPresets(loaded);
+    return loaded;
+  };
+
+  const applyPreset = async (preset: ThemePreset) => {
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetMessage(null);
+    try {
+      const backgroundImagePath = preset.backgroundImagePath
+        ? await importThemeBackground(preset.backgroundImagePath)
+        : null;
+      if (!preset.backgroundImagePath) await clearThemeBackground();
+      set("theme", {
+        backgroundColor: preset.backgroundColor,
+        backgroundImagePath,
+        backgroundOverlay: preset.backgroundOverlay,
+        accentColor: preset.accentColor,
+        motion: preset.motion,
+        uiFont: preset.uiFont,
+        terminalFont: preset.terminalFont,
+        tokens: preset.tokens ?? {},
+      });
+      setSelectedPresetId(preset.id);
+      setPresetMessage(t("settings.theme.presets.applied", { name: preset.name }));
+      setImageError(null);
+    } catch (error) {
+      setPresetError(
+        typeof error === "string" ? error : t("settings.theme.presets.error"),
+      );
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const importPreset = async () => {
+    setPresetError(null);
+    setPresetMessage(null);
+    try {
+      const selected = await open({
+        title: t("settings.theme.presets.import"),
+        multiple: false,
+        directory: false,
+        filters: [
+          { name: t("settings.theme.presets.tomlFiles"), extensions: ["toml"] },
+        ],
+      });
+      if (!selected || Array.isArray(selected)) return;
+
+      setPresetBusy(true);
+      const imported = await importThemePreset(selected);
+      await refreshPresets();
+      await applyPreset(imported);
+    } catch (error) {
+      setPresetError(
+        typeof error === "string" ? error : t("settings.theme.presets.error"),
+      );
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const exportPreset = async () => {
+    setPresetError(null);
+    setPresetMessage(null);
+    try {
+      const target = await save({
+        title: t("settings.theme.presets.export"),
+        defaultPath: "sshland-theme.toml",
+        filters: [
+          { name: t("settings.theme.presets.tomlFiles"), extensions: ["toml"] },
+        ],
+      });
+      if (!target) return;
+
+      setPresetBusy(true);
+      const path = await exportThemePreset(target, {
+        ...theme,
+        tokens: collectThemeTokens(),
+      });
+      setPresetMessage(t("settings.theme.presets.exported", { path }));
+    } catch (error) {
+      setPresetError(
+        typeof error === "string" ? error : t("settings.theme.presets.error"),
+      );
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const reloadPresets = async () => {
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetMessage(null);
+    try {
+      const loaded = await refreshPresets();
+      if (selectedPresetId) {
+        const selected = loaded.find((preset) => preset.id === selectedPresetId);
+        if (selected) await applyPreset(selected);
+        else setSelectedPresetId("");
+      }
+    } catch (error) {
+      setPresetError(
+        typeof error === "string" ? error : t("settings.theme.presets.error"),
+      );
+    } finally {
+      setPresetBusy(false);
+    }
   };
 
   const chooseBackground = async () => {
@@ -367,6 +521,8 @@ function ThemeSection() {
   const resetTheme = () => {
     void clearThemeBackground().catch(() => {});
     set("theme", { ...DEFAULT_THEME_SETTINGS });
+    setSelectedPresetId("");
+    setPresetMessage(null);
     setImageError(null);
   };
 
@@ -376,6 +532,89 @@ function ThemeSection() {
       <p className="mb-4 text-sm leading-relaxed text-slate-400">
         {t("settings.theme.description")}
       </p>
+
+      <div className="mb-4 rounded-lg border border-ink-700/60 bg-ink-800/50 px-4 py-3">
+        <div className="text-sm font-medium text-slate-200">
+          {t("settings.theme.presets.title")}
+        </div>
+        <p className="mt-1 text-2xs leading-relaxed text-slate-500">
+          {t("settings.theme.presets.description")}
+        </p>
+
+        <select
+          value={selectedPresetId}
+          disabled={presetBusy}
+          onChange={(event) => {
+            const id = event.target.value;
+            if (!id) {
+              setSelectedPresetId("");
+              return;
+            }
+            const preset = presets.find((item) => item.id === id);
+            if (preset) void applyPreset(preset);
+          }}
+          className="mt-3 w-full rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40 disabled:opacity-50"
+        >
+          <option value="">{t("settings.theme.presets.custom")}</option>
+          {presets.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.author ? `${preset.name} — ${preset.author}` : preset.name}
+            </option>
+          ))}
+        </select>
+
+        {presets.length === 0 && (
+          <p className="mt-2 text-2xs text-slate-500">
+            {t("settings.theme.presets.empty")}
+          </p>
+        )}
+        {selectedPresetId && presets.find((item) => item.id === selectedPresetId)?.description && (
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">
+            {presets.find((item) => item.id === selectedPresetId)?.description}
+          </p>
+        )}
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={presetBusy}
+            onClick={() => void importPreset()}
+            className="rounded-lg bg-sky-500/15 px-3 py-1 text-xs text-sky-200 hover:bg-sky-500/25 disabled:opacity-50"
+          >
+            {t("settings.theme.presets.import")}
+          </button>
+          <button
+            type="button"
+            disabled={presetBusy}
+            onClick={() => void exportPreset()}
+            className="rounded-lg border border-ink-700 px-3 py-1 text-xs text-slate-300 hover:bg-ink-700 disabled:opacity-50"
+          >
+            {t("settings.theme.presets.export")}
+          </button>
+          <button
+            type="button"
+            disabled={presetBusy}
+            onClick={() => void openThemesDir().catch(() => {})}
+            className="rounded-lg border border-ink-700 px-3 py-1 text-xs text-slate-300 hover:bg-ink-700 disabled:opacity-50"
+          >
+            {t("common.openFolder")}
+          </button>
+          <button
+            type="button"
+            disabled={presetBusy}
+            onClick={() => void reloadPresets()}
+            className="rounded-lg border border-ink-700 px-3 py-1 text-xs text-slate-300 hover:bg-ink-700 disabled:opacity-50"
+          >
+            {presetBusy ? t("common.reloading") : t("common.reload")}
+          </button>
+        </div>
+
+        <div className="mt-2 break-all font-mono text-2xs text-slate-600">
+          {presetsPath ?? "…"}
+        </div>
+        {presetMessage && <p className="mt-2 text-xs text-emerald-300">{presetMessage}</p>}
+        {presetError && <p className="mt-2 text-xs text-red-300">{presetError}</p>}
+      </div>
 
       <div className="theme-settings-preview mb-4 overflow-hidden rounded-lg border border-ink-700/60">
         <div className="theme-settings-preview-image" />

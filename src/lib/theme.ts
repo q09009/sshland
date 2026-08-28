@@ -6,6 +6,13 @@
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "./settings";
+import {
+  isValidThemeTokenValue,
+  THEME_TOKEN_KINDS,
+  THEME_TOKEN_NAMES,
+  themeTokenCssValue,
+  type ThemeTokenValues,
+} from "./themeTokens";
 
 export const THEME_CHANGE_EVENT = "sshland-theme-change";
 
@@ -97,6 +104,38 @@ export function accentRamp(hex: string): Record<string, readonly number[]> {
   };
 }
 
+function channelsToHex(value: string): string | null {
+  const channels = value.match(/\d+(?:\.\d+)?/g)?.map(Number);
+  if (!channels || channels.length !== 3 || channels.some((channel) => channel < 0 || channel > 255)) {
+    return null;
+  }
+  return `#${channels
+    .map((channel) => Math.round(channel).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function colorTokenToHex(name: string, seen = new Set<string>()): string | null {
+  if (seen.has(name)) return null;
+  seen.add(name);
+  const value = token(`--${name}`);
+  const direct = channelsToHex(value);
+  if (direct) return direct;
+  const reference = /^var\(--([a-z0-9-]+)\)$/i.exec(value);
+  return reference ? colorTokenToHex(reference[1], seen) : null;
+}
+
+/** Snapshot every public design token in TOML-friendly form for export. */
+export function collectThemeTokens(): ThemeTokenValues {
+  const values: ThemeTokenValues = {};
+  for (const name of THEME_TOKEN_NAMES) {
+    const value = THEME_TOKEN_KINDS[name] === "color"
+      ? colorTokenToHex(name)
+      : token(`--${name}`);
+    if (value && isValidThemeTokenValue(name, value)) values[name] = value;
+  }
+  return values;
+}
+
 function assetUrl(path: string): string | null {
   try {
     return convertFileSrc(path);
@@ -106,9 +145,10 @@ function assetUrl(path: string): string | null {
   }
 }
 
-/** Apply the small user-facing theme surface to the central CSS variables. */
+/** Apply the simple settings first, then any advanced TOML token overrides. */
 export function applyTheme(theme: ThemeSettings): void {
   const root = document.documentElement;
+  for (const name of THEME_TOKEN_NAMES) root.style.removeProperty(`--${name}`);
   const backgroundColor = normalizeHex(
     theme.backgroundColor,
     DEFAULT_THEME_SETTINGS.backgroundColor,
@@ -140,6 +180,11 @@ export function applyTheme(theme: ThemeSettings): void {
     "--font-terminal",
     TERMINAL_FONTS[theme.terminalFont] ?? TERMINAL_FONTS.default,
   );
+
+  for (const [name, value] of Object.entries(theme.tokens)) {
+    if (!isValidThemeTokenValue(name, value)) continue;
+    root.style.setProperty(`--${name}`, themeTokenCssValue(name, value));
+  }
 
   window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT));
 }
