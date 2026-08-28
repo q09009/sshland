@@ -29,7 +29,7 @@ export default function StatusBar() {
 
 function TransferStatus() {
   const transfers = useAppStore((s) => s.transfers);
-  const batches = useAppStore((s) => s.uploadBatches);
+  const batches = useAppStore((s) => s.transferBatches);
   const dismissTransfer = useAppStore((s) => s.dismissTransfer);
   const dismissBatch = useAppStore((s) => s.dismissBatch);
   const { t } = useI18n();
@@ -106,7 +106,12 @@ function TransferStatus() {
     if (!completedBatch && !completed) return null;
 
     const label = completedBatch
-      ? t("status.uploadBatchComplete", { count: completedBatch.total })
+      ? t(
+          completedBatch.kind === "upload"
+            ? "status.uploadBatchComplete"
+            : "status.downloadBatchComplete",
+          { count: completedBatch.total },
+        )
       : t("status.transferComplete", {
           direction: completed?.kind === "upload" ? "↑" : "↓",
           name: completed?.name ?? "",
@@ -146,7 +151,12 @@ function TransferStatus() {
   const singleTransfer =
     activeTransfers.length === 1 ? activeTransfers[0] : null;
   const label = batch
-    ? t("status.uploadProgress", { done: batch.done, total: batch.total })
+    ? t(
+        batch.kind === "upload"
+          ? "status.uploadProgress"
+          : "status.downloadProgress",
+        { done: batch.done, total: batch.total },
+      )
     : singleTransfer
     ? `${singleTransfer.kind === "upload" ? "↑" : "↓"} ${singleTransfer.name}`
     : activeTransfers.length > 1

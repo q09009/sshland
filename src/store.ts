@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { SearchToolStatus } from "./lib/settings";
 import {
   collectRects,
   Direction,
@@ -29,12 +30,13 @@ export interface Transfer {
 }
 
 /**
- * A multi-item drag-in upload, shown as an overall "N개 중 M개 완료" counter
- * above the per-item transfer cards. Only created when >1 item is dropped.
+ * A multi-item upload/download, shown as an overall "N개 중 M개 완료" counter
+ * above the per-item transfer cards.
  */
-export interface UploadBatch {
+export interface TransferBatch {
   id: string;
-  /** How many top-level files/folders this batch is uploading. */
+  kind: "download" | "upload";
+  /** How many top-level files/folders this batch is transferring. */
   total: number;
   /** How many have finished (success or error). */
   done: number;
@@ -56,9 +58,7 @@ export type Screen = "connect" | "files";
 
 /** A file/folder being dragged for an in-app move. */
 export interface DragItem {
-  name: string;
-  path: string;
-  isDir: boolean;
+  items: Array<{ name: string; path: string; isDir: boolean }>;
   /** Directory the item is being dragged from. */
   sourceDir: string;
 }
@@ -69,9 +69,12 @@ export type ViewMode = "list" | "details" | "grid";
 /** Details about the live connection, shown in the file manager header. */
 export interface ConnectionInfo {
   host: string;
+  port: number;
   username: string;
   /** Home directory reported by the server on connect. */
   home: string;
+  /** Remembered search-command checks for this server/port/user. */
+  searchTools: SearchToolStatus;
   /** Local timestamp (ms) of when the session started, for elapsed-time display. */
   connectedAt: number;
 }
@@ -89,6 +92,11 @@ interface AppState {
   /** Live connection health, shown in the status bar. */
   connectionStatus: ConnectionStatus;
   setConnectionStatus: (status: ConnectionStatus) => void;
+  setSearchToolCheck: (
+    engine: "fd" | "find",
+    available: boolean,
+    command: string | null,
+  ) => void;
 
   /** Whether the settings overlay is open. */
   settingsOpen: boolean;
@@ -110,9 +118,9 @@ interface AppState {
   // Note: per-directory file-manager state (path, entries, view mode, …) lives
   // locally in each FilesScreen so multiple file-manager panes are independent.
 
-  /** A copied file/folder, shared across panes for paste. */
-  clipboard: { name: string; path: string; isDir: boolean } | null;
-  setClipboard: (item: { name: string; path: string; isDir: boolean }) => void;
+  /** Copied files/folders, shared across panes for paste. */
+  clipboard: Array<{ name: string; path: string; isDir: boolean }> | null;
+  setClipboard: (items: Array<{ name: string; path: string; isDir: boolean }>) => void;
 
   /** The file/folder currently being dragged between panes (move), if any. */
   dragItem: DragItem | null;
@@ -173,9 +181,9 @@ interface AppState {
   finishTransfer: (id: string, error?: string) => void;
   dismissTransfer: (id: string) => void;
 
-  // --- Multi-item upload batches (overall progress) ---
-  uploadBatches: UploadBatch[];
-  startBatch: (id: string, total: number) => void;
+  // --- Multi-item transfer batches (overall progress) ---
+  transferBatches: TransferBatch[];
+  startBatch: (id: string, total: number, kind: TransferBatch["kind"]) => void;
   advanceBatch: (id: string) => void;
   dismissBatch: (id: string) => void;
 }
@@ -189,6 +197,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   connectNotice: null,
   connectionStatus: "disconnected",
   setConnectionStatus: (status) => set({ connectionStatus: status }),
+  setSearchToolCheck: (engine, available, command) =>
+    set((state) => {
+      if (!state.connection) return {};
+      const searchTools: SearchToolStatus =
+        engine === "find"
+          ? {
+              ...state.connection.searchTools,
+              find: available,
+            }
+          : {
+              ...state.connection.searchTools,
+              fdChecked: true,
+              fdCommand:
+                available && (command === "fd" || command === "fdfind")
+                  ? command
+                  : null,
+            };
+      return {
+        connection: {
+          ...state.connection,
+          searchTools,
+        },
+      };
+    }),
 
   settingsOpen: false,
   openSettings: () => set({ settingsOpen: true }),
@@ -290,12 +322,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     const fm = makeLeaf("file-manager");
     set({
       screen: "files",
-      connection: { ...connection, connectedAt: Date.now() },
+      connection: {
+        ...connection,
+        connectedAt: Date.now(),
+      },
       connectionStatus: "connected",
       connectNotice: null,
       settingsOpen: false,
       paneTree: fm,
       focusedPaneId: fm.id,
+      clipboard: null,
+      dragItem: null,
     });
   },
 
@@ -306,6 +343,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       connectionStatus: "disconnected",
       settingsOpen: false,
       connectNotice: notice ?? null,
+      clipboard: null,
+      dragItem: null,
     }),
 
   clearNotice: () => set({ connectNotice: null }),
@@ -351,15 +390,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   dismissTransfer: (id) =>
     set((s) => ({ transfers: s.transfers.filter((t) => t.id !== id) })),
 
-  uploadBatches: [],
-  startBatch: (id, total) =>
-    set((s) => ({ uploadBatches: [...s.uploadBatches, { id, total, done: 0 }] })),
+  transferBatches: [],
+  startBatch: (id, total, kind) =>
+    set((s) => ({
+      transferBatches: [...s.transferBatches, { id, kind, total, done: 0 }],
+    })),
   advanceBatch: (id) =>
     set((s) => ({
-      uploadBatches: s.uploadBatches.map((b) =>
+      transferBatches: s.transferBatches.map((b) =>
         b.id === id ? { ...b, done: b.done + 1 } : b
       ),
     })),
   dismissBatch: (id) =>
-    set((s) => ({ uploadBatches: s.uploadBatches.filter((b) => b.id !== id) })),
+    set((s) => ({
+      transferBatches: s.transferBatches.filter((b) => b.id !== id),
+    })),
 }));

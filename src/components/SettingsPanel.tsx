@@ -6,6 +6,7 @@ import {
   DEFAULT_THEME_SETTINGS,
   useSettings,
   type MotionPreference,
+  type FileSearchEngine,
   type TerminalFontPreference,
   type ThemeSettings,
   type UiFontPreference,
@@ -14,6 +15,7 @@ import { useCommandConfigs } from "../lib/commandConfigs";
 import { useDashboardWidgetConfigs } from "../lib/dashboardWidgetConfigs";
 import { MIN_REFRESH_SECONDS, clampInterval } from "../lib/dashboardTypes";
 import {
+  checkSearchTool,
   clearThemeBackground,
   commandsDirPath,
   exportThemePreset,
@@ -35,11 +37,12 @@ import {
   MOTION_THEME_TOKENS,
   withoutThemeTokenGroups,
 } from "../lib/themeTokens";
+import { resolveFileSearchEngine } from "../lib/fileSearch";
 
 /**
  * Full settings surface: a modal overlay covering the pane tiling, with a
- * category sidebar and a content area. Adding a section later ("명령어 로그",
- * "단축키", "테마", …) is just one more entry in SECTIONS — the sidebar and
+ * category sidebar and a content area. Adding a section later ("단축키",
+ * "테마", …) is just one more entry in SECTIONS — the sidebar and
  * routing are data-driven.
  */
 interface Section {
@@ -49,8 +52,16 @@ interface Section {
 }
 
 const SECTIONS: Section[] = [
-  { id: "command-log", label: "settings.section.commandLog", render: () => <CommandLogSection /> },
-  { id: "command-gui", label: "settings.section.commandGui", render: () => <CommandGuiSection /> },
+  {
+    id: "file-manager",
+    label: "settings.section.fileManager",
+    render: () => <FileManagerSection />,
+  },
+  {
+    id: "terminal-command-gui",
+    label: "settings.section.commandGui",
+    render: () => <TerminalCommandGuiSection />,
+  },
   { id: "dashboard", label: "settings.section.dashboard", render: () => <DashboardSection /> },
   { id: "theme", label: "settings.section.theme", render: () => <ThemeSection /> },
   { id: "general", label: "settings.section.general", render: () => <GeneralSection /> },
@@ -91,8 +102,8 @@ export default function SettingsPanel() {
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Category sidebar */}
-        <nav className="flex w-44 shrink-0 flex-col border-r border-ink-700/70 bg-ink-800 p-2">
-          <div className="px-2 py-2 text-sm font-semibold text-slate-200">
+        <nav className="flex w-44 shrink-0 flex-col gap-1 border-r border-ink-700/70 bg-ink-800 p-2">
+          <div className="mb-1 px-2 py-2 text-sm font-semibold text-slate-200">
             {t("settings.title")}
           </div>
           {SECTIONS.map((s) => (
@@ -129,31 +140,26 @@ export default function SettingsPanel() {
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mb-4 text-lg font-semibold text-slate-100">{children}</h2>
+    <header className="mb-5">
+      <h2 className="text-lg font-semibold text-slate-100">{children}</h2>
+      <div className="mt-3 h-px bg-ink-700/70" />
+    </header>
   );
 }
 
-function CommandLogSection() {
-  const enabled = useSettings((s) => s.settings.commandLogEnabled);
-  const set = useSettings((s) => s.set);
-  const { t } = useI18n();
+function SettingsStack({ children }: { children: React.ReactNode }) {
+  return <div className="flex flex-col gap-3">{children}</div>;
+}
+
+function SubsectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <SectionTitle>{t("settings.section.commandLog")}</SectionTitle>
-      <SettingRow
-        label={t("settings.commandLog.label")}
-        description={t("settings.commandLog.description")}
-      >
-        <Toggle
-          checked={enabled}
-          onChange={(v) => set("commandLogEnabled", v)}
-        />
-      </SettingRow>
-    </div>
+    <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-400">
+      {children}
+    </h3>
   );
 }
 
-function CommandGuiSection() {
+function TerminalCommandGuiSection() {
   const enabled = useSettings((s) => s.settings.commandGuiEnabled);
   const set = useSettings((s) => s.set);
   const configs = useCommandConfigs((s) => s.configs);
@@ -177,17 +183,19 @@ function CommandGuiSection() {
   return (
     <div>
       <SectionTitle>{t("settings.section.commandGui")}</SectionTitle>
-      <SettingRow
-        label={t("settings.commandGui.label")}
-        description={t("settings.commandGui.description")}
-      >
-        <Toggle
-          checked={enabled}
-          onChange={(v) => set("commandGuiEnabled", v)}
-        />
-      </SettingRow>
+      <SettingsStack>
+        <SettingRow
+          label={t("settings.commandGui.label")}
+          description={t("settings.commandGui.description")}
+        >
+          <Toggle
+            checked={enabled}
+            onChange={(v) => set("commandGuiEnabled", v)}
+          />
+        </SettingRow>
+      </SettingsStack>
 
-      <div className="mt-4 rounded-lg border border-ink-700/60 bg-ink-800/50 px-4 py-3">
+      <div className="mt-5 rounded-xl border border-ink-700/60 bg-ink-800/50 px-4 py-3">
         <div className="text-sm text-slate-200">{t("settings.commandGui.folder")}</div>
         <div className="mt-1 break-all font-mono text-2xs text-slate-500">
           {dir ?? "…"}
@@ -212,22 +220,22 @@ function CommandGuiSection() {
         </p>
       </div>
 
-      <div className="mt-4">
-        <div className="mb-2 text-xs font-medium text-slate-400">
+      <div className="mt-5">
+        <SubsectionTitle>
           {t("settings.commandGui.registered", { count: configs.length })}
-        </div>
-        <ul className="flex flex-col gap-1">
+        </SubsectionTitle>
+        <ul className="flex flex-col gap-2">
           {configs.map((c) => (
             <li
               key={c.name}
-              className="flex items-center gap-2 rounded-md border border-ink-700/50 bg-ink-900/40 px-3 py-1.5 text-xs"
+              className="flex min-h-10 items-center gap-3 rounded-lg border border-ink-700/50 bg-ink-800/40 px-3 py-2 text-xs"
             >
               <span className="font-mono text-slate-200">{c.name}</span>
               <span className="text-slate-500">
                 {c.parser} → {c.render}
               </span>
               <span
-                className={`ml-auto rounded px-1.5 py-0.5 text-2xs ${
+                className={`ml-auto rounded-full px-2 py-0.5 text-2xs ${
                   c.source === "user"
                     ? "bg-sky-500/15 text-sky-200"
                     : "bg-ink-700 text-slate-400"
@@ -267,51 +275,59 @@ function DashboardSection() {
   return (
     <div>
       <SectionTitle>{t("settings.section.dashboard")}</SectionTitle>
-      <SettingRow
-        label={t("settings.dashboard.enabled")}
-        description={t("settings.dashboard.enabledDescription")}
-      >
-        <Toggle
-          checked={enabled}
-          onChange={(v) => set("dashboardEnabled", v)}
-        />
-      </SettingRow>
-
-      <SettingRow
-        label={t("settings.dashboard.interval")}
-        description={t("settings.dashboard.intervalDescription")}
-      >
-        <span className="flex items-center gap-1 text-sm text-slate-300">
-          <input
-            type="number"
-            min={MIN_REFRESH_SECONDS}
-            value={intervalText}
-            onChange={(e) => setIntervalText(e.target.value)}
-            onBlur={commitInterval}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-            }}
-            className="w-16 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1 text-right text-slate-100 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+      <SettingsStack>
+        <SettingRow
+          label={t("settings.dashboard.enabled")}
+          description={t("settings.dashboard.enabledDescription")}
+        >
+          <Toggle
+            checked={enabled}
+            onChange={(v) => set("dashboardEnabled", v)}
           />
-          <span className="text-slate-500">{t("common.seconds")}</span>
-        </span>
-      </SettingRow>
+        </SettingRow>
 
-      <div className="mt-4">
-        <div className="mb-2 text-xs font-medium text-slate-400">
+        <SettingRow
+          label={t("settings.dashboard.interval")}
+          description={t("settings.dashboard.intervalDescription")}
+        >
+          <span className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="number"
+              min={MIN_REFRESH_SECONDS}
+              value={intervalText}
+              onChange={(e) => setIntervalText(e.target.value)}
+              onBlur={commitInterval}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+              className="w-16 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-right text-slate-100 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+            />
+            <span className="text-slate-500">{t("common.seconds")}</span>
+          </span>
+        </SettingRow>
+      </SettingsStack>
+
+      <div className="mt-5">
+        <SubsectionTitle>
           {t("settings.dashboard.available", { count: configs.length })}
-        </div>
-        <ul className="flex flex-col gap-1">
+        </SubsectionTitle>
+        <ul className="flex flex-col gap-2">
           {configs.map((c) => (
             <li
               key={c.id}
-              className="flex items-center gap-2 rounded-md border border-ink-700/50 bg-ink-900/40 px-3 py-1.5 text-xs"
+              className="flex min-h-11 items-center gap-3 rounded-lg border border-ink-700/50 bg-ink-800/40 px-3 py-2 text-xs"
             >
-              <span className="select-none">{c.icon ?? "📊"}</span>
-              <span className="text-slate-200">{dashboardWidgetLabel(c, t)}</span>
-              <span className="text-slate-500">{c.render}</span>
+              <span className="flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-md bg-ink-700/70 text-sm">
+                {c.icon ?? "📊"}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-slate-200">
+                {dashboardWidgetLabel(c, t)}
+              </span>
+              <span className="shrink-0 font-mono text-2xs text-slate-500">
+                {c.render}
+              </span>
               <span
-                className={`ml-auto rounded px-1.5 py-0.5 text-2xs ${
+                className={`shrink-0 rounded-full px-2 py-0.5 text-2xs ${
                   c.source === "user"
                     ? "bg-sky-500/15 text-sky-200"
                     : "bg-ink-700 text-slate-400"
@@ -323,6 +339,183 @@ function DashboardSection() {
           ))}
         </ul>
       </div>
+    </div>
+  );
+}
+
+function FileManagerSection() {
+  const preferred = useSettings((s) => s.settings.fileSearchEngine);
+  const set = useSettings((s) => s.set);
+  const saveSearchToolCheck = useSettings((s) => s.saveSearchToolCheck);
+  const connection = useAppStore((s) => s.connection);
+  const setSearchToolCheck = useAppStore((s) => s.setSearchToolCheck);
+  const [checking, setChecking] = useState<FileSearchEngine | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const { t } = useI18n();
+  const tools = connection?.searchTools ?? {
+    find: null,
+    fdCommand: null,
+    fdChecked: false,
+  };
+  const effective = resolveFileSearchEngine(preferred, tools);
+  const options: Array<{
+    id: FileSearchEngine;
+    label: TranslationKey;
+    description: TranslationKey;
+  }> = [
+    {
+      id: "filter",
+      label: "settings.fileSearch.filter",
+      description: "settings.fileSearch.filterDescription",
+    },
+    {
+      id: "fd",
+      label: "settings.fileSearch.fd",
+      description: "settings.fileSearch.fdDescription",
+    },
+    {
+      id: "find",
+      label: "settings.fileSearch.find",
+      description: "settings.fileSearch.findDescription",
+    },
+  ];
+
+  type Availability = "available" | "unavailable" | "unchecked" | "checking";
+
+  const availabilityState = (engine: FileSearchEngine): Availability => {
+    if (checking === engine) return "checking";
+    if (engine === "filter") return "available";
+    if (engine === "fd") {
+      if (!tools.fdChecked) return "unchecked";
+      return tools.fdCommand ? "available" : "unavailable";
+    }
+    if (tools.find === null) return "unchecked";
+    return tools.find ? "available" : "unavailable";
+  };
+
+  const availability = (engine: FileSearchEngine, status: Availability) => {
+    if (engine === "filter") return t("settings.fileSearch.builtIn");
+    if (status === "checking") return t("settings.fileSearch.checking");
+    if (status === "unchecked") return t("settings.fileSearch.notChecked");
+    if (engine === "fd") {
+      return tools.fdCommand
+        ? t("settings.fileSearch.availableAs", { command: tools.fdCommand })
+        : t("settings.fileSearch.unavailable");
+    }
+    return tools.find
+      ? t("settings.fileSearch.available")
+      : t("settings.fileSearch.unavailable");
+  };
+
+  const selectEngine = async (engine: FileSearchEngine) => {
+    setCheckError(null);
+    if (engine === "filter") {
+      set("fileSearchEngine", engine);
+      return;
+    }
+    if (!connection || checking) return;
+
+    setChecking(engine);
+    try {
+      const result = await checkSearchTool(engine);
+      setSearchToolCheck(engine, result.available, result.command);
+      saveSearchToolCheck(
+        {
+          host: connection.host,
+          port: connection.port,
+          username: connection.username,
+        },
+        engine,
+        result.available,
+        result.command,
+      );
+      // Missing optional commands do not replace the user's current choice.
+      if (result.available) set("fileSearchEngine", engine);
+    } catch (error) {
+      setCheckError(typeof error === "string" ? error : String(error));
+    } finally {
+      setChecking(null);
+    }
+  };
+
+  const preferredChecked =
+    preferred === "filter" ||
+    (preferred === "fd" ? tools.fdChecked : tools.find !== null);
+  const fallbackKey: TranslationKey = preferredChecked
+    ? "settings.fileSearch.fallback"
+    : "settings.fileSearch.fallbackUnchecked";
+
+  return (
+    <div>
+      <SectionTitle>{t("settings.section.fileManager")}</SectionTitle>
+      <p className="mb-4 text-sm leading-relaxed text-slate-400">
+        {t("settings.fileSearch.description")}
+      </p>
+      <div role="radiogroup" className="space-y-3">
+        {options.map((option) => {
+          const selected = preferred === option.id;
+          const status = availabilityState(option.id);
+          return (
+            <button
+              key={option.id}
+              role="radio"
+              aria-checked={selected}
+              aria-busy={status === "checking"}
+              disabled={checking !== null}
+              onClick={() => void selectEngine(option.id)}
+              className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+                selected
+                  ? "border-sky-500/60 bg-sky-500/10"
+                  : "border-ink-700/60 bg-ink-800/50 hover:bg-ink-700/60"
+              } disabled:cursor-wait disabled:opacity-70`}
+            >
+              <span
+                className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                  selected ? "border-sky-400" : "border-slate-600"
+                }`}
+              >
+                {selected && <span className="h-2 w-2 rounded-full bg-sky-400" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 text-sm text-slate-200">
+                  {t(option.label)}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-2xs ${
+                      status === "available"
+                        ? "bg-emerald-500/10 text-emerald-400"
+                        : status === "checking"
+                          ? "bg-sky-500/10 text-sky-300"
+                          : status === "unchecked"
+                            ? "bg-ink-700 text-slate-400"
+                            : "bg-amber-500/10 text-amber-400"
+                    }`}
+                  >
+                    {availability(option.id, status)}
+                  </span>
+                </span>
+                <span className="mt-1 block text-xs leading-relaxed text-slate-500">
+                  {t(option.description)}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {checkError && (
+        <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs leading-relaxed text-rose-200">
+          {t("settings.fileSearch.checkFailed", { error: checkError })}
+        </div>
+      )}
+
+      {effective !== preferred && (
+        <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs leading-relaxed text-amber-200">
+          {t(fallbackKey, {
+            preferred: t(`settings.fileSearch.${preferred}` as TranslationKey),
+            effective: t(`settings.fileSearch.${effective}` as TranslationKey),
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -533,7 +726,7 @@ function ThemeSection() {
         {t("settings.theme.description")}
       </p>
 
-      <div className="mb-4 rounded-lg border border-ink-700/60 bg-ink-800/50 px-4 py-3">
+      <div className="mb-5 rounded-xl border border-ink-700/60 bg-ink-800/50 px-4 py-3">
         <div className="text-sm font-medium text-slate-200">
           {t("settings.theme.presets.title")}
         </div>
@@ -616,7 +809,7 @@ function ThemeSection() {
         {presetError && <p className="mt-2 text-xs text-red-300">{presetError}</p>}
       </div>
 
-      <div className="theme-settings-preview mb-4 overflow-hidden rounded-lg border border-ink-700/60">
+      <div className="theme-settings-preview mb-5 overflow-hidden rounded-xl border border-ink-700/60">
         <div className="theme-settings-preview-image" />
         <div className="theme-settings-preview-overlay" />
         <div className="relative flex h-full items-end justify-between p-3">
@@ -627,7 +820,7 @@ function ThemeSection() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <SettingsStack>
         <SettingRow
           label={t("settings.theme.background.color")}
           description={t("settings.theme.background.colorDescription")}
@@ -752,7 +945,7 @@ function ThemeSection() {
             <option value="system">{t("settings.theme.font.systemMono")}</option>
           </select>
         </SettingRow>
-      </div>
+      </SettingsStack>
 
       {imageError && <p className="mt-3 text-xs text-red-300">{imageError}</p>}
 
@@ -792,35 +985,49 @@ function ColorControl({
 
 function GeneralSection() {
   const showSeconds = useSettings((s) => s.settings.clockShowSeconds);
+  const commandLogEnabled = useSettings((s) => s.settings.commandLogEnabled);
   const language = useSettings((s) => s.settings.language);
   const set = useSettings((s) => s.set);
   const { t } = useI18n();
   return (
     <div>
       <SectionTitle>{t("settings.section.general")}</SectionTitle>
-      <SettingRow
-        label={t("settings.language.label")}
-        description={t("settings.language.description")}
-      >
-        <select
-          value={language}
-          onChange={(event) => set("language", event.target.value as AppLanguage)}
-          className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+      <SettingsStack>
+        <SettingRow
+          label={t("settings.language.label")}
+          description={t("settings.language.description")}
         >
-          <option value="system">{t("language.system")}</option>
-          <option value="ko">{t("language.ko")}</option>
-          <option value="en">{t("language.en")}</option>
-        </select>
-      </SettingRow>
-      <SettingRow
-        label={t("settings.clock.label")}
-        description={t("settings.clock.description")}
-      >
-        <Toggle
-          checked={showSeconds}
-          onChange={(v) => set("clockShowSeconds", v)}
-        />
-      </SettingRow>
+          <select
+            value={language}
+            onChange={(event) =>
+              set("language", event.target.value as AppLanguage)
+            }
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+          >
+            <option value="system">{t("language.system")}</option>
+            <option value="ko">{t("language.ko")}</option>
+            <option value="en">{t("language.en")}</option>
+          </select>
+        </SettingRow>
+        <SettingRow
+          label={t("settings.clock.label")}
+          description={t("settings.clock.description")}
+        >
+          <Toggle
+            checked={showSeconds}
+            onChange={(v) => set("clockShowSeconds", v)}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t("settings.commandLog.label")}
+          description={t("settings.commandLog.description")}
+        >
+          <Toggle
+            checked={commandLogEnabled}
+            onChange={(value) => set("commandLogEnabled", value)}
+          />
+        </SettingRow>
+      </SettingsStack>
     </div>
   );
 }
@@ -848,28 +1055,30 @@ function AboutSection() {
   return (
     <div>
       <SectionTitle>{t("settings.section.about")}</SectionTitle>
-      <div className="flex items-center gap-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-500/15 text-2xl">
-          🌐
-        </div>
-        <div>
-          <div className="text-base font-semibold text-slate-100">
-            sshland
+      <div className="rounded-xl border border-ink-700/60 bg-ink-800/50 p-4">
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-sky-500/20 bg-sky-500/10 text-2xl">
+            🌐
           </div>
-          <div className="text-sm text-slate-400">
-            {t("settings.about.version", { version: info?.version ?? "…" })}
+          <div>
+            <div className="text-base font-semibold text-slate-100">
+              sshland
+            </div>
+            <div className="text-sm text-slate-400">
+              {t("settings.about.version", { version: info?.version ?? "…" })}
+            </div>
           </div>
         </div>
+        <p className="mt-4 max-w-md text-sm leading-relaxed text-slate-400">
+          {t("settings.about.description")}
+        </p>
+        <dl className="mt-4 border-t border-ink-700/60 pt-3 text-sm text-slate-500">
+          <div className="flex gap-2">
+            <dt className="w-24 text-slate-600">Tauri</dt>
+            <dd>{info?.tauri ?? "…"}</dd>
+          </div>
+        </dl>
       </div>
-      <p className="mt-4 max-w-md text-sm leading-relaxed text-slate-400">
-        {t("settings.about.description")}
-      </p>
-      <dl className="mt-4 space-y-1 text-sm text-slate-500">
-        <div className="flex gap-2">
-          <dt className="w-24 text-slate-600">Tauri</dt>
-          <dd>{info?.tauri ?? "…"}</dd>
-        </div>
-      </dl>
     </div>
   );
 }
@@ -884,11 +1093,13 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-ink-700/60 bg-ink-800/50 px-4 py-3">
+    <div className="flex min-h-[68px] items-center justify-between gap-4 rounded-xl border border-ink-700/60 bg-ink-800/50 px-4 py-3">
       <div className="min-w-0">
         <div className="text-sm text-slate-200">{label}</div>
         {description && (
-          <div className="mt-0.5 text-xs text-slate-500">{description}</div>
+          <div className="mt-1 text-xs leading-relaxed text-slate-500">
+            {description}
+          </div>
         )}
       </div>
       {children}

@@ -6,8 +6,8 @@ import { useI18n } from "../i18n";
 
 /**
  * Thin one-line bar at the very bottom of the window (a separate layer below
- * the pane tiling). Shows the most recent file-manager operation as the CLI
- * command it maps to; clicking expands a popup upward with recent history.
+ * the pane tiling). Shows the most recent file-manager operation or recursive
+ * search as its CLI equivalent; clicking expands recent history upward.
  * Session-only — history resets on restart. The on/off setting comes later.
  */
 export default function CommandLogBar() {

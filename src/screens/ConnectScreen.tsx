@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { connect, forgetHostKey, isHostKeyError, type HostKeyError } from "../api";
 import { useAppStore } from "../store";
-import { useSettings } from "../lib/settings";
+import { getCachedSearchTools, useSettings } from "../lib/settings";
 import { useI18n } from "../i18n";
 import { HostKeyDialog } from "../components/Modal";
 
@@ -96,10 +96,18 @@ export default function ConnectScreen() {
         authKind,
         keyPath: authKind === "key" ? keyPath : "",
       });
-      enterFiles({
+      const server = {
         host: host.trim(),
+        port: Number(port),
         username: username.trim(),
+      };
+      enterFiles({
+        ...server,
         home: result.home,
+        searchTools: getCachedSearchTools(
+          useSettings.getState().settings.searchToolCache,
+          server,
+        ),
       });
     } catch (err) {
       if (isHostKeyError(err)) {

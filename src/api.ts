@@ -60,6 +60,19 @@ export interface FileEntry {
   permissions: string;
 }
 
+export type RemoteSearchEngine = "fd" | "find";
+
+export interface SearchToolCheck {
+  available: boolean;
+  /** `find`, `fd`, or Debian/Ubuntu's `fdfind`; null when unavailable. */
+  command: string | null;
+}
+
+export interface RemoteSearchResult {
+  entries: FileEntry[];
+  truncated: boolean;
+}
+
 /** Open an SSH/SFTP connection. Resolves with the home directory. */
 export function connect(params: ConnectParams): Promise<ConnectResult> {
   return invoke<ConnectResult>("connect", { params }).catch((error: unknown) => {
@@ -84,13 +97,43 @@ export function listDir(path: string): Promise<FileEntry[]> {
   return invokeCommand<FileEntry[]>("list_dir", { path });
 }
 
-/** Download a remote file to a local path (emits `transfer-progress`). */
+/** Check one optional search command when its settings option is clicked. */
+export function checkSearchTool(
+  engine: RemoteSearchEngine,
+): Promise<SearchToolCheck> {
+  return invokeCommand<SearchToolCheck>("check_search_tool", { engine });
+}
+
+/** Recursively search below one remote directory using `fd` or `find`. */
+export function searchFiles(
+  root: string,
+  query: string,
+  engine: RemoteSearchEngine,
+  includeHidden: boolean,
+): Promise<RemoteSearchResult> {
+  return invokeCommand<RemoteSearchResult>("search_files", {
+    root,
+    query,
+    engine,
+    includeHidden,
+  });
+}
+
+/** Download a remote file or folder to a local path (emits `transfer-progress`). */
 export function download(
   id: string,
   remotePath: string,
-  localPath: string
+  localPath: string,
+  isDir = false,
+  localName: string | null = null,
 ): Promise<void> {
-  return invokeCommand<void>("download", { id, remotePath, localPath });
+  return invokeCommand<void>("download", {
+    id,
+    remotePath,
+    localPath,
+    isDir,
+    localName,
+  });
 }
 
 export interface UploadResult {

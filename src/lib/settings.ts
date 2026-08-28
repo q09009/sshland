@@ -28,6 +28,108 @@ export type TerminalFontPreference =
   | "d2coding"
   | "consolas"
   | "system";
+export type FileSearchEngine = "filter" | "fd" | "find";
+
+export interface SearchToolStatus {
+  /** null means this server/user combination has not checked find yet. */
+  find: boolean | null;
+  /** The executable exposed by the server, or null when unavailable/unchecked. */
+  fdCommand: "fd" | "fdfind" | null;
+  fdChecked: boolean;
+}
+
+export interface SearchServerIdentity {
+  host: string;
+  port: number;
+  username: string;
+}
+
+export interface SearchToolCacheEntry
+  extends SearchServerIdentity,
+    SearchToolStatus {}
+
+const MAX_SEARCH_TOOL_CACHE_ENTRIES = 50;
+
+export function emptySearchToolStatus(): SearchToolStatus {
+  return { find: null, fdCommand: null, fdChecked: false };
+}
+
+function normalizeServerIdentity(
+  server: SearchServerIdentity,
+): SearchServerIdentity {
+  return {
+    host: server.host.trim().toLowerCase(),
+    port: server.port,
+    username: server.username.trim(),
+  };
+}
+
+function sameSearchServer(
+  left: SearchServerIdentity,
+  right: SearchServerIdentity,
+): boolean {
+  const normalizedLeft = normalizeServerIdentity(left);
+  const normalizedRight = normalizeServerIdentity(right);
+  return (
+    normalizedLeft.host === normalizedRight.host &&
+    normalizedLeft.port === normalizedRight.port &&
+    normalizedLeft.username === normalizedRight.username
+  );
+}
+
+/** Read a saved availability result for one host/port/user combination. */
+export function getCachedSearchTools(
+  cache: SearchToolCacheEntry[],
+  server: SearchServerIdentity,
+): SearchToolStatus {
+  const match = cache.find((entry) => sameSearchServer(entry, server));
+  return match
+    ? {
+        find: match.find,
+        fdCommand: match.fdCommand,
+        fdChecked: match.fdChecked,
+      }
+    : emptySearchToolStatus();
+}
+
+function normalizeSearchToolCache(value: unknown): SearchToolCacheEntry[] {
+  if (!Array.isArray(value)) return [];
+  const normalized: SearchToolCacheEntry[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const entry = raw as Partial<SearchToolCacheEntry>;
+    if (
+      typeof entry.host !== "string" ||
+      !entry.host.trim() ||
+      typeof entry.username !== "string" ||
+      !entry.username.trim() ||
+      !Number.isInteger(entry.port) ||
+      Number(entry.port) < 1 ||
+      Number(entry.port) > 65535
+    ) {
+      continue;
+    }
+    const identity = normalizeServerIdentity({
+      host: entry.host,
+      port: Number(entry.port),
+      username: entry.username,
+    });
+    if (normalized.some((saved) => sameSearchServer(saved, identity))) continue;
+    const fdChecked = entry.fdChecked === true;
+    const fdCommand =
+      fdChecked && (entry.fdCommand === "fd" || entry.fdCommand === "fdfind")
+        ? entry.fdCommand
+        : null;
+    normalized.push({
+      ...identity,
+      find: typeof entry.find === "boolean" ? entry.find : null,
+      fdCommand,
+      fdChecked,
+    });
+    if (normalized.length >= MAX_SEARCH_TOOL_CACHE_ENTRIES) break;
+  }
+  return normalized;
+}
 
 export interface ThemeSettings {
   /** Solid color painted below the optional background image. */
@@ -109,8 +211,12 @@ function normalizeTheme(value: Partial<ThemeSettings> | null | undefined): Theme
 export interface AppSettings {
   /** Interface language, or the current OS language when set to system. */
   language: AppLanguage;
-  /** Show the bottom command-log bar (file ops as CLI commands). */
+  /** Show the app-wide bottom activity log as terminal-style commands. */
   commandLogEnabled: boolean;
+  /** How file-manager search boxes find matching remote entries. */
+  fileSearchEngine: FileSearchEngine;
+  /** Remembered fd/find availability, scoped to host + port + SSH user. */
+  searchToolCache: SearchToolCacheEntry[];
   /** Render matching terminal command output as GUI widgets (off = raw only). */
   commandGuiEnabled: boolean;
   /** Show seconds (HH:MM:SS) in the status-bar clock. */
@@ -130,6 +236,8 @@ export interface AppSettings {
 const DEFAULTS: AppSettings = {
   language: "system",
   commandLogEnabled: true,
+  fileSearchEngine: "filter",
+  searchToolCache: [],
   commandGuiEnabled: true,
   clockShowSeconds: false,
   dashboardEnabled: true,
@@ -147,6 +255,13 @@ interface SettingsState {
   load: () => Promise<void>;
   /** Update one setting and persist the whole object. */
   set: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+  /** Save one fd/find check for the current server and persist it. */
+  saveSearchToolCheck: (
+    server: SearchServerIdentity,
+    engine: "fd" | "find",
+    available: boolean,
+    command: string | null,
+  ) => void;
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -170,10 +285,17 @@ export const useSettings = create<SettingsState>((setState, get) => ({
       const raw = await loadSettings();
       // Merge over defaults so missing/older keys fall back gracefully.
       const persisted = raw as Partial<AppSettings>;
+      const searchEngines: FileSearchEngine[] = ["filter", "fd", "find"];
       setState({
         settings: {
           ...DEFAULTS,
           ...persisted,
+          fileSearchEngine: searchEngines.includes(
+            persisted.fileSearchEngine as FileSearchEngine,
+          )
+            ? (persisted.fileSearchEngine as FileSearchEngine)
+            : DEFAULTS.fileSearchEngine,
+          searchToolCache: normalizeSearchToolCache(persisted.searchToolCache),
           theme: normalizeTheme(persisted.theme),
         },
       });
@@ -189,6 +311,33 @@ export const useSettings = create<SettingsState>((setState, get) => ({
     // Theme sliders/color pickers can emit many updates in a short burst. A
     // tiny debounce keeps only the newest complete JSON blob and avoids older
     // writes racing with newer ones.
+    scheduleSave(next);
+  },
+  saveSearchToolCheck: (server, engine, available, command) => {
+    const settings = get().settings;
+    const current = getCachedSearchTools(settings.searchToolCache, server);
+    const identity = normalizeServerIdentity(server);
+    const updated: SearchToolCacheEntry = {
+      ...identity,
+      ...current,
+      ...(engine === "find"
+        ? { find: available }
+        : {
+            fdChecked: true,
+            fdCommand:
+              available && (command === "fd" || command === "fdfind")
+                ? command
+                : null,
+          }),
+    };
+    const searchToolCache = [
+      updated,
+      ...settings.searchToolCache.filter(
+        (entry) => !sameSearchServer(entry, identity),
+      ),
+    ].slice(0, MAX_SEARCH_TOOL_CACHE_ENTRIES);
+    const next = { ...settings, searchToolCache };
+    setState({ settings: next });
     scheduleSave(next);
   },
 }));

@@ -38,6 +38,11 @@ const TERM_BUF: usize = 32 * 1024;
 /// huge file can't exhaust memory or bog down CodeMirror; the frontend catches
 /// this earlier via the listing size and offers a download instead.
 const MAX_EDIT_SIZE: u64 = 5 * 1024 * 1024;
+/// Bound recursive search results so broad queries cannot flood the UI or make
+/// hundreds of unbounded follow-up SFTP metadata requests.
+const MAX_SEARCH_RESULTS: usize = 500;
+const MAX_SEARCH_QUERY_CHARS: usize = 256;
+const MAX_SEARCH_PATH_BYTES: usize = 64 * 1024;
 
 /// How the user proves their identity to the server.
 ///
@@ -72,6 +77,30 @@ pub struct ConnectParams {
 pub struct ConnectResult {
     /// Absolute path of the user's starting (home) directory.
     pub home: String,
+}
+
+/// Result of checking one optional server-side file-search command.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchToolCheck {
+    pub available: bool,
+    /// The executable name that will be used (`find`, `fd`, or `fdfind`).
+    pub command: Option<String>,
+}
+
+#[derive(Copy, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchEngine {
+    Find,
+    Fd,
+}
+
+/// One bounded page of recursive search results.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub entries: Vec<FileEntry>,
+    pub truncated: bool,
 }
 
 /// Structured connection failures let the frontend distinguish a host-key
@@ -196,11 +225,20 @@ pub enum Req {
         path: String,
         resp: oneshot::Sender<Result<Vec<FileEntry>, String>>,
     },
-    /// Download a remote file to a local path, emitting progress events.
+    /// Recursively search below a remote directory using `find` or `fd`.
+    Search {
+        root: String,
+        query: String,
+        engine: SearchEngine,
+        include_hidden: bool,
+        resp: oneshot::Sender<Result<SearchResult, String>>,
+    },
+    /// Download a remote file or folder to a local path, emitting progress events.
     Download {
         id: String,
         remote_path: String,
-        local_path: String,
+        local_path: PathBuf,
+        is_dir: bool,
         resp: oneshot::Sender<Result<(), String>>,
     },
     /// Upload a local file or folder to a remote path, emitting progress events.
@@ -298,6 +336,10 @@ fn reply_err(req: Req, msg: String) -> bool {
             true
         }
         Req::ListDir { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::Search { resp, .. } => {
             let _ = resp.send(Err(msg));
             true
         }
@@ -707,24 +749,134 @@ fn read_dir_entries(sftp: &Sftp, path: &str) -> Result<Vec<FileEntry>, String> {
     Ok(entries)
 }
 
-/// Stream a remote file to disk, emitting throttled progress events.
-fn download_file(
+enum DownloadPlanEntry {
+    Directory {
+        local_path: PathBuf,
+    },
+    File {
+        remote_path: String,
+        local_path: PathBuf,
+    },
+}
+
+struct DownloadPlan {
+    entries: Vec<DownloadPlanEntry>,
+    total_bytes: u64,
+}
+
+/// Map one Unix remote filename to one local child without allowing a remote
+/// name such as `..` or a Windows-looking path to escape the chosen folder.
+fn safe_local_child(base: &Path, name: &str) -> Result<PathBuf, String> {
+    let relative = Path::new(name);
+    let mut components = relative.components();
+    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+        || components.next().is_some()
+    {
+        return Err(error::with_detail("errors.downloadName", name));
+    }
+    Ok(base.join(relative))
+}
+
+/// Inspect the complete remote tree before creating local files. This gives a
+/// folder one aggregate progress total and catches unreadable children early.
+fn build_download_plan(
+    sftp: &Sftp,
+    remote: &str,
+    local: &Path,
+    is_dir: bool,
+) -> Result<DownloadPlan, String> {
+    let mut entries = Vec::new();
+    let mut total_bytes = 0;
+
+    if is_dir {
+        append_download_directory(sftp, remote, local, &mut entries, &mut total_bytes)?;
+    } else {
+        let size = sftp
+            .stat(Path::new(remote))
+            .map_err(|_| error::sftp_error("fileDownload"))?
+            .size
+            .unwrap_or(0);
+        total_bytes = size;
+        entries.push(DownloadPlanEntry::File {
+            remote_path: remote.to_string(),
+            local_path: local.to_path_buf(),
+        });
+    }
+
+    Ok(DownloadPlan {
+        entries,
+        total_bytes,
+    })
+}
+
+fn append_download_directory(
+    sftp: &Sftp,
+    remote: &str,
+    local: &Path,
+    entries: &mut Vec<DownloadPlanEntry>,
+    total_bytes: &mut u64,
+) -> Result<(), String> {
+    entries.push(DownloadPlanEntry::Directory {
+        local_path: local.to_path_buf(),
+    });
+    let mut children = read_dir_entries(sftp, remote)?;
+    children.sort_by(|left, right| left.name.cmp(&right.name));
+
+    for child in children {
+        let local_child = safe_local_child(local, &child.name)?;
+        // Recreating remote symlinks portably would require elevated local
+        // privileges on some platforms, while following them could escape the
+        // selected tree or create cycles. Fail during the planning pass before
+        // any local file is created.
+        if child.is_symlink {
+            return Err(error::with_detail("errors.downloadSymlink", child.path));
+        }
+        if child.is_dir {
+            append_download_directory(sftp, &child.path, &local_child, entries, total_bytes)?;
+        } else {
+            *total_bytes = total_bytes
+                .checked_add(child.size)
+                .ok_or_else(|| error::code("errors.downloadTooLarge"))?;
+            entries.push(DownloadPlanEntry::File {
+                remote_path: child.path,
+                local_path: local_child,
+            });
+        }
+    }
+    Ok(())
+}
+
+struct DownloadProgress {
+    transferred: u64,
+    total: u64,
+    last_emit: Instant,
+}
+
+impl DownloadProgress {
+    fn emit(&mut self, app: &AppHandle, id: &str, force: bool) {
+        if force || self.last_emit.elapsed() >= Duration::from_millis(100) {
+            emit_progress(app, id, self.transferred, self.total);
+            self.last_emit = Instant::now();
+        }
+    }
+}
+
+/// Stream one planned remote file to disk, contributing to the aggregate
+/// progress shared by the selected top-level file or folder.
+fn download_planned_file(
     sftp: &Sftp,
     app: &AppHandle,
     id: &str,
     remote: &str,
-    local: &str,
+    local: &Path,
+    progress: &mut DownloadProgress,
 ) -> Result<(), String> {
     let mut remote_file = sftp
         .open(Path::new(remote))
         .map_err(|_| error::sftp_error("fileDownload"))?;
-    let total = remote_file.stat().ok().and_then(|s| s.size).unwrap_or(0);
-
     let mut local_file = File::create(local).map_err(|_| error::code("errors.localFileCreate"))?;
 
     let mut buf = [0u8; 32 * 1024];
-    let mut transferred = 0u64;
-    let mut last_emit = Instant::now();
 
     loop {
         let n = remote_file
@@ -736,16 +888,45 @@ fn download_file(
         local_file
             .write_all(&buf[..n])
             .map_err(|_| error::code("errors.localFileWrite"))?;
-        transferred += n as u64;
+        progress.transferred += n as u64;
+        progress.emit(app, id, false);
+    }
+    Ok(())
+}
 
-        // Throttle progress events to ~10/sec.
-        if last_emit.elapsed() >= Duration::from_millis(100) {
-            emit_progress(app, id, transferred, total);
-            last_emit = Instant::now();
+fn download_path(
+    sftp: &Sftp,
+    app: &AppHandle,
+    id: &str,
+    remote: &str,
+    local: &Path,
+    is_dir: bool,
+) -> Result<(), String> {
+    let plan = build_download_plan(sftp, remote, local, is_dir)?;
+    let mut progress = DownloadProgress {
+        transferred: 0,
+        total: plan.total_bytes,
+        last_emit: Instant::now(),
+    };
+    progress.emit(app, id, true);
+
+    for entry in plan.entries {
+        let result = match entry {
+            DownloadPlanEntry::Directory { local_path } => {
+                fs::create_dir_all(local_path).map_err(|_| error::code("errors.localFolderCreate"))
+            }
+            DownloadPlanEntry::File {
+                remote_path,
+                local_path,
+            } => download_planned_file(sftp, app, id, &remote_path, &local_path, &mut progress),
+        };
+        if let Err(message) = result {
+            progress.emit(app, id, true);
+            return Err(message);
         }
     }
-    // Final 100% update.
-    emit_progress(app, id, transferred, total);
+
+    progress.emit(app, id, true);
     Ok(())
 }
 
@@ -1107,9 +1288,236 @@ fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+/// Return true when `dst` is `src` itself or is nested below it.
+/// This avoids commands such as `cp -r /a /a/b`, which can recursively copy a
+/// directory into itself until the disk fills. Paths from SFTP are Unix paths.
+fn is_same_or_descendant(src: &str, dst: &str) -> bool {
+    let normalized_src = if src == "/" {
+        "/"
+    } else {
+        src.trim_end_matches('/')
+    };
+    let normalized_dst = if dst == "/" {
+        "/"
+    } else {
+        dst.trim_end_matches('/')
+    };
+
+    normalized_dst == normalized_src
+        || (normalized_src == "/" && normalized_dst.starts_with('/'))
+        || normalized_dst
+            .strip_prefix(normalized_src)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+impl SearchEngine {
+    fn command_name(self) -> &'static str {
+        match self {
+            Self::Find => "find",
+            Self::Fd => "fd",
+        }
+    }
+
+    fn availability_probe(self) -> &'static str {
+        match self {
+            Self::Find => {
+                "if command -v find >/dev/null 2>&1; then printf 'find\\n'; fi"
+            }
+            Self::Fd => "if command -v fd >/dev/null 2>&1; then printf 'fd\\n'; elif command -v fdfind >/dev/null 2>&1; then printf 'fdfind\\n'; fi",
+        }
+    }
+}
+
+fn parse_search_tool_check(engine: SearchEngine, output: &str) -> SearchToolCheck {
+    let command = output.lines().find_map(|line| match (engine, line.trim()) {
+        (SearchEngine::Find, "find") => Some("find".to_string()),
+        (SearchEngine::Fd, "fd") => Some("fd".to_string()),
+        (SearchEngine::Fd, "fdfind") => Some("fdfind".to_string()),
+        _ => None,
+    });
+    SearchToolCheck {
+        available: command.is_some(),
+        command,
+    }
+}
+
+/// Escape characters that `find -iname` treats specially so the UI always
+/// performs a literal filename-substring search, not an accidental glob.
+fn escape_find_pattern(query: &str) -> String {
+    let mut escaped = String::with_capacity(query.len());
+    for character in query.chars() {
+        if matches!(character, '\\' | '*' | '?' | '[') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
+fn build_search_command(
+    root: &str,
+    query: &str,
+    engine: SearchEngine,
+    include_hidden: bool,
+) -> String {
+    let root = shell_quote(root);
+    match engine {
+        SearchEngine::Find => {
+            let pattern = shell_quote(&format!("*{}*", escape_find_pattern(query)));
+            let find = if include_hidden {
+                format!("find {root} -mindepth 1 -iname {pattern} -print0")
+            } else {
+                format!(
+                    "find {root} -mindepth 1 \\( -name '.*' -prune \\) -o \\( -iname {pattern} -print0 \\)"
+                )
+            };
+            format!(
+                "if command -v find >/dev/null 2>&1; then {find}; else exit 127; fi 2>/dev/null"
+            )
+        }
+        SearchEngine::Fd => {
+            let hidden = if include_hidden { " --hidden" } else { "" };
+            let args = format!(
+                "--color never --absolute-path --print0 --fixed-strings --ignore-case --no-ignore --max-results 501{hidden} -- {} {root}",
+                shell_quote(query)
+            );
+            format!(
+                "if command -v fd >/dev/null 2>&1; then fd {args}; elif command -v fdfind >/dev/null 2>&1; then fdfind {args}; else exit 127; fi 2>/dev/null"
+            )
+        }
+    }
+}
+
+/// Execute a NUL-delimited path search and stop reading after one result past
+/// the UI limit. NUL framing keeps newlines and other legal filename bytes from
+/// being reinterpreted as injected paths.
+fn exec_search_paths(
+    session: &Session,
+    command: &str,
+    engine: SearchEngine,
+) -> Result<(Vec<String>, bool), String> {
+    let mut channel = session
+        .channel_session()
+        .map_err(|_| error::code("errors.searchFailed"))?;
+    channel
+        .exec(command)
+        .map_err(|_| error::code("errors.searchFailed"))?;
+
+    let mut paths = Vec::new();
+    let mut pending = Vec::new();
+    let mut buffer = [0u8; 32 * 1024];
+    let mut truncated = false;
+
+    'read: loop {
+        let count = channel
+            .read(&mut buffer)
+            .map_err(|_| error::code("errors.searchFailed"))?;
+        if count == 0 {
+            break;
+        }
+        pending.extend_from_slice(&buffer[..count]);
+
+        let mut consumed = 0;
+        while let Some(end) = pending[consumed..].iter().position(|byte| *byte == 0) {
+            let end = consumed + end;
+            if end > consumed {
+                paths.push(String::from_utf8_lossy(&pending[consumed..end]).into_owned());
+                if paths.len() > MAX_SEARCH_RESULTS {
+                    paths.pop();
+                    truncated = true;
+                    let _ = channel.close();
+                    break 'read;
+                }
+            }
+            consumed = end + 1;
+        }
+        if consumed > 0 {
+            pending.drain(..consumed);
+        }
+        if pending.len() > MAX_SEARCH_PATH_BYTES {
+            let _ = channel.close();
+            return Err(error::code("errors.searchFailed"));
+        }
+    }
+
+    if truncated {
+        return Ok((paths, true));
+    }
+
+    let mut stderr = Vec::new();
+    let _ = channel.stderr().read_to_end(&mut stderr);
+    let _ = channel.wait_close();
+    match channel.exit_status() {
+        Ok(0) => Ok((paths, false)),
+        Ok(127) => Err(error::with_detail(
+            "errors.searchToolUnavailable",
+            engine.command_name(),
+        )),
+        _ if !paths.is_empty() => Ok((paths, false)),
+        _ => Err(error::code("errors.searchFailed")),
+    }
+}
+
+fn unix_file_name(path: &str) -> Option<&str> {
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+}
+
+fn search_remote(
+    session: &Session,
+    sftp: &Sftp,
+    root: &str,
+    query: &str,
+    engine: SearchEngine,
+    include_hidden: bool,
+) -> Result<SearchResult, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err(error::code("errors.searchQueryEmpty"));
+    }
+    if query.chars().count() > MAX_SEARCH_QUERY_CHARS {
+        return Err(error::code("errors.searchQueryTooLong"));
+    }
+
+    let command = build_search_command(root, query, engine, include_hidden);
+    let (paths, truncated) = exec_search_paths(session, &command, engine)?;
+    let mut entries = Vec::with_capacity(paths.len());
+
+    for path in paths {
+        // The command is fixed and both arguments are quoted, but keep the
+        // SFTP metadata pass inside the requested root as a second boundary.
+        if path == root || !is_same_or_descendant(root, &path) {
+            continue;
+        }
+        let Some(name) = unix_file_name(&path) else {
+            continue;
+        };
+        let Ok(stat) = sftp.lstat(Path::new(&path)) else {
+            continue;
+        };
+        let permissions = stat.perm.unwrap_or(0);
+        entries.push(FileEntry {
+            name: name.to_string(),
+            path,
+            size: stat.size.unwrap_or(0),
+            is_dir: stat.is_dir(),
+            is_symlink: (permissions & 0o170000) == 0o120000,
+            modified: stat.mtime,
+            permissions: format_permissions(permissions),
+        });
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(SearchResult { entries, truncated })
+}
+
 /// Copy a file or directory on the server using `cp -r` over an exec channel.
 /// The copy happens entirely server-side (no data round-trips through us).
 fn exec_copy(session: &Session, src: &str, dst: &str) -> Result<(), String> {
+    if is_same_or_descendant(src, dst) {
+        return Err(error::code("errors.copyIntoSelf"));
+    }
     let mut channel = session
         .channel_session()
         .map_err(|_| error::sftp_error("copy"))?;
@@ -1219,13 +1627,32 @@ fn handle_req(
             read_dir_entries(sftp, &path),
             resp,
         ),
+        Req::Search {
+            root,
+            query,
+            engine,
+            include_hidden,
+            resp,
+        } => {
+            let result = search_remote(session, sftp, &root, &query, engine, include_hidden);
+            send_and_check(
+                sftp,
+                app,
+                "search",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
+        }
         Req::Download {
             id,
             remote_path,
             local_path,
+            is_dir,
             resp,
         } => {
-            let result = download_file(sftp, app, &id, &remote_path, &local_path);
+            let result = download_path(sftp, app, &id, &remote_path, &local_path, is_dir);
             send_and_check(
                 sftp,
                 app,
@@ -1916,19 +2343,66 @@ pub async fn list_dir(
     resp_rx.await.map_err(|_| error::disconnected_error())?
 }
 
-/// Download a remote file to a chosen local path.
+/// Check one optional recursive-search command when its settings option is
+/// clicked. Keeping this out of connection setup avoids an unnecessary shell
+/// round-trip for users who only need the built-in current-folder filter.
+#[tauri::command]
+pub async fn check_search_tool(
+    state: State<'_, SessionManager>,
+    engine: SearchEngine,
+) -> Result<SearchToolCheck, String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::RunOnce {
+        command: engine.availability_probe().to_string(),
+        resp: resp_tx,
+    })?;
+    let output = resp_rx.await.map_err(|_| error::disconnected_error())??;
+    Ok(parse_search_tool_check(engine, &output))
+}
+
+/// Recursively search below `root` using a server-side search command.
+#[tauri::command]
+pub async fn search_files(
+    state: State<'_, SessionManager>,
+    root: String,
+    query: String,
+    engine: SearchEngine,
+    include_hidden: bool,
+) -> Result<SearchResult, String> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::Search {
+        root,
+        query,
+        engine,
+        include_hidden,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
+/// Download a remote file or folder to a chosen local path.
 #[tauri::command]
 pub async fn download(
     state: State<'_, SessionManager>,
     id: String,
     remote_path: String,
     local_path: String,
+    is_dir: bool,
+    local_name: Option<String>,
 ) -> Result<(), String> {
+    // A native save dialog supplies a complete trusted local path. Batch and
+    // folder downloads instead supply a chosen directory plus an untrusted
+    // remote name, which must be joined here with platform-aware validation.
+    let local_path = match local_name {
+        Some(name) => safe_local_child(Path::new(&local_path), &name)?,
+        None => PathBuf::from(local_path),
+    };
     let (resp_tx, resp_rx) = oneshot::channel();
     state.send(Req::Download {
         id,
         remote_path,
         local_path,
+        is_dir,
         resp: resp_tx,
     })?;
     resp_rx.await.map_err(|_| error::disconnected_error())?
@@ -2223,6 +2697,23 @@ mod tests {
     }
 
     #[test]
+    fn downloaded_child_names_cannot_escape_the_destination() {
+        let base = Path::new("download-root");
+        assert_eq!(
+            safe_local_child(base, "notes.txt").expect("plain filename"),
+            base.join("notes.txt")
+        );
+        assert!(safe_local_child(base, "..").is_err());
+        assert!(safe_local_child(base, "nested/file.txt").is_err());
+
+        #[cfg(target_os = "windows")]
+        {
+            assert!(safe_local_child(base, r"nested\file.txt").is_err());
+            assert!(safe_local_child(base, r"C:\outside.txt").is_err());
+        }
+    }
+
+    #[test]
     fn utf8_text_decodes_as_utf8() {
         let fc = decode_text("안녕하세요 hello".as_bytes()).expect("utf-8 text");
         assert_eq!(fc.content, "안녕하세요 hello");
@@ -2449,5 +2940,68 @@ mod tests {
             Ok(_) => panic!("a changed host key must not authenticate"),
         }
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn copy_destination_cannot_be_the_source_or_its_descendant() {
+        assert!(is_same_or_descendant("/home/me/folder", "/home/me/folder"));
+        assert!(is_same_or_descendant(
+            "/home/me/folder/",
+            "/home/me/folder/nested/copy"
+        ));
+        assert!(!is_same_or_descendant(
+            "/home/me/folder",
+            "/home/me/folder-copy"
+        ));
+        assert!(!is_same_or_descendant(
+            "/home/me/folder",
+            "/home/other/folder"
+        ));
+        assert!(is_same_or_descendant("/", "/home/me/folder"));
+    }
+
+    #[test]
+    fn search_tool_probe_parser_accepts_only_the_requested_engine() {
+        let fd = parse_search_tool_check(SearchEngine::Fd, "find\nfdfind\nunknown\n");
+        assert!(fd.available);
+        assert_eq!(fd.command.as_deref(), Some("fdfind"));
+
+        let find = parse_search_tool_check(SearchEngine::Find, "fd\n");
+        assert!(!find.available);
+        assert_eq!(find.command, None);
+
+        let json = serde_json::to_value(fd).expect("search tool result should serialize");
+        assert_eq!(json["available"], true);
+        assert_eq!(json["command"], "fdfind");
+    }
+
+    #[test]
+    fn search_commands_use_literal_nul_delimited_results() {
+        assert_eq!(
+            escape_find_pattern(r"report*[draft]?\2026"),
+            r"report\*\[draft]\?\\2026"
+        );
+
+        let find = build_search_command(
+            "/srv/shared files",
+            "quarterly report",
+            SearchEngine::Find,
+            false,
+        );
+        assert!(find.contains("find '/srv/shared files'"));
+        assert!(find.contains("-name '.*' -prune"));
+        assert!(find.contains("-print0"));
+
+        let fd = build_search_command(
+            "/srv/shared files",
+            "quarterly report",
+            SearchEngine::Fd,
+            true,
+        );
+        assert!(fd.contains("--fixed-strings"));
+        assert!(fd.contains("--print0"));
+        assert!(fd.contains("--max-results 501"));
+        assert!(fd.contains("--hidden"));
+        assert!(fd.contains("fdfind"));
     }
 }

@@ -1,9 +1,8 @@
 /**
  * Turns a file-manager operation into the CLI command a user would have typed
- * in a real terminal. This is for DISPLAY / LEARNING only — the app performs
- * the operation over SFTP, never by running these strings. Keeping the
- * conversion here (pure, reusable) means the log bar and anything else can
- * render the same friendly command text.
+ * in a real terminal. This is for DISPLAY / LEARNING only: even where SSHland
+ * runs an equivalent fixed search command, this formatted string itself is
+ * never executed. Keeping conversion here makes every log use the same text.
  */
 
 /** The remote side of an scp command (`user@host`). */
@@ -15,14 +14,21 @@ export interface RemoteTarget {
 /** A file-manager operation, in terms the command formatter understands. */
 export type FileOperation =
   | { type: "upload"; localPath: string; remoteDir: string; isDir: boolean }
-  | { type: "download"; remotePath: string }
+  | { type: "download"; remotePath: string; isDir?: boolean }
   | { type: "delete"; path: string; isDir: boolean }
   | { type: "mkdir"; path: string }
   | { type: "newfile"; path: string }
   | { type: "move"; from: string; to: string }
   | { type: "copy"; from: string; to: string }
   | { type: "save"; path: string }
-  | { type: "kill"; pid: string; force: boolean };
+  | { type: "kill"; pid: string; force: boolean }
+  | {
+      type: "search";
+      root: string;
+      query: string;
+      engine: "find" | "fd" | "fdfind";
+      includeHidden: boolean;
+    };
 
 /** Last path segment, handling both `/` and `\` separators. */
 function baseName(p: string): string {
@@ -44,6 +50,23 @@ function withTrailingSlash(p: string): string {
   return p.endsWith("/") ? p : `${p}/`;
 }
 
+/** Quote find glob metacharacters so its displayed pattern stays literal. */
+function findLiteralPattern(query: string): string {
+  let escaped = "";
+  for (const character of query) {
+    if (
+      character === "\\" ||
+      character === "*" ||
+      character === "?" ||
+      character === "["
+    ) {
+      escaped += "\\";
+    }
+    escaped += character;
+  }
+  return `*${escaped}*`;
+}
+
 /** Format a single operation as its equivalent terminal command. */
 export function operationToCommandString(
   op: FileOperation,
@@ -57,7 +80,7 @@ export function operationToCommandString(
         "./" + baseName(op.localPath)
       )} ${host}:${shellArg(withTrailingSlash(op.remoteDir))}`;
     case "download":
-      return `scp ${host}:${shellArg(op.remotePath)} ./`;
+      return `scp ${op.isDir ? "-r " : ""}${host}:${shellArg(op.remotePath)} ./`;
     case "delete":
       return `rm ${op.isDir ? "-r " : ""}${shellArg(op.path)}`;
     case "mkdir":
@@ -76,5 +99,16 @@ export function operationToCommandString(
       // A real, working command (unlike `save`): the dashboard process manager
       // runs exactly this over a one-shot exec.
       return `kill ${op.force ? "-9 " : ""}${op.pid}`;
+    case "search": {
+      if (op.engine === "find") {
+        const prefix = `find ${shellArg(op.root)} -mindepth 1`;
+        const pattern = shellArg(findLiteralPattern(op.query));
+        return op.includeHidden
+          ? `${prefix} -iname ${pattern}`
+          : `${prefix} \\( -name '.*' -prune \\) -o \\( -iname ${pattern} -print \\)`;
+      }
+      const hidden = op.includeHidden ? " --hidden" : "";
+      return `${op.engine} --fixed-strings --ignore-case --no-ignore${hidden} -- ${shellArg(op.query)} ${shellArg(op.root)}`;
+    }
   }
 }

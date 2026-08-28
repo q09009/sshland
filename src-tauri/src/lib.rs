@@ -51,6 +51,8 @@ pub fn run() {
             ssh::connect,
             ssh::forget_host_key,
             ssh::list_dir,
+            ssh::check_search_tool,
+            ssh::search_files,
             ssh::download,
             ssh::upload,
             ssh::rename,
