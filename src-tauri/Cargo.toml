@@ -36,5 +36,5 @@ chardetng = "0.1"
 [target.'cfg(windows)'.dependencies]
 # Access the existing WebView2 settings used by Tauri so browser-only
 # accelerators do not steal terminal shortcuts such as Ctrl+Shift+C.
-webview2-com = "0.38"
+webview2-com = "0.39"
 windows-core = "0.61"
