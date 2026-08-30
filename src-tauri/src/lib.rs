@@ -2,6 +2,7 @@ mod commands_config;
 mod dashboard_config;
 mod diagnostics;
 mod error;
+mod local_fs;
 mod macros;
 mod settings;
 mod ssh;
@@ -70,6 +71,13 @@ pub fn run() {
             ssh::resize_terminal,
             ssh::close_terminal,
             ssh::disconnect,
+            local_fs::local_fs_info,
+            local_fs::local_list_dir,
+            local_fs::local_rename,
+            local_fs::local_mkdir,
+            local_fs::local_create_file,
+            local_fs::local_delete,
+            local_fs::local_copy,
             settings::load_settings,
             settings::save_settings,
             theme::import_theme_background,

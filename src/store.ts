@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { SearchToolStatus } from "./lib/settings";
+import type { FileSystemScope } from "./lib/fileSystem";
 import {
   collectRects,
   Direction,
@@ -59,8 +60,17 @@ export type Screen = "connect" | "files";
 /** A file/folder being dragged for an in-app move. */
 export interface DragItem {
   items: Array<{ name: string; path: string; isDir: boolean }>;
+  /** Whether the dragged entries live on this computer or the SSH server. */
+  scope: FileSystemScope;
   /** Directory the item is being dragged from. */
   sourceDir: string;
+}
+
+export interface ClipboardItem {
+  name: string;
+  path: string;
+  isDir: boolean;
+  scope: FileSystemScope;
 }
 
 /** File-listing layout: compact list, detailed table, or large icons. */
@@ -119,8 +129,8 @@ interface AppState {
   // locally in each FilesScreen so multiple file-manager panes are independent.
 
   /** Copied files/folders, shared across panes for paste. */
-  clipboard: Array<{ name: string; path: string; isDir: boolean }> | null;
-  setClipboard: (items: Array<{ name: string; path: string; isDir: boolean }>) => void;
+  clipboard: ClipboardItem[] | null;
+  setClipboard: (items: ClipboardItem[]) => void;
 
   /** The file/folder currently being dragged between panes (move), if any. */
   dragItem: DragItem | null;

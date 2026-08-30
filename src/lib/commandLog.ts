@@ -13,8 +13,14 @@ export interface RemoteTarget {
 
 /** A file-manager operation, in terms the command formatter understands. */
 export type FileOperation =
-  | { type: "upload"; localPath: string; remoteDir: string; isDir: boolean }
-  | { type: "download"; remotePath: string; isDir?: boolean }
+  | {
+      type: "upload";
+      localPath: string;
+      remoteDir: string;
+      remotePath?: string;
+      isDir: boolean;
+    }
+  | { type: "download"; remotePath: string; localName?: string; isDir?: boolean }
   | { type: "delete"; path: string; isDir: boolean }
   | { type: "mkdir"; path: string }
   | { type: "newfile"; path: string }
@@ -78,9 +84,11 @@ export function operationToCommandString(
     case "upload":
       return `scp ${op.isDir ? "-r " : ""}${shellArg(
         "./" + baseName(op.localPath)
-      )} ${host}:${shellArg(withTrailingSlash(op.remoteDir))}`;
+      )} ${host}:${shellArg(op.remotePath ?? withTrailingSlash(op.remoteDir))}`;
     case "download":
-      return `scp ${op.isDir ? "-r " : ""}${host}:${shellArg(op.remotePath)} ./`;
+      return `scp ${op.isDir ? "-r " : ""}${host}:${shellArg(op.remotePath)} ${
+        op.localName ? shellArg(`./${op.localName}`) : "./"
+      }`;
     case "delete":
       return `rm ${op.isDir ? "-r " : ""}${shellArg(op.path)}`;
     case "mkdir":

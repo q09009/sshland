@@ -2,22 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
-  copyPath,
-  createFile,
-  deletePath,
   disconnect,
   download,
   FileEntry,
-  listDir,
-  mkdir,
-  rename,
+  localFsInfo,
   searchFiles,
   upload,
   type RemoteSearchEngine,
 } from "../api";
 import { useAppStore, ViewMode } from "../store";
-import { baseName, breadcrumbs, joinPath, parentPath } from "../lib/path";
+import { baseName } from "../lib/path";
 import { sortEntries } from "../lib/files";
+import { fileSystemFor, type FileSystemScope } from "../lib/fileSystem";
 import { isProbablyBinary, MAX_EDITABLE_SIZE } from "../lib/editable";
 import { FileOperation, operationToCommandString } from "../lib/commandLog";
 import { ConfirmDialog, PromptDialog } from "../components/Modal";
@@ -29,9 +25,13 @@ import { useI18n } from "../i18n";
 import { useSettings } from "../lib/settings";
 import { resolveFileSearchEngine } from "../lib/fileSearch";
 
+function isValidEntryName(name: string): boolean {
+  return name !== "." && name !== ".." && !/[\\/\0]/.test(name);
+}
+
 /**
  * One file-manager pane. All directory state (path, listing, view mode) is
- * LOCAL so multiple file-manager panes navigate independently.
+ * component-local so multiple file-manager panes navigate independently.
  */
 export default function FilesScreen({ id }: { id: string }) {
   const connection = useAppStore((s) => s.connection);
@@ -53,6 +53,9 @@ export default function FilesScreen({ id }: { id: string }) {
   const tRef = useRef(t);
   tRef.current = t;
 
+  const [scope, setScope] = useState<FileSystemScope>("remote");
+  const [localHome, setLocalHome] = useState<string | null>(null);
+  const [localRoots, setLocalRoots] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState(connection?.home ?? "/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,6 +103,11 @@ export default function FilesScreen({ id }: { id: string }) {
   const reqIdRef = useRef(0);
   const searchReqIdRef = useRef(0);
   const currentPathRef = useRef(currentPath);
+  const scopeRef = useRef<FileSystemScope>(scope);
+  const lastPathRef = useRef<Record<FileSystemScope, string | null>>({
+    remote: connection?.home ?? "/",
+    local: null,
+  });
   const rootRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -109,19 +117,31 @@ export default function FilesScreen({ id }: { id: string }) {
   const didLoadInitialRef = useRef(false);
   useEffect(() => {
     currentPathRef.current = currentPath;
+    lastPathRef.current[scopeRef.current] = currentPath;
   }, [currentPath]);
+  useEffect(() => {
+    scopeRef.current = scope;
+  }, [scope]);
 
-  const effectiveSearchEngine = resolveFileSearchEngine(
-    preferredSearchEngine,
-    connection?.searchTools ?? {
-      find: null,
-      fdCommand: null,
-      fdChecked: false,
-    },
-  );
+  const effectiveSearchEngine =
+    scope === "local"
+      ? "filter"
+      : resolveFileSearchEngine(
+          preferredSearchEngine,
+          connection?.searchTools ?? {
+            find: null,
+            fdCommand: null,
+            fdChecked: false,
+          },
+        );
 
-  const loadDir = useCallback(async (path: string) => {
+  const loadDir = useCallback(async (
+    path: string,
+    targetScope: FileSystemScope = scopeRef.current,
+  ) => {
     const reqId = ++reqIdRef.current;
+    scopeRef.current = targetScope;
+    setScope(targetScope);
     setCurrentPath(path);
     setSelectedPaths(new Set());
     setSelectionAnchor(null);
@@ -135,7 +155,7 @@ export default function FilesScreen({ id }: { id: string }) {
     setLoading(true);
     setError(null);
     try {
-      const list = await listDir(path);
+      const list = await fileSystemFor(targetScope).list(path);
       if (reqIdRef.current === reqId) {
         setEntries(sortEntries(list));
         setLoading(false);
@@ -151,7 +171,7 @@ export default function FilesScreen({ id }: { id: string }) {
   // Refresh the current directory without a loading flicker (keeps selection).
   const reloadSilently = useCallback(() => {
     const reqId = ++reqIdRef.current;
-    listDir(currentPathRef.current)
+    fileSystemFor(scopeRef.current).list(currentPathRef.current)
       .then((list) => {
         if (reqIdRef.current === reqId) {
           const sorted = sortEntries(list);
@@ -164,6 +184,29 @@ export default function FilesScreen({ id }: { id: string }) {
       })
       .catch(() => {});
   }, []);
+
+  const switchScope = useCallback(async (next: FileSystemScope) => {
+    if (next === scopeRef.current) return;
+    if (next === "remote") {
+      await loadDir(lastPathRef.current.remote ?? connection?.home ?? "/", "remote");
+      return;
+    }
+    let home = localHome;
+    if (!home) {
+      try {
+        const info = await localFsInfo();
+        home = info.home;
+        setLocalHome(info.home);
+        setLocalRoots(info.roots);
+      } catch (failure) {
+        setOpError(
+          typeof failure === "string" ? failure : tRef.current("files.error.load"),
+        );
+        return;
+      }
+    }
+    await loadDir(lastPathRef.current.local ?? home, "local");
+  }, [connection?.home, loadDir, localHome]);
 
   const runRemoteSearch = useCallback(
     async (rawQuery = searchQuery, includeHidden = showHidden) => {
@@ -337,6 +380,33 @@ export default function FilesScreen({ id }: { id: string }) {
    */
   async function handleDrop(paths: string[]) {
     const dir = currentPathRef.current;
+    const activeScope = scopeRef.current;
+    if (activeScope === "local") {
+      const localFs = fileSystemFor("local");
+      let failed = 0;
+      let completed = 0;
+      for (const source of paths) {
+        const normalizedSource = source.replace(/\\/g, "/");
+        const destination = localFs.join(dir, baseName(normalizedSource));
+        if (localFs.contains(normalizedSource, destination)) {
+          failed += 1;
+          continue;
+        }
+        try {
+          await localFs.copy(normalizedSource, destination);
+          completed += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      if (failed > 0) {
+        setOpError(
+          tRef.current("files.error.batch", { failed, total: paths.length }),
+        );
+      }
+      if (completed > 0) bumpFs();
+      return;
+    }
     const batchId = crypto.randomUUID();
     const showBatch = paths.length > 1;
     if (showBatch) startBatch(batchId, paths.length, "upload");
@@ -345,7 +415,7 @@ export default function FilesScreen({ id }: { id: string }) {
       const id = crypto.randomUUID();
       startTransfer({ id, name, kind: "upload", total: 0 });
       try {
-        const result = await upload(id, local, joinPath(dir, name));
+        const result = await upload(id, local, fileSystemFor("remote").join(dir, name));
         finishTransfer(id);
         logOp({
           type: "upload",
@@ -498,16 +568,25 @@ export default function FilesScreen({ id }: { id: string }) {
     const startY = e.clientY;
     let dragging = false;
     const additive = e.ctrlKey || e.metaKey;
+    const sourceScope = scopeRef.current;
+    const sourceDir = currentPathRef.current;
     const dragEntries = selectedPaths.has(entry.path)
       ? selectedEntries
       : additive
         ? [...selectedEntries, entry]
         : [entry];
 
-    const targetDirAt = (x: number, y: number): string | null => {
+    const targetDirAt = (
+      x: number,
+      y: number,
+    ): { path: string; scope: FileSystemScope } | null => {
       const el = document.elementFromPoint(x, y);
       const t = el?.closest("[data-drop-dir]") as HTMLElement | null;
-      return t?.getAttribute("data-drop-dir") ?? null;
+      const path = t?.getAttribute("data-drop-dir");
+      const targetScope = t?.getAttribute("data-drop-scope");
+      return path && (targetScope === "local" || targetScope === "remote")
+        ? { path, scope: targetScope }
+        : null;
     };
     const clearHighlight = () => {
       highlightedElRef.current?.classList.remove("drop-target-active");
@@ -528,7 +607,8 @@ export default function FilesScreen({ id }: { id: string }) {
             path: item.path,
             isDir: item.isDir,
           })),
-          sourceDir: currentPathRef.current,
+          scope: sourceScope,
+          sourceDir,
         });
         document.body.style.userSelect = "none";
       }
@@ -550,9 +630,30 @@ export default function FilesScreen({ id }: { id: string }) {
       document.body.style.userSelect = "";
       clearHighlight();
       if (dragging) {
-        const destDir = targetDirAt(ev.clientX, ev.clientY);
+        const destination = targetDirAt(ev.clientX, ev.clientY);
         setDragItem(null);
-        if (destDir != null) void performMove(dragEntries, destDir);
+        if (destination != null) {
+          if (destination.scope === sourceScope) {
+            void performMove(dragEntries, destination.path, sourceScope);
+          } else {
+            void transferEntries(
+              dragEntries,
+              sourceScope,
+              destination.scope,
+              destination.path,
+            ).then(({ completed, failed }) => {
+              if (completed > 0) bumpFs();
+              if (failed > 0) {
+                setOpError(
+                  tRef.current("files.error.batch", {
+                    failed,
+                    total: dragEntries.length,
+                  }),
+                );
+              }
+            });
+          }
+        }
         // Normally the following click consumes the flag. If the platform
         // suppresses that click after dragging, clear it for the next action.
         window.setTimeout(() => {
@@ -565,16 +666,21 @@ export default function FilesScreen({ id }: { id: string }) {
   }
 
   /** Move selected entries via rename (same connection = same filesystem). */
-  async function performMove(items: FileEntry[], destDir: string) {
+  async function performMove(
+    items: FileEntry[],
+    destDir: string,
+    operationScope: FileSystemScope,
+  ) {
+    const fs = fileSystemFor(operationScope);
     const movableItems = items.filter(
-      (item) => parentPath(item.path) !== destDir,
+      (item) => fs.parent(item.path) !== destDir,
     );
     if (movableItems.length === 0) return;
     if (
       movableItems.some(
         (item) =>
           item.isDir &&
-          (destDir === item.path || destDir.startsWith(item.path + "/")),
+          fs.contains(item.path, destDir),
       )
     ) {
       setOpError(t("files.error.moveIntoSelf"));
@@ -584,10 +690,12 @@ export default function FilesScreen({ id }: { id: string }) {
     let failed = 0;
     let completed = 0;
     for (const item of movableItems) {
-      const to = joinPath(destDir, item.name);
+      const to = fs.join(destDir, item.name);
       try {
-        await rename(item.path, to);
-        logOp({ type: "move", from: item.path, to });
+        await fs.rename(item.path, to);
+        if (operationScope === "remote") {
+          logOp({ type: "move", from: item.path, to });
+        }
         completed += 1;
       } catch {
         failed += 1;
@@ -603,7 +711,103 @@ export default function FilesScreen({ id }: { id: string }) {
     }
   }
 
-  const crumbs = useMemo(() => breadcrumbs(currentPath), [currentPath]);
+  /** Copy entries across the local/remote boundary using existing transfers. */
+  async function transferEntries(
+    items: FileEntry[],
+    fromScope: FileSystemScope,
+    toScope: FileSystemScope,
+    destinationDir: string,
+  ): Promise<{ completed: number; failed: number }> {
+    if (items.length === 0 || fromScope === toScope) {
+      return { completed: 0, failed: 0 };
+    }
+    let existing: FileEntry[];
+    try {
+      existing = await fileSystemFor(toScope).list(destinationDir);
+    } catch {
+      return { completed: 0, failed: items.length };
+    }
+    const taken = new Set(existing.map((entry) => entry.name));
+    const batchId = crypto.randomUUID();
+    const showBatch = items.length > 1;
+    const kind = fromScope === "local" ? "upload" : "download";
+    let completed = 0;
+    let failed = 0;
+    if (showBatch) startBatch(batchId, items.length, kind);
+
+    for (const item of items) {
+      let destinationName = item.name;
+      if (taken.has(destinationName)) {
+        let candidate = tRef.current("files.copySuffix", { name: destinationName });
+        let index = 2;
+        while (taken.has(candidate)) {
+          candidate = tRef.current("files.copyNumberedSuffix", {
+            name: destinationName,
+            number: index++,
+          });
+        }
+        destinationName = candidate;
+      }
+      taken.add(destinationName);
+      const transferId = crypto.randomUUID();
+      startTransfer({
+        id: transferId,
+        name: item.name,
+        kind,
+        total: item.isDir ? 0 : item.size,
+      });
+      try {
+        if (fromScope === "local") {
+          const remotePath = fileSystemFor("remote").join(
+            destinationDir,
+            destinationName,
+          );
+          const result = await upload(transferId, item.path, remotePath);
+          logOp({
+            type: "upload",
+            localPath: item.path,
+            remoteDir: destinationDir,
+            remotePath,
+            isDir: result.isDir,
+          });
+        } else {
+          await download(
+            transferId,
+            item.path,
+            destinationDir,
+            item.isDir,
+            destinationName,
+          );
+          logOp({
+            type: "download",
+            remotePath: item.path,
+            localName: destinationName,
+            isDir: item.isDir,
+          });
+        }
+        finishTransfer(transferId);
+        completed += 1;
+      } catch (failure) {
+        failed += 1;
+        finishTransfer(
+          transferId,
+          typeof failure === "string"
+            ? failure
+            : tRef.current(
+                fromScope === "local" ? "files.error.upload" : "files.error.download",
+              ),
+        );
+      }
+      if (showBatch) advanceBatch(batchId);
+    }
+    return { completed, failed };
+  }
+
+  const activeFileSystem = fileSystemFor(scope);
+  const crumbs = useMemo(
+    () => activeFileSystem.breadcrumbs(currentPath),
+    [activeFileSystem, currentPath],
+  );
   const visibleEntries = useMemo(() => {
     const source = searchActive ? searchResults : entries;
     const query =
@@ -701,6 +905,10 @@ export default function FilesScreen({ id }: { id: string }) {
       loadDir(entry.path);
       return;
     }
+    if (scopeRef.current === "local") {
+      setOpError(t("files.local.openHint"));
+      return;
+    }
     if (isProbablyBinary(entry.name)) {
       offerDownload(
         entry,
@@ -730,10 +938,14 @@ export default function FilesScreen({ id }: { id: string }) {
   }
 
   /** Run a mutating operation, log its command on success, then refresh panes. */
-  async function runOp(fn: () => Promise<void>, op?: FileOperation) {
+  async function runOp(
+    fn: () => Promise<void>,
+    op?: FileOperation,
+    operationScope: FileSystemScope = scopeRef.current,
+  ) {
     try {
       await fn();
-      if (op) logOp(op);
+      if (op && operationScope === "remote") logOp(op);
       bumpFs();
     } catch (err) {
       setOpError(typeof err === "string" ? err : t("files.error.operation"));
@@ -791,26 +1003,33 @@ export default function FilesScreen({ id }: { id: string }) {
   }
 
   function doRename(entry: FileEntry) {
+    const operationScope = scopeRef.current;
     setPrompt({
       title: t("common.rename"),
       initialValue: entry.name,
       onConfirm: (newName) => {
         setPrompt(null);
         if (newName === entry.name) return;
+        if (!isValidEntryName(newName)) {
+          setOpError(t("files.error.invalidName"));
+          return;
+        }
         // Search results may come from a nested directory. Rename in place
         // rather than accidentally moving the item into the search root.
-        const to = joinPath(parentPath(entry.path), newName);
-        runOp(() => rename(entry.path, to), {
+        const fs = fileSystemFor(operationScope);
+        const to = fs.join(fs.parent(entry.path), newName);
+        runOp(() => fs.rename(entry.path, to), {
           type: "move",
           from: entry.path,
           to,
-        });
+        }, operationScope);
       },
     });
   }
 
   function doDeleteEntries(items: FileEntry[]) {
     if (items.length === 0) return;
+    const operationScope = scopeRef.current;
     const single = items.length === 1 ? items[0] : null;
     setConfirm({
       title: single
@@ -837,8 +1056,10 @@ export default function FilesScreen({ id }: { id: string }) {
           let completed = 0;
           for (const item of items) {
             try {
-              await deletePath(item.path, item.isDir);
-              logOp({ type: "delete", path: item.path, isDir: item.isDir });
+              await fileSystemFor(operationScope).delete(item.path, item.isDir);
+              if (operationScope === "remote") {
+                logOp({ type: "delete", path: item.path, isDir: item.isDir });
+              }
               completed += 1;
             } catch {
               failed += 1;
@@ -856,35 +1077,49 @@ export default function FilesScreen({ id }: { id: string }) {
   }
 
   function doNewFolder() {
+    const operationScope = scopeRef.current;
+    const targetDirectory = currentPathRef.current;
     setPrompt({
       title: t("files.newFolder.title"),
       placeholder: t("files.newFolder.placeholder"),
       onConfirm: (name) => {
         setPrompt(null);
-        const path = joinPath(currentPath, name);
-        runOp(() => mkdir(path), { type: "mkdir", path });
+        if (!isValidEntryName(name)) {
+          setOpError(t("files.error.invalidName"));
+          return;
+        }
+        const fs = fileSystemFor(operationScope);
+        const path = fs.join(targetDirectory, name);
+        runOp(() => fs.mkdir(path), { type: "mkdir", path }, operationScope);
       },
     });
   }
 
   function doNewFile() {
+    const operationScope = scopeRef.current;
+    const targetDirectory = currentPathRef.current;
     setPrompt({
       title: t("files.newFile.title"),
       placeholder: t("files.newFile.placeholder"),
       onConfirm: (name) => {
         setPrompt(null);
-        void createNewFile(joinPath(currentPath, name));
+        if (!isValidEntryName(name)) {
+          setOpError(t("files.error.invalidName"));
+          return;
+        }
+        const fs = fileSystemFor(operationScope);
+        void createNewFile(fs.join(targetDirectory, name), operationScope);
       },
     });
   }
 
   /** Create an empty file, then open it in the editor so typing can start. */
-  async function createNewFile(path: string) {
+  async function createNewFile(path: string, operationScope: FileSystemScope) {
     try {
-      await createFile(path);
-      logOp({ type: "newfile", path });
+      await fileSystemFor(operationScope).createFile(path);
+      if (operationScope === "remote") logOp({ type: "newfile", path });
       bumpFs();
-      openEditor(path);
+      if (operationScope === "remote") openEditor(path);
     } catch (err) {
       setOpError(typeof err === "string" ? err : t("files.error.create"));
     }
@@ -897,6 +1132,7 @@ export default function FilesScreen({ id }: { id: string }) {
         name: entry.name,
         path: entry.path,
         isDir: entry.isDir,
+        scope: scopeRef.current,
       })),
     );
   }
@@ -904,13 +1140,15 @@ export default function FilesScreen({ id }: { id: string }) {
   /** Paste clipboard items into the current directory (avoids name clashes). */
   function doPaste() {
     if (!clipboard || clipboard.length === 0) return;
-    if (
-      clipboard.some(
-        (item) =>
-          item.isDir &&
-          (currentPath === item.path || currentPath.startsWith(item.path + "/")),
-      )
-    ) {
+    const targetScope = scopeRef.current;
+    const targetDirectory = currentPathRef.current;
+    const clipboardItems = [...clipboard];
+    const fs = fileSystemFor(targetScope);
+    if (clipboard.some((item) =>
+      item.scope === targetScope &&
+      item.isDir &&
+      fs.contains(item.path, targetDirectory)
+    )) {
       setOpError(t("errors.copyIntoSelf"));
       return;
     }
@@ -918,7 +1156,7 @@ export default function FilesScreen({ id }: { id: string }) {
     void (async () => {
       let failed = 0;
       let completed = 0;
-      for (const item of clipboard) {
+      for (const item of clipboardItems) {
         let name = item.name;
         if (taken.has(name)) {
           let candidate = t("files.copySuffix", { name });
@@ -929,18 +1167,42 @@ export default function FilesScreen({ id }: { id: string }) {
           name = candidate;
         }
         taken.add(name);
-        const to = joinPath(currentPath, name);
+        const to = fs.join(targetDirectory, name);
         try {
-          await copyPath(item.path, to);
-          logOp({ type: "copy", from: item.path, to });
-          completed += 1;
+          if (item.scope === targetScope) {
+            await fs.copy(item.path, to);
+            if (targetScope === "remote") {
+              logOp({ type: "copy", from: item.path, to });
+            }
+            completed += 1;
+          } else {
+            const sourceEntry: FileEntry = {
+              name,
+              path: item.path,
+              isDir: item.isDir,
+              isSymlink: false,
+              size: 0,
+              modified: null,
+              permissions: "",
+            };
+            const result = await transferEntries(
+              [sourceEntry],
+              item.scope,
+              targetScope,
+              targetDirectory,
+            );
+            completed += result.completed;
+            failed += result.failed;
+          }
         } catch {
           failed += 1;
         }
       }
       if (completed > 0) bumpFs();
       if (failed > 0) {
-        setOpError(t("files.error.batch", { failed, total: clipboard.length }));
+        setOpError(
+          t("files.error.batch", { failed, total: clipboardItems.length }),
+        );
       }
     })();
   }
@@ -986,8 +1248,13 @@ export default function FilesScreen({ id }: { id: string }) {
     const targets = selectedEntries.length > 0 ? selectedEntries : [entry];
     const items: MenuItem[] = [
       { label: t("common.copy"), onClick: () => doCopy(targets) },
-      { label: t("common.download"), onClick: () => void doDownloadEntries(targets) },
     ];
+    if (scope === "remote") {
+      items.push({
+        label: t("common.download"),
+        onClick: () => void doDownloadEntries(targets),
+      });
+    }
     if (targets.length === 1) {
       items.push({ label: t("common.rename"), onClick: () => doRename(targets[0]) });
     }
@@ -998,17 +1265,19 @@ export default function FilesScreen({ id }: { id: string }) {
     });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu, clipboard, selectedEntries, t]);
+  }, [menu, clipboard, scope, selectedEntries, t]);
 
   // Menu-bar dropdown contents.
   const fileMenu: DropItem[] = [
     { label: t("files.newFile"), onClick: doNewFile },
     { label: t("files.newFolder"), onClick: doNewFolder },
-    {
-      label: t("common.download"),
-      onClick: () => void doDownloadEntries(selectedEntries),
-      disabled: selectedEntries.length === 0,
-    },
+    ...(scope === "remote"
+      ? [{
+          label: t("common.download"),
+          onClick: () => void doDownloadEntries(selectedEntries),
+          disabled: selectedEntries.length === 0,
+        } satisfies DropItem]
+      : []),
     { label: t("common.refresh"), onClick: refreshCurrentView },
     { type: "separator" },
     { label: t("files.disconnect"), onClick: handleDisconnect },
@@ -1068,7 +1337,7 @@ export default function FilesScreen({ id }: { id: string }) {
     { label: t("common.view"), items: viewMenu },
   ]);
 
-  const atRoot = currentPath === "/";
+  const atRoot = activeFileSystem.parent(currentPath) === currentPath;
   function refreshCurrentView() {
     if (error) {
       void loadDir(currentPath);
@@ -1087,16 +1356,36 @@ export default function FilesScreen({ id }: { id: string }) {
     >
       {/* Navigation row: up / home / refresh + breadcrumb */}
       <div className="flex items-center gap-1 border-b border-ink-700/60 bg-ink-800/60 px-2 py-1">
+        <div className="mr-1 flex shrink-0 rounded-md bg-ink-900/70 p-0.5 text-2xs">
+          {(["local", "remote"] as const).map((candidate) => (
+            <button
+              key={candidate}
+              type="button"
+              aria-pressed={scope === candidate}
+              onClick={() => void switchScope(candidate)}
+              className={`rounded px-2 py-1 transition-colors ${
+                scope === candidate
+                  ? "bg-sky-500/20 text-sky-200"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {candidate === "local" ? t("files.scope.local") : t("files.scope.remote")}
+            </button>
+          ))}
+        </div>
         <ToolButton
           label={t("files.up")}
           disabled={atRoot}
-          onClick={() => loadDir(parentPath(currentPath))}
+          onClick={() => loadDir(activeFileSystem.parent(currentPath))}
         >
           <path d="M12 19V6M5 12l7-7 7 7" />
         </ToolButton>
         <ToolButton
           label={t("files.home")}
-          onClick={() => connection && loadDir(connection.home)}
+          onClick={() => {
+            const home = scope === "local" ? localHome : connection?.home;
+            if (home) void loadDir(home);
+          }}
         >
           <path d="M3 11l9-8 9 8M5 10v10h14V10" />
         </ToolButton>
@@ -1104,6 +1393,21 @@ export default function FilesScreen({ id }: { id: string }) {
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
           <path d="M21 3v5h-5" />
         </ToolButton>
+
+        {scope === "local" && localRoots.length > 1 && (
+          <select
+            value={
+              localRoots.find((root) =>
+                fileSystemFor("local").contains(root, currentPath),
+              ) ?? localRoots[0]
+            }
+            onChange={(event) => void loadDir(event.target.value, "local")}
+            aria-label={t("files.scope.drive")}
+            className="max-w-16 rounded border border-ink-700 bg-ink-900 px-1 py-1 font-mono text-2xs text-slate-300 outline-none focus:border-sky-600"
+          >
+            {localRoots.map((root) => <option key={root}>{root}</option>)}
+          </select>
+        )}
 
         <nav className="flex min-w-0 flex-1 items-center overflow-x-auto whitespace-nowrap text-sm">
           {crumbs.map((crumb, i) => (
@@ -1189,6 +1493,7 @@ export default function FilesScreen({ id }: { id: string }) {
         onMouseDown={onSelectionAreaMouseDown}
         onContextMenu={openEmptyMenu}
         data-drop-dir={currentPath}
+        data-drop-scope={scope}
       >
         {loading ? (
           <CenterMessage>{t("files.loading")}</CenterMessage>
@@ -1218,6 +1523,7 @@ export default function FilesScreen({ id }: { id: string }) {
           <FileView
             entries={visibleEntries}
             viewMode={viewMode}
+            scope={scope}
             selectedPaths={selectedPaths}
             onOpen={openEntry}
             onSelect={selectEntry}
@@ -1258,10 +1564,12 @@ export default function FilesScreen({ id }: { id: string }) {
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-sky-400 bg-sky-950/60 backdrop-blur-sm">
           <div className="rounded-2xl px-10 py-8 text-center">
             <div className="text-lg font-medium text-sky-200">
-              {t("files.drop.title")}
+              {scope === "remote" ? t("files.drop.title") : t("files.drop.localTitle")}
             </div>
             <div className="mt-1 truncate text-sm text-sky-300/80">
-              {t("files.drop.destination", { path: currentPath })}
+              {scope === "remote"
+                ? t("files.drop.destination", { path: currentPath })
+                : t("files.drop.localDestination", { path: currentPath })}
             </div>
           </div>
         </div>

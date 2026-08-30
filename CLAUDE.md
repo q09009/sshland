@@ -33,7 +33,18 @@ The `ssh2` crate (built against the WinCNG backend on Windows, so no OpenSSL/Per
 
 - **Global store (zustand, `src/store.ts`)**: connection info, the pane tree (tiling), the transfer (upload/download) list, the clipboard (copy), drag state, `fsVersion` (a counter for broadcasting filesystem changes).
 - **Per-pane local state for the file manager**: current path, listing, loading/error, view mode, and the hidden-files toggle live in each `FilesScreen` component's local `useState`. **Never put these in the global store** — it used to be global and caused a bug where "opening two file managers makes them move together" (commit `78b3e13`).
+  - Each pane also owns its active filesystem (`local` or `remote`) and remembers one last path per side. `FileSystemScope` on shared clipboard/drag items prevents a delayed prompt or transfer from accidentally acting on whichever side happens to be visible later.
   - When a pane performs a file operation (delete/move/copy, etc.), it bumps `fsVersion` via `bumpFs()`, and every `FilesScreen` instance detects this and silently refreshes (`reloadSilently`).
+
+### Shared local / remote file manager
+
+`FilesScreen.tsx` renders one common file-manager UI for the client filesystem and the SSH server. `lib/fileSystem.ts` supplies the small `FileSystemAdapter` surface (list/rename/mkdir/create/delete/copy plus path helpers); the remote adapter calls the existing SSH/SFTP commands and the local adapter calls `local_fs.rs`. This keeps selection, three view modes, breadcrumbs, context menus, clipboard, collision naming, and pointer-based drag behavior shared instead of maintaining two file managers.
+
+- **Local operations do not use SSH and require no server-side install.** `local_fs.rs` uses `std::fs`, exposes the current user's home plus `/` or existing Windows drive roots, normalizes displayed Windows paths to forward slashes, refuses relative paths, and rejects recursive symlink copies. A failed recursive local copy removes only the newly-created partial destination.
+- **Same-side drag means move; cross-side drag means copy.** Dragging within local or within remote uses that adapter's rename. Dragging local→remote uses the existing recursive upload; remote→local uses the existing recursive download. The source is deliberately retained across the boundary. Multiple selections use the existing transfer cards/batches, and destination name collisions receive localized copy suffixes instead of silently replacing an entry.
+- **Two panes make the transfer model visible.** Because filesystem scope remains per pane, users can split the workspace, switch one pane to `내 PC`, keep the other on `서버`, and drag between them. A single pane can also switch sides; each side returns to its last path.
+- **Local search is intentionally the current-folder filter only.** `fd`/`find` settings and recursive results remain remote-server features. Local files are currently for navigation, transfer, and basic file operations; only remote text files open in the built-in SFTP editor.
+- **Command log scope:** remote operations and cross-boundary transfers are logged as their equivalent SSH/scp commands. Pure local operations are not shown as server commands.
 
 ### Tiling pane tree (Hyprland-style, partial feature set)
 
@@ -103,14 +114,15 @@ A macro is a user-authored, ordered list of shell steps (`{ id, name, steps: [{ 
 - **Macros are not written to the command-log bar** — mirroring the existing rule that terminal-typed input never lands there either (a macro is the same kind of thing: commands run directly against the shell, not a file-manager operation).
 - **Export to server as `.sh`** (secondary): the card's ⬆ opens a `PromptDialog` (reusing the new-file/rename prompt) defaulting to `<home>/<slug>.sh`, then `buildExportScript` assembles a real standalone script (`#!/bin/bash` + a `# <label>` comment above each step + one command per line, **no** sentinels) written via the existing `write_remote_file` (arbitrary text + path — no new backend). A transient inline toast confirms success.
 
-### OS drag-in upload (local → server)
+### OS drag-in handling
 
 OS file drops do **not** arrive via the standard browser `ondrop` — they only come through Tauri's native `getCurrentWebview().onDragDropEvent(...)` event (subscribed once on mount in `FilesScreen.tsx`). `dragDropEnabled` must be at its `tauri.conf.json` default of `true` for the event to fire at all.
 
 **The target pane is determined by cursor position, not focus.** The event fires once per window (webview), so every open `FilesScreen`'s listener runs — each pane checks **whether the cursor is inside its own root rect** (`rootRef.getBoundingClientRect()` containment test) and only that pane reacts. Terminal panes have no `FilesScreen` so they're automatically ignored, and since a drop never changes focus, a position check is the only correct approach. (It used to be focus-based, which caused uploads to land in the wrong pane when two panes were open.)
 
 - The payload's `position` is in **physical pixels** (`PhysicalPosition`), so it must be divided by `window.devicePixelRatio` to convert to CSS coordinates matching `getBoundingClientRect` (otherwise it's off whenever Windows display scaling isn't 100%).
-- Multiple top-level files/folders upload sequentially. For `>1` items, `store.uploadBatches` creates a batch so `TransfersPanel` shows an overall "M of N complete" progress above the individual cards. Each top-level item still follows the existing `transfer-progress` flow.
+- Over a **server** view, multiple top-level files/folders upload sequentially. For `>1` items, `store.uploadBatches` creates a batch so `TransfersPanel` shows an overall "M of N complete" progress above the individual cards. Each top-level item still follows the existing `transfer-progress` flow.
+- Over a **local** view, the same native drop copies the selected OS paths into that local directory through the local adapter. This is separate from the in-app pointer drag used between file-manager panes.
 - **Folders upload recursively over SFTP** (`upload_path`): the backend scans the complete local tree first, creates each remote directory (including empty ones), and streams every file. Existing remote folders are merged and existing files are overwritten, matching single-file upload behavior. One transfer card reports aggregate byte progress for the whole top-level folder. Local symlinks are rejected instead of followed so a recursive upload cannot escape the selected tree or loop forever.
 - The hover highlight is **scoped to that pane only** (the pane root is `relative`, and the overlay is `absolute inset-0` with a dashed border) — not a window-wide `fixed` overlay.
 
@@ -170,6 +182,8 @@ src-tauri/src/
               run_macro/stop_macro (Req::RunMacro streaming exec channel, macro-output/macro-closed events),
               read_remote_file/write_remote_file (in-memory editor read/write),
               open/write/resize/close_terminal, disconnect)
+  local_fs.rs Client filesystem commands (home/roots, list/rename/mkdir/create/delete/recursive copy)
+              used by the local side of the shared file manager; std::fs only, no SSH dependency
   settings.rs Settings persistence commands (load_settings/save_settings) — reads/writes a JSON
               blob at the app config folder's settings.json. The frontend owns the schema.
   theme.rs    Validates/imports/clears the app-owned theme background image in the app config folder
@@ -186,9 +200,10 @@ src-tauri/src/
 
 src/
   store.ts              zustand: connection (with status/elapsed-time base)/connection status/settings overlay/command log/screen switching/pane tree/transfer list/upload batches/clipboard/drag/fsVersion
-  api.ts                Typed Tauri invoke wrappers (including settings load/save)
+  api.ts                Typed Tauri invoke wrappers (including remote SFTP and local filesystem commands)
   lib/panes.ts           Pane-tree pure functions (split/remove/switch/ratio/layout/focus navigation)
-  lib/path.ts            Path utilities (join, parent, breadcrumb, baseName)
+  lib/path.ts            Remote Unix + normalized local/Windows path utilities (join/parent/breadcrumb/containment/baseName)
+  lib/fileSystem.ts      Shared local/remote FileSystemAdapter used by FilesScreen
   lib/files.ts           sortEntries (folders-first sort)
   lib/format.ts          Human-readable size/date/elapsed-time/clock formatting
   lib/commandLog.ts      File operation → CLI command string conversion (operationToCommandString, pure/reusable; incl. the editor "save" case)
@@ -212,7 +227,7 @@ src/
   index.css              Design-token :root definitions, semantic surfaces, backdrop and motion-mode styles
   ../tailwind.config.js  Wires tokens to Tailwind utility names (holds no values, only var mappings)
   screens/ConnectScreen.tsx   Connect screen (password/private key, loading, errors)
-  screens/FilesScreen.tsx     File-manager pane body (fully local state)
+  screens/FilesScreen.tsx     Shared local/remote file-manager pane body (per-pane filesystem + navigation state, cross-side transfers)
   components/StatusBar.tsx    Top GNOME-style status bar (user@host / connection status / session elapsed / local clock / settings icon) — all computed locally, no server calls
   components/CommandLogBar.tsx  Bottom command-log bar (latest line + click for a history popup, toggleable via settings)
   components/CommandWidgetPanel.tsx  Command-GUI widget panel (parses via parser → renders via render as table/card/list, with a raw toggle) — below the terminal pane
@@ -240,10 +255,10 @@ src/
   components/ShortcutsHelp.tsx   Bottom-right shortcuts help
 ```
 
-## Current Status (as of 2026-07-14)
+## Current Status (as of 2026-08-30)
 
-**Phase 1 — SSH connect + SFTP file manager: done**
-Connect screen, pre-authentication `known_hosts` verification with first-use fingerprint approval and changed-key blocking, listing (3 view modes), path navigation/breadcrumbs/hidden files, download/upload (drag-and-drop)/rename/delete/new folder/copy, disconnect detection.
+**Phase 1 — SSH connect + shared local/SFTP file manager: done**
+Connect screen, pre-authentication `known_hosts` verification with first-use fingerprint approval and changed-key blocking, local/server switching (with independent paths per pane), listing (3 view modes), path navigation/breadcrumbs/hidden files, download/upload and bidirectional pane drag-and-drop, rename/delete/new folder/copy, disconnect detection.
 
 **Phase 2 — Terminal + Hyprland-style tiling: done (all 9 steps)**
 PTY streaming → xterm pane → pane tree + renderer → split shortcuts → focus movement → closing → divider dragging → pane switching → render throttling for inactive panes.
@@ -269,7 +284,8 @@ Macro storage (`macros.rs` one-JSON-file-per-macro + `lib/macros.ts`) → `Req::
 **Additional improvements (from user feedback, done):**
 - Cleaned up the toolbar into a file-manager menu bar (File/Edit/View), single selection, right-click on empty space (new folder/paste), right-click on a file (copy/download/rename/delete)
 - In-app drag to move a file/folder icon into another folder or another pane (via SFTP rename)
-- **OS file/folder drag-in upload** (local → server): dragging from Explorer/Finder onto a file-manager pane uploads into that pane's current folder. Folders keep their nested structure. See the "OS drag-in upload" section above. (The reverse direction, drag-out, wasn't built since Tauri's webview doesn't support it cross-platform — downloads keep the existing button flow.)
+- **OS file/folder drag-in handling**: dragging from Explorer/Finder onto a server view uploads into its current folder; dropping onto a local view copies into that local folder. Folders keep their nested structure. See the "OS drag-in handling" section above. Native OS drag-out remains unavailable cross-platform, so local↔server pane dragging provides the portable reverse path.
+- **Shared local/server file manager**: every file-manager pane can independently show the client or server filesystem. Split panes can show both sides and transfer multi-selections by pointer drag (same side = move, cross side = copy), avoiding the unsupported OS drag-out path entirely.
 - **Design-token centralization** (a refactor, zero visual change): moved every color/typography/radius literal into `:root` (`index.css`) as the single source, with Tailwind only mapping to it. See the "Design tokens" section above. Structural groundwork for a future redesign.
 - **Limited theme customization**: background color or imported image, image darkness, accent color, normal/reduced/off motion, and UI + terminal/editor font presets. This intentionally stops short of exposing every palette shade, component radius, spacing value, or individual animation.
 

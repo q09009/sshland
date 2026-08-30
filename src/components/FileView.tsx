@@ -2,11 +2,13 @@ import { FileEntry } from "../api";
 import { ViewMode } from "../store";
 import { formatDate, formatSize } from "../lib/format";
 import { useI18n } from "../i18n";
+import type { FileSystemScope } from "../lib/fileSystem";
 
 interface Props {
   entries: FileEntry[];
   viewMode: ViewMode;
   selectedPaths: ReadonlySet<string>;
+  scope: FileSystemScope;
   /** Search root when entries may come from nested folders. */
   searchRoot?: string | null;
   onOpen: (entry: FileEntry) => void;
@@ -41,6 +43,7 @@ function rowHandlers(entry: FileEntry, p: Props) {
     },
     // Folders accept dropped items.
     "data-drop-dir": entry.isDir ? entry.path : undefined,
+    "data-drop-scope": entry.isDir ? p.scope : undefined,
     "data-file-path": entry.path,
     "aria-selected": p.selectedPaths.has(entry.path),
   };

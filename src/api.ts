@@ -54,7 +54,7 @@ export function isHostKeyError(error: unknown): error is HostKeyError {
 
 export interface FileEntry {
   name: string;
-  /** Absolute path on the server. */
+  /** Absolute path on the active local or remote filesystem. */
   path: string;
   size: number;
   isDir: boolean;
@@ -63,6 +63,13 @@ export interface FileEntry {
   modified: number | null;
   /** Unix permission string, e.g. "drwxr-xr-x". */
   permissions: string;
+}
+
+export interface LocalFsInfo {
+  /** Local user home directory, normalized to forward slashes. */
+  home: string;
+  /** Filesystem roots (`/` on Unix, available drive roots on Windows). */
+  roots: string[];
 }
 
 export type RemoteSearchEngine = "fd" | "find";
@@ -100,6 +107,36 @@ export function forgetHostKey(host: string, port: number): Promise<void> {
 /** List the contents of a directory on the server. */
 export function listDir(path: string): Promise<FileEntry[]> {
   return invokeCommand<FileEntry[]>("list_dir", { path });
+}
+
+/** Locate the client home directory and platform filesystem roots. */
+export function localFsInfo(): Promise<LocalFsInfo> {
+  return invokeCommand<LocalFsInfo>("local_fs_info");
+}
+
+/** List a directory on the client computer. */
+export function localListDir(path: string): Promise<FileEntry[]> {
+  return invokeCommand<FileEntry[]>("local_list_dir", { path });
+}
+
+export function localRename(from: string, to: string): Promise<void> {
+  return invokeCommand<void>("local_rename", { from, to });
+}
+
+export function localMkdir(path: string): Promise<void> {
+  return invokeCommand<void>("local_mkdir", { path });
+}
+
+export function localCreateFile(path: string): Promise<void> {
+  return invokeCommand<void>("local_create_file", { path });
+}
+
+export function localDelete(path: string): Promise<void> {
+  return invokeCommand<void>("local_delete", { path });
+}
+
+export function localCopy(from: string, to: string): Promise<void> {
+  return invokeCommand<void>("local_copy", { from, to });
 }
 
 /** Check one optional search command when its settings option is clicked. */
