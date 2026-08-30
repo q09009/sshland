@@ -67,7 +67,7 @@ const DEFAULT_WIDGETS: &[(&str, &str)] = &[
 const PARSERS: &[&str] = &["columns", "keyvalue", "regex"];
 const RENDERS: &[&str] = &["gauge", "table", "keyvalue-card", "list"];
 const CATEGORIES: &[&str] = &["monitoring", "process-manager"];
-const SIMPLE_VIEWS: &[&str] = &["disk", "network", "process", "docker"];
+const SIMPLE_VIEWS: &[&str] = &["cpu", "disk", "network", "process", "docker"];
 
 /// Raw shape as written in a TOML file.
 #[derive(Deserialize)]
@@ -235,11 +235,12 @@ mod tests {
     fn bundled_cpu_usage_parses() {
         let text = include_str!("../default_dashboard_widgets/cpu-usage.toml");
         let cfg = parse_widget("cpu-usage", "default", text).expect("cpu-usage should parse");
-        assert_eq!(cfg.parser, "regex");
-        assert_eq!(cfg.render, "gauge");
+        assert_eq!(cfg.parser, "columns");
+        assert_eq!(cfg.render, "table");
         assert_eq!(cfg.category, "monitoring");
-        assert_eq!(cfg.value_field.as_deref(), Some("usage"));
-        assert!(cfg.capture_pattern.is_some());
+        assert_eq!(cfg.simple_view.as_deref(), Some("cpu"));
+        assert!(cfg.command.contains("/proc/stat"));
+        assert!(!cfg.command.contains("top "));
     }
 
     #[test]

@@ -2,6 +2,11 @@
 // Every command rejects with a friendly message in the current UI language.
 import { invoke } from "@tauri-apps/api/core";
 import { localizeBackendError } from "./i18n/errors";
+import {
+  parseSysstatToolCheck,
+  SYSSTAT_CHECK_COMMAND,
+  type SysstatToolStatus,
+} from "./lib/monitoring";
 
 function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(command, args).catch((error) =>
@@ -245,6 +250,14 @@ export function pollWidgetCommand(command: string): Promise<string> {
   return invokeCommand<string>("poll_widget_command", { command });
 }
 
+/** Check the optional sysstat suite when its dashboard setting is selected. */
+export async function checkSysstat(): Promise<SysstatToolStatus> {
+  const output = await pollWidgetCommand(SYSSTAT_CHECK_COMMAND);
+  const status = parseSysstatToolCheck(output);
+  if (!status) throw new Error("Unexpected sysstat check output");
+  return status;
+}
+
 /**
  * Kill a process by PID (the dashboard process manager's row action). Reuses the
  * one-shot exec (poll_widget_command / Req::RunOnce) rather than a second worker
@@ -435,7 +448,7 @@ export interface DashboardWidgetConfig {
   /** One-line description shown in the picker. */
   description?: string;
   /** Optional built-in beginner-friendly view; parser/render stays detailed. */
-  simpleView?: "disk" | "network" | "process" | "docker";
+  simpleView?: "cpu" | "disk" | "network" | "process" | "docker";
   category: "monitoring" | "process-manager";
   /**
    * Suggested poll interval. Optional — when a widget omits it, the app's global

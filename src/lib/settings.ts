@@ -3,6 +3,11 @@ import { loadSettings, saveSettings } from "../api";
 // Imported from the leaf types module (no store/component imports) so there is
 // no cycle with the dashboard layout store, which imports this module to persist.
 import type { DashboardWidgetInstance } from "./dashboardTypes";
+import {
+  emptySysstatToolStatus,
+  type MonitoringEngine,
+  type SysstatToolStatus,
+} from "./monitoring";
 import { normalizeThemeTokens, type ThemeTokenValues } from "./themeTokens";
 
 /**
@@ -48,7 +53,12 @@ export interface SearchToolCacheEntry
   extends SearchServerIdentity,
     SearchToolStatus {}
 
+export interface MonitoringToolCacheEntry
+  extends SearchServerIdentity,
+    SysstatToolStatus {}
+
 const MAX_SEARCH_TOOL_CACHE_ENTRIES = 50;
+const MAX_MONITORING_TOOL_CACHE_ENTRIES = 50;
 
 export function emptySearchToolStatus(): SearchToolStatus {
   return { find: null, fdCommand: null, fdChecked: false };
@@ -92,6 +102,22 @@ export function getCachedSearchTools(
     : emptySearchToolStatus();
 }
 
+/** Read the saved sysstat check for one host/port/user combination. */
+export function getCachedMonitoringTools(
+  cache: MonitoringToolCacheEntry[],
+  server: SearchServerIdentity,
+): SysstatToolStatus {
+  const match = cache.find((entry) => sameSearchServer(entry, server));
+  return match
+    ? {
+        checked: match.checked,
+        available: match.available,
+        version: match.version,
+        missing: [...match.missing],
+      }
+    : emptySysstatToolStatus();
+}
+
 function normalizeSearchToolCache(value: unknown): SearchToolCacheEntry[] {
   if (!Array.isArray(value)) return [];
   const normalized: SearchToolCacheEntry[] = [];
@@ -127,6 +153,44 @@ function normalizeSearchToolCache(value: unknown): SearchToolCacheEntry[] {
       fdChecked,
     });
     if (normalized.length >= MAX_SEARCH_TOOL_CACHE_ENTRIES) break;
+  }
+  return normalized;
+}
+
+function normalizeMonitoringToolCache(value: unknown): MonitoringToolCacheEntry[] {
+  if (!Array.isArray(value)) return [];
+  const normalized: MonitoringToolCacheEntry[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const entry = raw as Partial<MonitoringToolCacheEntry>;
+    if (
+      typeof entry.host !== "string" ||
+      !entry.host.trim() ||
+      typeof entry.username !== "string" ||
+      !entry.username.trim() ||
+      !Number.isInteger(entry.port) ||
+      Number(entry.port) < 1 ||
+      Number(entry.port) > 65535 ||
+      entry.checked !== true
+    ) {
+      continue;
+    }
+    const identity = normalizeServerIdentity({
+      host: entry.host,
+      port: Number(entry.port),
+      username: entry.username,
+    });
+    if (normalized.some((saved) => sameSearchServer(saved, identity))) continue;
+    normalized.push({
+      ...identity,
+      checked: true,
+      available: entry.available === true,
+      version: typeof entry.version === "string" ? entry.version : null,
+      missing: Array.isArray(entry.missing)
+        ? entry.missing.filter((tool): tool is string => typeof tool === "string")
+        : [],
+    });
+    if (normalized.length >= MAX_MONITORING_TOOL_CACHE_ENTRIES) break;
   }
   return normalized;
 }
@@ -223,6 +287,10 @@ export interface AppSettings {
   clockShowSeconds: boolean;
   /** Enable the dashboard pane type (its 📊 entry point + polling). */
   dashboardEnabled: boolean;
+  /** Preferred monitoring collector; unavailable sysstat falls back to built-in. */
+  monitoringEngine: MonitoringEngine;
+  /** Remembered sysstat availability, scoped to host + port + SSH user. */
+  monitoringToolCache: MonitoringToolCacheEntry[];
   /** Default poll interval (seconds) used when adding a new dashboard widget. */
   dashboardDefaultInterval: number;
   /** The single shared dashboard layout (which widgets, order, sizes, intervals). */
@@ -241,6 +309,8 @@ const DEFAULTS: AppSettings = {
   commandGuiEnabled: true,
   clockShowSeconds: false,
   dashboardEnabled: true,
+  monitoringEngine: "builtin",
+  monitoringToolCache: [],
   dashboardDefaultInterval: 5,
   dashboardLayout: [],
   theme: DEFAULT_THEME_SETTINGS,
@@ -261,6 +331,11 @@ interface SettingsState {
     engine: "fd" | "find",
     available: boolean,
     command: string | null,
+  ) => void;
+  /** Save one sysstat availability check for the current server. */
+  saveMonitoringToolCheck: (
+    server: SearchServerIdentity,
+    status: SysstatToolStatus,
   ) => void;
 }
 
@@ -286,6 +361,7 @@ export const useSettings = create<SettingsState>((setState, get) => ({
       // Merge over defaults so missing/older keys fall back gracefully.
       const persisted = raw as Partial<AppSettings>;
       const searchEngines: FileSearchEngine[] = ["filter", "fd", "find"];
+      const monitoringEngines: MonitoringEngine[] = ["builtin", "sysstat"];
       setState({
         settings: {
           ...DEFAULTS,
@@ -296,6 +372,14 @@ export const useSettings = create<SettingsState>((setState, get) => ({
             ? (persisted.fileSearchEngine as FileSearchEngine)
             : DEFAULTS.fileSearchEngine,
           searchToolCache: normalizeSearchToolCache(persisted.searchToolCache),
+          monitoringEngine: monitoringEngines.includes(
+            persisted.monitoringEngine as MonitoringEngine,
+          )
+            ? (persisted.monitoringEngine as MonitoringEngine)
+            : DEFAULTS.monitoringEngine,
+          monitoringToolCache: normalizeMonitoringToolCache(
+            persisted.monitoringToolCache,
+          ),
           theme: normalizeTheme(persisted.theme),
         },
       });
@@ -337,6 +421,26 @@ export const useSettings = create<SettingsState>((setState, get) => ({
       ),
     ].slice(0, MAX_SEARCH_TOOL_CACHE_ENTRIES);
     const next = { ...settings, searchToolCache };
+    setState({ settings: next });
+    scheduleSave(next);
+  },
+  saveMonitoringToolCheck: (server, status) => {
+    const settings = get().settings;
+    const identity = normalizeServerIdentity(server);
+    const updated: MonitoringToolCacheEntry = {
+      ...identity,
+      checked: true,
+      available: status.available,
+      version: status.version,
+      missing: [...status.missing],
+    };
+    const monitoringToolCache = [
+      updated,
+      ...settings.monitoringToolCache.filter(
+        (entry) => !sameSearchServer(entry, identity),
+      ),
+    ].slice(0, MAX_MONITORING_TOOL_CACHE_ENTRIES);
+    const next = { ...settings, monitoringToolCache };
     setState({ settings: next });
     scheduleSave(next);
   },

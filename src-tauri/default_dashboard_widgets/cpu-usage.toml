@@ -1,14 +1,13 @@
-# CPU usage as a percentage (100 - idle), read from `top` and reduced to a
-# single number by the widget's own shell command so the gauge just renders a %.
+# Cumulative CPU time counters from /proc/stat. The client compares two
+# snapshots, so the SSH worker never has to sleep while measuring an interval.
 id = "cpu-usage"
 label = "CPU 사용률"
 icon = "🖥️"
 description = "전체 CPU 사용률을 게이지로 표시해요."
-command = "top -bn1 | grep '%Cpu' | head -1 | awk '{print 100 - $8}'"
-parser = "regex"
-capture_pattern = '(?<usage>[0-9.]+)'
-render = "gauge"
-value_field = "usage"
-unit = "%"
+command = "awk '/^cpu / {printf \"USER NICE SYSTEM IDLE IOWAIT IRQ SOFTIRQ STEAL\\n%.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f\\n\", $2, $3, $4, $5, $6, $7, $8, $9; exit}' /proc/stat"
+parser = "columns"
+render = "table"
+highlight_column = "SYSTEM"
+simple_view = "cpu"
 category = "monitoring"
 # No refresh_interval_seconds: uses the app's global default interval.

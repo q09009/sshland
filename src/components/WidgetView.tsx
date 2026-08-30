@@ -10,6 +10,7 @@ import {
   parseRegex,
 } from "../lib/parsers";
 import ProcessTable from "./ProcessTable";
+import { pidstatProcessRows } from "../lib/processUsage";
 import { useI18n } from "../i18n";
 import SimpleDashboardView, {
   type PreviousDashboardSample,
@@ -98,6 +99,8 @@ function renderWidget(
   // Process-manager widgets use a dedicated table (subset columns, CPU sort,
   // and a per-row kill action) instead of the generic table renderer.
   if (config.category === "process-manager" && config.parser === "columns") {
+    const pidstatRows = pidstatProcessRows(output);
+    if (pidstatRows) return <ProcessTable rows={pidstatRows} onKill={onKill} />;
     const data = parseColumns(output);
     if (data && data.rows.length > 0)
       return <ProcessTable data={data} onKill={onKill} />;

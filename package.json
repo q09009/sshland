@@ -7,6 +7,7 @@
     "predev": "node scripts/free-port.mjs 1420",
     "dev": "vite",
     "free-port": "node scripts/free-port.mjs 1420",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"

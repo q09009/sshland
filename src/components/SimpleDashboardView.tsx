@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import type { DashboardWidgetConfig } from "../api";
 import { useI18n } from "../i18n";
+import { cpuCounters, cpuUsageBetween, sysstatCpuUsage } from "../lib/cpuUsage";
 import { leadingNumber, parseColumns, type ColumnsData } from "../lib/parsers";
+import { pidstatProcessRows } from "../lib/processUsage";
 import { toProcessRows } from "./ProcessTable";
 
 const DISK_LIMIT = 5;
@@ -26,6 +28,8 @@ export default function SimpleDashboardView({
   onKill?: (pid: string, name: string) => void;
 }): React.ReactElement | null {
   switch (kind) {
+    case "cpu":
+      return <SimpleCpuView output={output} previousSample={previousSample} />;
     case "disk":
       return <SimpleDiskView output={output} />;
     case "network":
@@ -79,6 +83,121 @@ function ProgressBar({ percent, compact = false }: { percent: number; compact?: 
         className={`h-full rounded-full transition-[width] duration-normal ease-spatial ${tone.fill}`}
         style={{ width: `${pct}%` }}
       />
+    </div>
+  );
+}
+
+function SimpleCpuView({
+  output,
+  previousSample,
+}: {
+  output: string;
+  previousSample?: PreviousDashboardSample | null;
+}) {
+  const [showCores, setShowCores] = useState(false);
+  const sysstatRows = useMemo(() => sysstatCpuUsage(output), [output]);
+  const current = useMemo(() => cpuCounters(output), [output]);
+  const previous = useMemo(
+    () => previousSample ? cpuCounters(previousSample.output) : null,
+    [previousSample],
+  );
+  const { t } = useI18n();
+  if (sysstatRows) {
+    const total = sysstatRows.find((row) => row.cpu === "all");
+    if (!total) {
+      return <FriendlyMessage>{t("dashboard.simple.unavailable")}</FriendlyMessage>;
+    }
+    const cores = sysstatRows
+      .filter((row) => row.cpu !== "all")
+      .sort((left, right) => Number(left.cpu) - Number(right.cpu));
+    const tone = usageTone(total.usage);
+    return (
+      <div className="flex flex-col gap-3">
+        <div>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="text-2xs uppercase tracking-wide text-slate-500">
+                {t("dashboard.simple.cpu.total")}
+              </div>
+              <div className="mt-0.5 flex items-baseline gap-1">
+                <span className={`text-3xl font-semibold tabular-nums ${tone.text}`}>
+                  {total.usage.toFixed(1)}
+                </span>
+                <span className="text-sm text-slate-400">%</span>
+              </div>
+            </div>
+            {cores.length > 0 && (
+              <button
+                type="button"
+                aria-pressed={showCores}
+                aria-expanded={showCores}
+                onClick={() => setShowCores((value) => !value)}
+                className={`rounded-md px-2 py-1 text-2xs transition-colors ${
+                  showCores
+                    ? "bg-sky-500/20 text-sky-200"
+                    : "bg-ink-900/60 text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                {t("dashboard.simple.cpu.cores")} {showCores ? "▴" : "▾"}
+              </button>
+            )}
+          </div>
+          <div className="mt-2"><ProgressBar percent={total.usage} /></div>
+        </div>
+
+        {showCores && cores.length > 0 && (
+          <div className="border-t border-ink-700/60 pt-2">
+            <div className="mb-1.5 text-2xs font-medium text-slate-500">
+              {t("dashboard.simple.cpu.coreCount", { count: cores.length })}
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {cores.map((core) => {
+                const coreTone = usageTone(core.usage);
+                return (
+                  <div key={core.cpu} className="rounded-md bg-ink-900/35 px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2 text-2xs">
+                      <span className="font-mono text-slate-300">CPU {core.cpu}</span>
+                      <span className={`tabular-nums ${coreTone.text}`}>
+                        {core.usage.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="mt-1"><ProgressBar percent={core.usage} compact /></div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (!current) return <FriendlyMessage>{t("dashboard.simple.unavailable")}</FriendlyMessage>;
+  if (!previous) {
+    return (
+      <div className="flex h-full min-h-24 items-center justify-center text-center text-xs text-slate-500">
+        {t("dashboard.simple.cpu.measuring")}
+      </div>
+    );
+  }
+  const percent = cpuUsageBetween(previous, current);
+  if (percent == null) {
+    return <FriendlyMessage>{t("dashboard.simple.unavailable")}</FriendlyMessage>;
+  }
+  const tone = usageTone(percent);
+  return (
+    <div className="flex h-full w-full flex-col justify-center gap-3">
+      <div>
+        <div className="text-2xs uppercase tracking-wide text-slate-500">
+          {t("dashboard.simple.cpu.total")}
+        </div>
+        <div className="mt-0.5 flex items-baseline gap-1">
+          <span className={`text-3xl font-semibold tabular-nums ${tone.text}`}>
+            {percent.toFixed(1)}
+          </span>
+          <span className="text-sm text-slate-400">%</span>
+        </div>
+      </div>
+      <ProgressBar percent={percent} />
     </div>
   );
 }
@@ -280,7 +399,11 @@ function SimpleProcessView({
   onKill?: (pid: string, name: string) => void;
 }) {
   const data = useMemo(() => parseColumns(output), [output]);
-  const rows = useMemo(() => data ? toProcessRows(data) : null, [data]);
+  const sampledRows = useMemo(() => pidstatProcessRows(output), [output]);
+  const rows = useMemo(
+    () => sampledRows ?? (data ? toProcessRows(data) : null),
+    [data, sampledRows],
+  );
   const [sortBy, setSortBy] = useState<"cpu" | "mem">("cpu");
   const { t } = useI18n();
   if (!rows) return <FriendlyMessage>{t("dashboard.simple.unavailable")}</FriendlyMessage>;

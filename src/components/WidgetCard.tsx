@@ -8,7 +8,13 @@ import {
   WIDGET_SIZES,
 } from "../lib/dashboardLayout";
 import { operationToCommandString } from "../lib/commandLog";
+import {
+  resolveMonitoringEngine,
+  SYSSTAT_CPU_COMMAND,
+  SYSSTAT_PROCESS_COMMAND,
+} from "../lib/monitoring";
 import { ReorderItemProps } from "../lib/reorder";
+import { getCachedMonitoringTools, useSettings } from "../lib/settings";
 import { useAppStore } from "../store";
 import WidgetView from "./WidgetView";
 import type { PreviousDashboardSample } from "./SimpleDashboardView";
@@ -58,6 +64,8 @@ export default function WidgetCard({
   const [killTarget, setKillTarget] = useState<{ pid: string; name: string } | null>(null);
   const [killing, setKilling] = useState(false);
   const connection = useAppStore((s) => s.connection);
+  const preferredMonitoringEngine = useSettings((s) => s.settings.monitoringEngine);
+  const monitoringToolCache = useSettings((s) => s.settings.monitoringToolCache);
   const logCommand = useAppStore((s) => s.logCommand);
   const { language, t } = useI18n();
 
@@ -66,8 +74,27 @@ export default function WidgetCard({
   const mounted = useRef(true);
   const pollRef = useRef<() => void>(() => {});
   const latestSampleRef = useRef<{ output: string; at: number } | null>(null);
-  const networkMeasureTimerRef = useRef<number | null>(null);
-  const command = config?.command ?? "";
+  const counterMeasureTimerRef = useRef<number | null>(null);
+  const sysstat = connection
+    ? getCachedMonitoringTools(monitoringToolCache, connection)
+    : { checked: false, available: false, version: null, missing: [] };
+  const effectiveMonitoringEngine = resolveMonitoringEngine(
+    preferredMonitoringEngine,
+    sysstat,
+  );
+  const usesSysstatCpu =
+    config?.name === "cpu-usage" &&
+    config.source === "default" &&
+    effectiveMonitoringEngine === "sysstat";
+  const usesSysstatProcess =
+    config?.name === "process-manager" &&
+    config.source === "default" &&
+    effectiveMonitoringEngine === "sysstat";
+  const command = usesSysstatCpu
+    ? SYSSTAT_CPU_COMMAND
+    : usesSysstatProcess
+      ? SYSSTAT_PROCESS_COMMAND
+      : config?.command ?? "";
 
   pollRef.current = () => {
     if (!command) return;
@@ -88,15 +115,16 @@ export default function WidgetCard({
         latestSampleRef.current = { output: out, at: now };
         setOutput(out);
         setError(null);
-        // Current network throughput needs two counter snapshots. Take the
-        // second one quickly without sleeping in the remote command/SSH worker.
+        // CPU usage and current network throughput need two counter snapshots.
+        // Take the second one quickly without sleeping in the shared SSH worker.
         if (
-          config?.simpleView === "network" &&
+          ((!usesSysstatCpu && config?.simpleView === "cpu") ||
+            config?.simpleView === "network") &&
           previous == null &&
-          networkMeasureTimerRef.current == null
+          counterMeasureTimerRef.current == null
         ) {
-          networkMeasureTimerRef.current = window.setTimeout(() => {
-            networkMeasureTimerRef.current = null;
+          counterMeasureTimerRef.current = window.setTimeout(() => {
+            counterMeasureTimerRef.current = null;
             pollRef.current();
           }, 1000);
         }
@@ -114,8 +142,8 @@ export default function WidgetCard({
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (networkMeasureTimerRef.current != null) {
-        window.clearTimeout(networkMeasureTimerRef.current);
+      if (counterMeasureTimerRef.current != null) {
+        window.clearTimeout(counterMeasureTimerRef.current);
       }
     };
   }, []);
@@ -125,9 +153,9 @@ export default function WidgetCard({
     if (!command) return;
     latestSampleRef.current = null;
     setPreviousSample(null);
-    if (networkMeasureTimerRef.current != null) {
-      window.clearTimeout(networkMeasureTimerRef.current);
-      networkMeasureTimerRef.current = null;
+    if (counterMeasureTimerRef.current != null) {
+      window.clearTimeout(counterMeasureTimerRef.current);
+      counterMeasureTimerRef.current = null;
     }
     const run = () => pollRef.current();
     run(); // poll immediately, then on the interval

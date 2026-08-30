@@ -1,21 +1,18 @@
 import { useMemo, useState } from "react";
 import { ColumnsData, leadingNumber } from "../lib/parsers";
+import type { ProcessUsageRow } from "../lib/processUsage";
 import { useI18n } from "../i18n";
 
 /**
  * The process-manager widget's table. Unlike the generic table renderer it
- * projects `ps aux` down to just PID / CPU% / MEM% / name, defaults to sorting
- * by CPU descending, and (wired in a later step) offers a per-row kill action.
+ * projects either `ps aux` or the normalized pidstat sample down to just
+ * PID / CPU% / MEM% / name, defaults to sorting by CPU descending, and offers
+ * a per-row kill action.
  *
- * Returns null if the expected columns aren't present, so a non-`ps` command
+ * Returns null if the expected columns aren't present, so an unrelated command
  * routed here falls back to raw text like everywhere else.
  */
-export interface ProcessRow {
-  pid: string;
-  cpu: string;
-  mem: string;
-  command: string;
-}
+export type ProcessRow = ProcessUsageRow;
 
 /** Column the table is sorted by. */
 type ProcCol = "pid" | "cpu" | "mem" | "command";
@@ -42,13 +39,18 @@ export function toProcessRows(data: ColumnsData): ProcessRow[] | null {
 
 export default function ProcessTable({
   data,
+  rows: suppliedRows,
   onKill,
 }: {
-  data: ColumnsData;
+  data?: ColumnsData;
+  rows?: ProcessRow[];
   /** Ask to kill a process; the card orchestrates the confirm + exec + re-poll. */
   onKill?: (pid: string, name: string) => void;
 }) {
-  const rows = useMemo(() => toProcessRows(data), [data]);
+  const rows = useMemo(
+    () => suppliedRows ?? (data ? toProcessRows(data) : null),
+    [data, suppliedRows],
+  );
   // Default: highest CPU first.
   const [sort, setSort] = useState<Sort>({ col: "cpu", dir: -1 });
   const { t } = useI18n();

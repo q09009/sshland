@@ -4,6 +4,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../store";
 import {
   DEFAULT_THEME_SETTINGS,
+  getCachedMonitoringTools,
   useSettings,
   type MotionPreference,
   type FileSearchEngine,
@@ -11,11 +12,17 @@ import {
   type ThemeSettings,
   type UiFontPreference,
 } from "../lib/settings";
+import {
+  resolveMonitoringEngine,
+  type MonitoringEngine,
+  type SysstatToolStatus,
+} from "../lib/monitoring";
 import { useCommandConfigs } from "../lib/commandConfigs";
 import { useDashboardWidgetConfigs } from "../lib/dashboardWidgetConfigs";
 import { MIN_REFRESH_SECONDS, clampInterval } from "../lib/dashboardTypes";
 import {
   checkSearchTool,
+  checkSysstat,
   clearThemeBackground,
   commandsDirPath,
   exportThemePreset,
@@ -254,11 +261,24 @@ function TerminalCommandGuiSection() {
 function DashboardSection() {
   const enabled = useSettings((s) => s.settings.dashboardEnabled);
   const defaultInterval = useSettings((s) => s.settings.dashboardDefaultInterval);
+  const preferredMonitoringEngine = useSettings((s) => s.settings.monitoringEngine);
+  const monitoringToolCache = useSettings((s) => s.settings.monitoringToolCache);
+  const saveMonitoringToolCheck = useSettings((s) => s.saveMonitoringToolCheck);
   const set = useSettings((s) => s.set);
+  const connection = useAppStore((s) => s.connection);
   const configs = useDashboardWidgetConfigs((s) => s.configs);
   const reload = useDashboardWidgetConfigs((s) => s.load);
   const [intervalText, setIntervalText] = useState(String(defaultInterval));
+  const [checkingSysstat, setCheckingSysstat] = useState(false);
+  const [monitoringCheckError, setMonitoringCheckError] = useState<string | null>(null);
   const { t } = useI18n();
+  const sysstat = connection
+    ? getCachedMonitoringTools(monitoringToolCache, connection)
+    : { checked: false, available: false, version: null, missing: [] };
+  const effectiveMonitoringEngine = resolveMonitoringEngine(
+    preferredMonitoringEngine,
+    sysstat,
+  );
 
   useEffect(() => setIntervalText(String(defaultInterval)), [defaultInterval]);
   useEffect(() => {
@@ -270,6 +290,30 @@ function DashboardSection() {
     const clamped = Number.isNaN(n) ? defaultInterval : clampInterval(n);
     set("dashboardDefaultInterval", clamped);
     setIntervalText(String(clamped));
+  };
+
+  const selectMonitoringEngine = async (engine: MonitoringEngine) => {
+    setMonitoringCheckError(null);
+    if (engine === "builtin") {
+      set("monitoringEngine", engine);
+      return;
+    }
+    if (!connection || checkingSysstat) {
+      if (!connection) {
+        setMonitoringCheckError(t("settings.dashboard.monitoring.noConnection"));
+      }
+      return;
+    }
+    setCheckingSysstat(true);
+    try {
+      const status = await checkSysstat();
+      saveMonitoringToolCheck(connection, status);
+      if (status.available) set("monitoringEngine", "sysstat");
+    } catch {
+      setMonitoringCheckError(t("settings.dashboard.monitoring.checkFailed"));
+    } finally {
+      setCheckingSysstat(false);
+    }
   };
 
   return (
@@ -285,6 +329,15 @@ function DashboardSection() {
             onChange={(v) => set("dashboardEnabled", v)}
           />
         </SettingRow>
+
+        <MonitoringEnginePicker
+          preferred={preferredMonitoringEngine}
+          effective={effectiveMonitoringEngine}
+          sysstat={sysstat}
+          checking={checkingSysstat}
+          error={monitoringCheckError}
+          onSelect={selectMonitoringEngine}
+        />
 
         <SettingRow
           label={t("settings.dashboard.interval")}
@@ -343,6 +396,90 @@ function DashboardSection() {
   );
 }
 
+function MonitoringEnginePicker({
+  preferred,
+  effective,
+  sysstat,
+  checking,
+  error,
+  onSelect,
+}: {
+  preferred: MonitoringEngine;
+  effective: MonitoringEngine;
+  sysstat: SysstatToolStatus;
+  checking: boolean;
+  error: string | null;
+  onSelect: (engine: MonitoringEngine) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="rounded-xl border border-ink-700/60 bg-ink-800/50 px-4 py-3">
+      <div className="text-sm text-slate-200">
+        {t("settings.dashboard.monitoring.title")}
+      </div>
+      <div className="mt-1 text-xs leading-relaxed text-slate-500">
+        {t("settings.dashboard.monitoring.description")}
+      </div>
+      <div role="radiogroup" className="mt-3 grid gap-2 sm:grid-cols-2">
+        {(["builtin", "sysstat"] as const).map((engine) => {
+          const selected = preferred === engine;
+          const isChecking = engine === "sysstat" && checking;
+          const status =
+            engine === "builtin"
+              ? t("settings.dashboard.monitoring.builtInStatus")
+              : isChecking
+                ? t("settings.dashboard.monitoring.checking")
+                : !sysstat.checked
+                  ? t("settings.dashboard.monitoring.notChecked")
+                  : sysstat.available
+                    ? sysstat.version ?? t("settings.dashboard.monitoring.available")
+                    : t("settings.dashboard.monitoring.unavailable");
+          return (
+            <button
+              key={engine}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-busy={isChecking}
+              disabled={checking}
+              onClick={() => void onSelect(engine)}
+              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                selected
+                  ? "border-sky-500/60 bg-sky-500/10"
+                  : "border-ink-700/60 bg-ink-900/30 hover:bg-ink-700/50"
+              } disabled:cursor-wait disabled:opacity-70`}
+            >
+              <span className="flex items-center gap-2 text-xs text-slate-200">
+                <span
+                  className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                    selected ? "border-sky-400" : "border-slate-600"
+                  }`}
+                >
+                  {selected && <span className="h-2 w-2 rounded-full bg-sky-400" />}
+                </span>
+                {t(`settings.dashboard.monitoring.${engine}` as TranslationKey)}
+              </span>
+              <span className="mt-1 block truncate text-2xs text-slate-500" title={status}>
+                {status}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {preferred === "sysstat" && effective === "builtin" && (
+        <p className="mt-2 text-xs text-amber-400">
+          {sysstat.checked && sysstat.missing.length > 0
+            ? t("settings.dashboard.monitoring.missing", {
+                commands: sysstat.missing.join(", "),
+              })
+            : t("settings.dashboard.monitoring.fallback")}
+        </p>
+      )}
+      {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
+    </div>
+  );
+}
+
 function FileManagerSection() {
   const preferred = useSettings((s) => s.settings.fileSearchEngine);
   const set = useSettings((s) => s.set);
@@ -357,6 +494,7 @@ function FileManagerSection() {
     fdCommand: null,
     fdChecked: false,
   };
+
   const effective = resolveFileSearchEngine(preferred, tools);
   const options: Array<{
     id: FileSearchEngine;
