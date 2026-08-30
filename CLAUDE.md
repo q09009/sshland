@@ -23,7 +23,7 @@ The `ssh2` crate (built against the WinCNG backend on Windows, so no OpenSSL/Per
   - With no terminals open, it blocks on `cmd_rx.recv_timeout()` until either a request arrives or the next 30-second SSH keepalive is due (effectively 0% CPU). `Session::set_keepalive` only configures libssh2, so the worker explicitly calls `keepalive_send()`; otherwise an idle connection can still be removed by the server/NAT/VPN.
   - With at least one terminal open, the session switches to non-blocking mode and polls every channel roughly every 15ms (`TERMINAL_POLL`), batching each channel's output into a single `terminal-output` event.
   - A terminal EOF/read error is followed immediately by an SFTP `realpath(".")` probe: a live connection emits only `terminal-closed` (normal shell exit), while a failed probe emits `connection-lost` immediately instead of waiting for the next file operation.
-- SFTP operations (list/download/upload/rename/delete/copy/mkdir) are handled blockingly inside this same worker.
+- SFTP operations (list/download/upload/rename/delete/copy/mkdir/permission changes) are handled blockingly inside this same worker.
 - Disconnect detection: when any operation fails, a cheap `sftp.realpath(".")` round-trip confirms whether the connection is truly dead → if so, emits a `connection-lost` event and the worker exits.
 - **Host identity is verified before authentication.** After the SSH handshake, `connect` compares the presented key against the app-owned `<config>/com.sshland.app/known_hosts`. An unknown host returns a structured SHA-256 fingerprint challenge without sending credentials; approval is bound to that exact fingerprint and checked again on a fresh handshake before the key is saved. A mismatch is a hard stop. Removing the saved entry is a separate action and the replacement key still needs its own approval.
 - **The production WebView has a deny-by-default CSP.** Bundled scripts only (`script-src 'self'`, with Tauri injecting build-time hashes/nonces), Tauri IPC only for connections, and no frames, workers, media, or object/plugin content. `img-src` additionally permits `asset:` / `http://asset.localhost` for the narrowly scoped app-owned theme background and `data:` for library-provided SVG images. `style-src 'unsafe-inline'` is the deliberate exception required by React layout styles, CodeMirror, xterm, and runtime theme CSS variables. Development has a separate equivalent `devCsp` that additionally permits only Vite's fixed `ws://localhost:1420` HMR socket.
@@ -45,6 +45,7 @@ The `ssh2` crate (built against the WinCNG backend on Windows, so no OpenSSL/Per
 - **Two panes make the transfer model visible.** Because filesystem scope remains per pane, users can split the workspace, switch one pane to `내 PC`, keep the other on `서버`, and drag between them. A single pane can also switch sides; each side returns to its last path.
 - **Local search is intentionally the current-folder filter only.** `fd`/`find` settings and recursive results remain remote-server features. Local files are currently for navigation, transfer, and basic file operations; only remote text files open in the built-in SFTP editor.
 - **Command log scope:** remote operations and cross-boundary transfers are logged as their equivalent SSH/scp commands. Pure local operations are not shown as server commands.
+- **Remote Unix permissions:** one non-symlink server entry exposes a checkbox-based owner/group/others `rwx` dialog. `set_permissions` uses SFTP `SETSTAT` (not a shell command), accepts only `000`–`777`, and optionally applies the same mode recursively. Recursive mode builds the complete plan before changing anything, verifies every child with `lstat`, skips symlinks, then changes children before parents so removing directory execute permission cannot interrupt traversal midway. The displayed command log is the equivalent `chmod [-R] MODE PATH`.
 
 ### Tiling pane tree (Hyprland-style, partial feature set)
 
@@ -143,7 +144,7 @@ The files screen (`App.tsx`) is a **vertical flex**: `StatusBar` (fixed height `
 
 A thin one-line bar that turns file-manager operations into **actual terminal command strings** for learning purposes. Positioned below the tiling in `App.tsx`'s vertical flex (symmetric with `StatusBar`).
 
-- **The conversion is one reusable pure function, `operationToCommandString(op, {user,host})` in `lib/commandLog.ts`**: upload/download → `scp` (folder upload adds `-r`), delete → `rm` (`-r` for directories), new folder → `mkdir`, new file → `touch`, rename/move → `mv`, copy → `cp -r`, **editor save → a descriptive `(편집기로 저장) <path>` line** (no honest shell equivalent). Paths are quoted only when they contain spaces/special characters (so the shown command stays one that would actually work, since this is for learning). The operation itself runs over SFTP; this string is **display-only**.
+- **The conversion is one reusable pure function, `operationToCommandString(op, {user,host})` in `lib/commandLog.ts`**: upload/download → `scp` (folder upload adds `-r`), delete → `rm` (`-r` for directories), new folder → `mkdir`, new file → `touch`, rename/move → `mv`, copy → `cp -r`, permissions → `chmod` (optional `-R`), **editor save → a descriptive `(편집기로 저장) <path>` line** (no honest shell equivalent). Paths are quoted only when they contain spaces/special characters (so the shown command stays one that would actually work, since this is for learning). The operation itself runs over SFTP; this string is **display-only**.
 - The log is **session-only** (`store.commandLog`, newest first, capped at the most recent 20) — not persisted, reset on restart.
 - `logOp(op)` is called at each operation's success point (`FilesScreen`'s handleDrop/doDownload/performMove/doRename/doDelete/doNewFolder/doPaste). **Terminal-pane input never lands in this log** — only file-manager operations are explicitly hooked, so there's no automatic duplication.
 - Clicking the bar expands a **history popup** upward (the most recent 20, closes on outside click or Esc). Clicking does nothing when there's no history.
@@ -178,6 +179,7 @@ Shared color/typography/radius values live in **`:root` in `src/index.css`** as 
 src-tauri/src/
   ssh.rs      SSH/SFTP session manager + worker loop + every Tauri command (connect, list_dir,
               download, upload, rename, mkdir, create_file (new empty file), delete, copy,
+              set_permissions (SFTP SETSTAT, optional recursive plan with symlink exclusion),
               poll_widget_command (Req::RunOnce one-shot exec, for dashboard polling + process kill),
               run_macro/stop_macro (Req::RunMacro streaming exec channel, macro-output/macro-closed events),
               read_remote_file/write_remote_file (in-memory editor read/write),
@@ -204,6 +206,7 @@ src/
   lib/panes.ts           Pane-tree pure functions (split/remove/switch/ratio/layout/focus navigation)
   lib/path.ts            Remote Unix + normalized local/Windows path utilities (join/parent/breadcrumb/containment/baseName)
   lib/fileSystem.ts      Shared local/remote FileSystemAdapter used by FilesScreen
+  lib/permissions.ts     Pure Unix rwx string/mode parsing, toggling, and octal formatting for the permission dialog
   lib/files.ts           sortEntries (folders-first sort)
   lib/format.ts          Human-readable size/date/elapsed-time/clock formatting
   lib/commandLog.ts      File operation → CLI command string conversion (operationToCommandString, pure/reusable; incl. the editor "save" case)
@@ -249,7 +252,7 @@ src/
   components/FileView.tsx     Three view modes — list/details/large icons (selection, drag-start, right-click support)
   components/Menu.tsx         Menu-bar dropdown (File/Edit/View)
   components/ContextMenu.tsx  Right-click context menu
-  components/Modal.tsx        Confirm / prompt / unsaved-changes / kill-process dialogs (저장·저장 안 함·취소 / 종료·강제 종료); prompt reused for macro export path
+  components/Modal.tsx        Confirm / prompt / permissions / unsaved-changes / kill-process dialogs (저장·저장 안 함·취소 / 종료·강제 종료); prompt reused for macro export path
   components/DragLayer.tsx    Ghost label that follows the cursor while dragging
   components/TransfersPanel.tsx  Upload/download progress panel (finished cards/batches auto-fade after 3s; errors are dismissed manually)
   components/ShortcutsHelp.tsx   Bottom-right shortcuts help
@@ -258,7 +261,7 @@ src/
 ## Current Status (as of 2026-08-30)
 
 **Phase 1 — SSH connect + shared local/SFTP file manager: done**
-Connect screen, pre-authentication `known_hosts` verification with first-use fingerprint approval and changed-key blocking, local/server switching (with independent paths per pane), listing (3 view modes), path navigation/breadcrumbs/hidden files, download/upload and bidirectional pane drag-and-drop, rename/delete/new folder/copy, disconnect detection.
+Connect screen, pre-authentication `known_hosts` verification with first-use fingerprint approval and changed-key blocking, local/server switching (with independent paths per pane), listing (3 view modes), path navigation/breadcrumbs/hidden files, download/upload and bidirectional pane drag-and-drop, rename/delete/new folder/copy, server Unix permission editing (optional recursive application), disconnect detection.
 
 **Phase 2 — Terminal + Hyprland-style tiling: done (all 9 steps)**
 PTY streaming → xterm pane → pane tree + renderer → split shortcuts → focus movement → closing → divider dragging → pane switching → render throttling for inactive panes.
@@ -267,7 +270,7 @@ PTY streaming → xterm pane → pane tree + renderer → split shortcuts → fo
 A GNOME-style top status bar separate from the panes (user@host / connection status / session elapsed / local clock / settings icon, all computed locally), a settings modal (category sidebar, data-driven extensible structure), local JSON persistence (`settings.json`). See the "Top status bar + settings" architecture section above.
 
 **Phase 4 — Command log bar: done**
-A thin bar at the bottom of the screen showing file-manager operations as real CLI commands (scp/rm/mkdir/mv/cp) — latest line plus a click-to-open history popup, session-only. Toggleable via the settings tab's first section, "Command Log" (off makes the bar disappear). See the "Command log bar" architecture section above. Future shortcuts/theme sections are expected to extend the same settings structure.
+A thin bar at the bottom of the screen showing file-manager operations as real CLI commands (scp/rm/mkdir/mv/cp/chmod) — latest line plus a click-to-open history popup, session-only. Toggleable via the settings tab's first section, "Command Log" (off makes the bar disappear). See the "Command log bar" architecture section above. Future shortcuts/theme sections are expected to extend the same settings structure.
 
 **Phase 5 — Command GUI (the core feature): done (all 8 steps)**
 Shell-integration (OSC 133) boundary detection → declarative TOML config loader (defaults + user, with override) → columns/keyvalue/regex parsers + table/keyvalue-card/list renderers → inline terminal "▦" icon (decoration) + panel below (with a raw toggle) → 6 bundled defaults (ps aux/systemctl status/df -h/du -sh/free -h/ip addr) → reload/open-folder → a settings master toggle. See the "Command GUI" architecture section above. Parser/render verification was done in-browser against real xterm/React components; the inline decoration display needs confirming in the real app (rAF-dependent). **Not yet implemented (future work): file-change watching (currently a reload button), zsh/fish shell integration (currently bash only), fine-tuning the decoration icon's position (currently covers the first 3 columns of the output's first line).**

@@ -34,3 +34,18 @@ test("shows the collision-safe destination name for cross-side downloads", () =>
     "scp alice@server:/home/alice/report.txt './report copy.txt'",
   );
 });
+
+test("formats recursive Unix permission changes", () => {
+  assert.equal(
+    operationToCommandString(
+      {
+        type: "chmod",
+        path: "/srv/shared folder",
+        mode: 0o750,
+        recursive: true,
+      },
+      remote,
+    ),
+    "chmod -R 750 '/srv/shared folder'",
+  );
+});

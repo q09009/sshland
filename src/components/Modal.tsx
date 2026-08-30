@@ -1,5 +1,12 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
+import {
+  octalPermissionMode,
+  PERMISSION_COLUMNS,
+  PERMISSION_ROWS,
+  permissionModeFromString,
+  togglePermission,
+} from "../lib/permissions";
 
 function Backdrop({ children }: { children: ReactNode }) {
   return (
@@ -337,6 +344,131 @@ export function KillProcessDialog({
         >
           {busy ? t("modal.kill.killing") : t("modal.kill.kill")}
         </button>
+      </div>
+    </Backdrop>
+  );
+}
+
+/** Simple Unix rwx editor for one remote file or directory. */
+export function PermissionsDialog({
+  name,
+  permissions,
+  isDirectory,
+  busy,
+  onApply,
+  onCancel,
+}: {
+  name: string;
+  permissions: string;
+  isDirectory: boolean;
+  busy?: boolean;
+  onApply: (mode: number, recursive: boolean) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  const [mode, setMode] = useState(
+    () => permissionModeFromString(permissions) ?? (isDirectory ? 0o755 : 0o644),
+  );
+  const [recursive, setRecursive] = useState(false);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  return (
+    <Backdrop>
+      <div role="dialog" aria-modal="true" aria-labelledby="permissions-title">
+        <h2 id="permissions-title" className="text-base font-semibold text-slate-100">
+          {t("modal.permissions.title")}
+        </h2>
+        <p className="mt-1 truncate font-mono text-xs text-slate-400" title={name}>
+          {name}
+        </p>
+
+        <div className="mt-4 overflow-hidden rounded-lg border border-ink-700">
+          <div className="grid grid-cols-[1fr_repeat(3,52px)] items-center bg-ink-900/80 px-3 py-2 text-center text-2xs text-slate-500">
+            <span />
+            <span>{t("modal.permissions.read")}</span>
+            <span>{t("modal.permissions.write")}</span>
+            <span>{t("modal.permissions.execute")}</span>
+          </div>
+          {PERMISSION_ROWS.map((row) => (
+            <div
+              key={row.key}
+              className="grid grid-cols-[1fr_repeat(3,52px)] items-center border-t border-ink-700/60 px-3 py-2"
+            >
+              <span className="text-sm text-slate-300">
+                {t(`modal.permissions.${row.key}`)}
+              </span>
+              {row.masks.map((mask, index) => (
+                <label key={mask} className="flex justify-center">
+                  <input
+                    type="checkbox"
+                    checked={(mode & mask) !== 0}
+                    disabled={busy}
+                    aria-label={`${t(`modal.permissions.${row.key}`)} ${t(
+                      `modal.permissions.${PERMISSION_COLUMNS[index]}`,
+                    )}`}
+                    onChange={() => setMode((current) => togglePermission(current, mask))}
+                    className="h-4 w-4 accent-sky-500"
+                  />
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 flex items-center justify-between rounded-lg bg-ink-900/70 px-3 py-2 text-xs">
+          <span className="text-slate-500">{t("modal.permissions.numeric")}</span>
+          <code className="font-mono text-sky-300">{octalPermissionMode(mode)}</code>
+        </div>
+
+        {isDirectory && (
+          <label className="mt-4 flex items-start gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={recursive}
+              disabled={busy}
+              onChange={(event) => setRecursive(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-sky-500"
+            />
+            <span>
+              {t("modal.permissions.recursive")}
+              {recursive && (
+                <span className="mt-1 block text-xs leading-5 text-amber-400">
+                  {t("modal.permissions.recursiveWarning")}
+                </span>
+              )}
+            </span>
+          </label>
+        )}
+
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          {t("modal.permissions.help")}
+        </p>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded-lg border border-ink-700 px-3.5 py-2 text-sm text-slate-300 hover:bg-ink-700 disabled:opacity-50"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={() => onApply(mode, isDirectory && recursive)}
+            disabled={busy}
+            className="rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-on-accent hover:bg-sky-500 disabled:opacity-50"
+          >
+            {busy ? t("modal.permissions.applying") : t("modal.permissions.apply")}
+          </button>
+        </div>
       </div>
     </Backdrop>
   );

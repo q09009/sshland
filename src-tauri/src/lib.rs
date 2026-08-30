@@ -61,6 +61,7 @@ pub fn run() {
             ssh::create_file,
             ssh::delete,
             ssh::copy,
+            ssh::set_permissions,
             ssh::poll_widget_command,
             ssh::run_macro,
             ssh::stop_macro,

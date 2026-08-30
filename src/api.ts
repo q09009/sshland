@@ -139,6 +139,15 @@ export function localCopy(from: string, to: string): Promise<void> {
   return invokeCommand<void>("local_copy", { from, to });
 }
 
+/** Change standard Unix permission bits on a remote entry. */
+export function setPermissions(
+  path: string,
+  mode: number,
+  recursive: boolean,
+): Promise<void> {
+  return invokeCommand<void>("set_permissions", { path, mode, recursive });
+}
+
 /** Check one optional search command when its settings option is clicked. */
 export function checkSearchTool(
   engine: RemoteSearchEngine,

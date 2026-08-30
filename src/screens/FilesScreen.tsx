@@ -7,6 +7,7 @@ import {
   FileEntry,
   localFsInfo,
   searchFiles,
+  setPermissions as setRemotePermissions,
   upload,
   type RemoteSearchEngine,
 } from "../api";
@@ -16,7 +17,11 @@ import { sortEntries } from "../lib/files";
 import { fileSystemFor, type FileSystemScope } from "../lib/fileSystem";
 import { isProbablyBinary, MAX_EDITABLE_SIZE } from "../lib/editable";
 import { FileOperation, operationToCommandString } from "../lib/commandLog";
-import { ConfirmDialog, PromptDialog } from "../components/Modal";
+import {
+  ConfirmDialog,
+  PermissionsDialog,
+  PromptDialog,
+} from "../components/Modal";
 import ContextMenu, { MenuItem } from "../components/ContextMenu";
 import type { DropItem } from "../components/Menu";
 import FileView from "../components/FileView";
@@ -98,6 +103,10 @@ export default function FilesScreen({ id }: { id: string }) {
   } | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [permissionsDialog, setPermissionsDialog] = useState<{
+    entry: FileEntry;
+    busy: boolean;
+  } | null>(null);
 
   // Refs so the once-registered drag-drop listener sees current values.
   const reqIdRef = useRef(0);
@@ -1137,6 +1146,35 @@ export default function FilesScreen({ id }: { id: string }) {
     );
   }
 
+  function doPermissions(entry: FileEntry) {
+    if (scopeRef.current !== "remote" || entry.isSymlink) return;
+    setPermissionsDialog({ entry, busy: false });
+  }
+
+  async function applyPermissions(mode: number, recursive: boolean) {
+    const dialog = permissionsDialog;
+    if (!dialog || dialog.busy) return;
+    setPermissionsDialog({ ...dialog, busy: true });
+    try {
+      await setRemotePermissions(dialog.entry.path, mode, recursive);
+      logOp({
+        type: "chmod",
+        path: dialog.entry.path,
+        mode,
+        recursive,
+      });
+      bumpFs();
+      setPermissionsDialog(null);
+    } catch (failure) {
+      setPermissionsDialog({ ...dialog, busy: false });
+      setOpError(
+        typeof failure === "string"
+          ? failure
+          : t("errors.sftp.permissions"),
+      );
+    }
+  }
+
   /** Paste clipboard items into the current directory (avoids name clashes). */
   function doPaste() {
     if (!clipboard || clipboard.length === 0) return;
@@ -1257,6 +1295,12 @@ export default function FilesScreen({ id }: { id: string }) {
     }
     if (targets.length === 1) {
       items.push({ label: t("common.rename"), onClick: () => doRename(targets[0]) });
+      if (scope === "remote" && !targets[0].isSymlink) {
+        items.push({
+          label: t("files.permissions"),
+          onClick: () => doPermissions(targets[0]),
+        });
+      }
     }
     items.push({
       label: t("common.delete"),
@@ -1303,6 +1347,16 @@ export default function FilesScreen({ id }: { id: string }) {
       onClick: () => primarySelected && doRename(primarySelected),
       disabled: selectedEntries.length !== 1,
     },
+    ...(scope === "remote"
+      ? [
+          {
+            label: t("files.permissions"),
+            onClick: () => primarySelected && doPermissions(primarySelected),
+            disabled:
+              selectedEntries.length !== 1 || Boolean(primarySelected?.isSymlink),
+          } satisfies DropItem,
+        ]
+      : []),
     {
       label: t("common.delete"),
       danger: true,
@@ -1606,6 +1660,18 @@ export default function FilesScreen({ id }: { id: string }) {
           placeholder={prompt.placeholder}
           onConfirm={prompt.onConfirm}
           onCancel={() => setPrompt(null)}
+        />
+      )}
+      {permissionsDialog && (
+        <PermissionsDialog
+          name={permissionsDialog.entry.name}
+          permissions={permissionsDialog.entry.permissions}
+          isDirectory={permissionsDialog.entry.isDir}
+          busy={permissionsDialog.busy}
+          onApply={(mode, recursive) => void applyPermissions(mode, recursive)}
+          onCancel={() => {
+            if (!permissionsDialog.busy) setPermissionsDialog(null);
+          }}
         />
       )}
     </div>

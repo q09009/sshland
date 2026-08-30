@@ -26,6 +26,7 @@ export type FileOperation =
   | { type: "newfile"; path: string }
   | { type: "move"; from: string; to: string }
   | { type: "copy"; from: string; to: string }
+  | { type: "chmod"; path: string; mode: number; recursive: boolean }
   | { type: "save"; path: string }
   | { type: "kill"; pid: string; force: boolean }
   | {
@@ -99,6 +100,10 @@ export function operationToCommandString(
       return `mv ${shellArg(op.from)} ${shellArg(op.to)}`;
     case "copy":
       return `cp -r ${shellArg(op.from)} ${shellArg(op.to)}`;
+    case "chmod":
+      return `chmod ${op.recursive ? "-R " : ""}${op.mode
+        .toString(8)
+        .padStart(3, "0")} ${shellArg(op.path)}`;
     case "save":
       // Saving edits has no single natural shell equivalent (echo/redirect
       // would be misleading), so show a plain descriptive line instead.

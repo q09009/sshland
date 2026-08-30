@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use ssh2::{
-    Channel, CheckResult, HashType, HostKeyType, KnownHostFileKind, OpenFlags, OpenType,
+    Channel, CheckResult, FileStat, HashType, HostKeyType, KnownHostFileKind, OpenFlags, OpenType,
     PtyModeOpcode, PtyModes, Session, Sftp,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -276,6 +276,13 @@ pub enum Req {
         dst: String,
         resp: oneshot::Sender<Result<(), String>>,
     },
+    /// Change Unix permission bits on one remote entry, optionally recursively.
+    SetPermissions {
+        path: String,
+        mode: u32,
+        recursive: bool,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
     /// Run a single command over a short-lived exec channel and return its
     /// stdout. Used by dashboard widgets polling on a timer and by the process
     /// manager's kill action — one-shot execs sharing the worker, never a
@@ -368,6 +375,10 @@ fn reply_err(req: Req, msg: String) -> bool {
             true
         }
         Req::Copy { resp, .. } => {
+            let _ = resp.send(Err(msg));
+            true
+        }
+        Req::SetPermissions { resp, .. } => {
             let _ = resp.send(Err(msg));
             true
         }
@@ -747,6 +758,83 @@ fn read_dir_entries(sftp: &Sftp, path: &str) -> Result<Vec<FileEntry>, String> {
         });
     }
     Ok(entries)
+}
+
+fn validate_permission_mode(mode: u32) -> Result<(), String> {
+    if mode <= 0o777 {
+        Ok(())
+    } else {
+        Err(error::code("errors.invalidPermissions"))
+    }
+}
+
+/// Build the complete recursive chmod plan before changing anything. Symlink
+/// children are skipped so an operation cannot follow a link outside the
+/// selected tree. The selected root itself may not be a symlink.
+fn build_permission_plan(sftp: &Sftp, path: &str, recursive: bool) -> Result<Vec<String>, String> {
+    let stat = sftp
+        .lstat(Path::new(path))
+        .map_err(|_| error::sftp_error("permissions"))?;
+    if stat.perm.unwrap_or(0) & 0o170000 == 0o120000 {
+        return Err(error::code("errors.permissionsSymlink"));
+    }
+
+    let mut paths = vec![path.to_string()];
+    if recursive && stat.is_dir() {
+        append_permission_children(sftp, path, &mut paths)?;
+    }
+    Ok(paths)
+}
+
+fn append_permission_children(
+    sftp: &Sftp,
+    directory: &str,
+    paths: &mut Vec<String>,
+) -> Result<(), String> {
+    for child in read_dir_entries(sftp, directory)? {
+        // Do not rely only on readdir attributes: some SFTP servers omit or
+        // follow them. lstat checks the entry itself before it enters the plan.
+        let stat = sftp
+            .lstat(Path::new(&child.path))
+            .map_err(|_| error::sftp_error("permissions"))?;
+        if stat.perm.unwrap_or(0) & 0o170000 == 0o120000 {
+            continue;
+        }
+        paths.push(child.path.clone());
+        if stat.is_dir() {
+            append_permission_children(sftp, &child.path, paths)?;
+        }
+    }
+    Ok(())
+}
+
+fn set_remote_permissions(
+    sftp: &Sftp,
+    path: &str,
+    mode: u32,
+    recursive: bool,
+) -> Result<(), String> {
+    validate_permission_mode(mode)?;
+    let paths = build_permission_plan(sftp, path, recursive)?;
+
+    // Children are changed before their parents. This lets a recursive mode
+    // such as 000 finish traversing the tree before its directories lose read
+    // or execute permission.
+    for target in paths.into_iter().rev() {
+        sftp.setstat(
+            Path::new(&target),
+            FileStat {
+                size: None,
+                uid: None,
+                gid: None,
+                perm: Some(mode),
+                atime: None,
+                mtime: None,
+            },
+        )
+        .map_err(|_| error::sftp_error("permissions"))?;
+    }
+    Ok(())
 }
 
 enum DownloadPlanEntry {
@@ -1749,6 +1837,23 @@ fn handle_req(
                 resp,
             )
         }
+        Req::SetPermissions {
+            path,
+            mode,
+            recursive,
+            resp,
+        } => {
+            let result = set_remote_permissions(sftp, &path, mode, recursive);
+            send_and_check(
+                sftp,
+                app,
+                "set_permissions",
+                terminal_channels,
+                macro_channels,
+                result,
+                resp,
+            )
+        }
         Req::RunOnce { command, resp } => {
             let result = exec_capture(session, &command);
             send_and_check(
@@ -2543,6 +2648,25 @@ pub async fn copy(
     resp_rx.await.map_err(|_| error::disconnected_error())?
 }
 
+/// Change Unix permission bits on a remote file or directory.
+#[tauri::command]
+pub async fn set_permissions(
+    state: State<'_, SessionManager>,
+    path: String,
+    mode: u32,
+    recursive: bool,
+) -> Result<(), String> {
+    validate_permission_mode(mode)?;
+    let (resp_tx, resp_rx) = oneshot::channel();
+    state.send(Req::SetPermissions {
+        path,
+        mode,
+        recursive,
+        resp: resp_tx,
+    })?;
+    resp_rx.await.map_err(|_| error::disconnected_error())?
+}
+
 /// Run a single command over a one-shot exec channel and return its stdout.
 /// Used by dashboard widgets (polling on a timer) and the process-manager kill
 /// action. Shares the existing worker thread — no dedicated channel.
@@ -2973,6 +3097,15 @@ mod tests {
         let json = serde_json::to_value(fd).expect("search tool result should serialize");
         assert_eq!(json["available"], true);
         assert_eq!(json["command"], "fdfind");
+    }
+
+    #[test]
+    fn permission_mode_accepts_only_standard_unix_bits() {
+        assert!(validate_permission_mode(0o000).is_ok());
+        assert!(validate_permission_mode(0o755).is_ok());
+        assert!(validate_permission_mode(0o777).is_ok());
+        assert!(validate_permission_mode(0o1000).is_err());
+        assert!(validate_permission_mode(u32::MAX).is_err());
     }
 
     #[test]
