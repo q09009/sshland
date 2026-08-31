@@ -31,7 +31,7 @@ tauri-plugin-dialog = "2"
 # for editing and re-encode them to the same encoding on save. chardetng
 # guesses the encoding (the Firefox detector); encoding_rs does the transcode.
 encoding_rs = "0.8"
-chardetng = "0.1"
+chardetng = "1.0"
 
 [target.'cfg(windows)'.dependencies]
 # Access the existing WebView2 settings used by Tauri so browser-only
