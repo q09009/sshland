@@ -54,7 +54,7 @@ export const TextInput = forwardRef<
     <input
       ref={ref}
       aria-invalid={invalid || undefined}
-      className={`w-full rounded-lg border bg-ink-900 px-3.5 py-2.5 text-sm text-slate-100 shadow-control outline-none transition-colors duration-fast ease-spatial placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-60 ${
+      className={`w-full rounded-lg border bg-ink-900 px-3.5 py-2.5 text-sm text-slate-100 shadow-control outline-hidden transition-colors duration-fast ease-spatial placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-60 ${
         invalid
           ? "border-red-500/70 focus:border-red-400 focus:ring-2 focus:ring-red-500/20"
           : "border-ink-700 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/25"
@@ -83,7 +83,7 @@ export function Button({
   return (
     <button
       disabled={disabled || busy}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium shadow-control outline-none transition-colors duration-fast ease-spatial focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-800 disabled:cursor-not-allowed disabled:opacity-60 ${variantClass} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium shadow-control outline-hidden transition-colors duration-fast ease-spatial focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-800 disabled:cursor-not-allowed disabled:opacity-60 ${variantClass} ${className}`}
       {...props}
     >
       {busy && <Spinner />}
@@ -155,7 +155,7 @@ export function SegmentedControl<T extends string>({
             disabled={disabled}
             onClick={() => onChange(option.value)}
             onKeyDown={(event) => handleKeyDown(event, index)}
-            className={`rounded-md px-3 py-2 text-sm font-medium outline-none transition-all duration-fast ease-spatial focus-visible:ring-2 focus-visible:ring-sky-500/50 disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`rounded-md px-3 py-2 text-sm font-medium outline-hidden transition-all duration-fast ease-spatial focus-visible:ring-2 focus-visible:ring-sky-500/50 disabled:cursor-not-allowed disabled:opacity-60 ${
               active
                 ? "bg-ink-700 text-slate-100 shadow-control"
                 : "text-slate-400 hover:bg-ink-800 hover:text-slate-200"

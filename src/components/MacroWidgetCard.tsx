@@ -261,7 +261,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
                   )}
                 </button>
                 {open && hasOutput && (
-                  <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words border-t border-ink-700/40 bg-ink-900/50 px-2 py-1 font-mono text-2xs text-slate-400">
+                  <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-break-word border-t border-ink-700/40 bg-ink-900/50 px-2 py-1 font-mono text-2xs text-slate-400">
                     {st.output}
                   </pre>
                 )}
@@ -283,7 +283,7 @@ export default function MacroWidgetCard({ macro }: { macro: Macro }) {
           </div>
           <pre
             ref={rawViewRef}
-            className="max-h-28 overflow-auto whitespace-pre-wrap break-words bg-ink-900 px-2 py-1 font-mono text-2xs text-slate-400"
+            className="max-h-28 overflow-auto whitespace-pre-wrap wrap-break-word bg-ink-900 px-2 py-1 font-mono text-2xs text-slate-400"
           >
             {liveText.trim() === "" ? "…" : liveText}
           </pre>

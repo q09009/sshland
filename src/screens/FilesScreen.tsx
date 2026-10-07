@@ -1457,7 +1457,7 @@ export default function FilesScreen({ id }: { id: string }) {
             }
             onChange={(event) => void loadDir(event.target.value, "local")}
             aria-label={t("files.scope.drive")}
-            className="max-w-16 rounded border border-ink-700 bg-ink-900 px-1 py-1 font-mono text-2xs text-slate-300 outline-none focus:border-sky-600"
+            className="max-w-16 rounded border border-ink-700 bg-ink-900 px-1 py-1 font-mono text-2xs text-slate-300 outline-hidden focus:border-sky-600"
           >
             {localRoots.map((root) => <option key={root}>{root}</option>)}
           </select>
@@ -1523,7 +1523,7 @@ export default function FilesScreen({ id }: { id: string }) {
             }
             aria-label={t("files.search.label")}
             aria-busy={searching}
-            className={`w-full rounded-md border border-ink-700 bg-ink-900 py-1 pl-6 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-sky-600 focus:ring-1 focus:ring-sky-600/40 ${
+            className={`w-full rounded-md border border-ink-700 bg-ink-900 py-1 pl-6 text-xs text-slate-200 outline-hidden placeholder:text-slate-600 focus:border-sky-600 focus:ring-1 focus:ring-sky-600/40 ${
               effectiveSearchEngine === "filter" ? "pr-2" : "pr-7"
             }`}
           />
@@ -1615,7 +1615,7 @@ export default function FilesScreen({ id }: { id: string }) {
       )}
 
       {isDragging && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-sky-400 bg-sky-950/60 backdrop-blur-sm">
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-sky-400 bg-sky-950/60 backdrop-blur-xs">
           <div className="rounded-2xl px-10 py-8 text-center">
             <div className="text-lg font-medium text-sky-200">
               {scope === "remote" ? t("files.drop.title") : t("files.drop.localTitle")}

@@ -9,6 +9,12 @@ updates:
       time: "09:00"
       timezone: Asia/Seoul
     open-pull-requests-limit: 5
+    # Core Tauri minor upgrades must update npm and Cargo together.
+    ignore:
+      - dependency-name: "@tauri-apps/api"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "@tauri-apps/cli"
+        update-types: ["version-update:semver-minor"]
     groups:
       npm-minor-and-patch:
         patterns: ["*"]
@@ -22,6 +28,9 @@ updates:
       time: "09:05"
       timezone: Asia/Seoul
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: tauri
+        update-types: ["version-update:semver-minor"]
     groups:
       cargo-minor-and-patch:
         patterns: ["*"]

@@ -1,6 +1,109 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+/* Inline utilities read the existing runtime tokens directly, including RGB
+   channels and user theme overrides, instead of treating them as CSS colors. */
+@theme inline {
+  --color-ink-600: rgb(var(--color-ink-600));
+  --color-ink-700: rgb(var(--color-ink-700));
+  --color-ink-800: rgb(var(--color-ink-800));
+  --color-ink-900: rgb(var(--color-ink-900));
+
+  --color-slate-100: rgb(var(--color-slate-100));
+  --color-slate-200: rgb(var(--color-slate-200));
+  --color-slate-300: rgb(var(--color-slate-300));
+  --color-slate-400: rgb(var(--color-slate-400));
+  --color-slate-500: rgb(var(--color-slate-500));
+  --color-slate-600: rgb(var(--color-slate-600));
+
+  --color-sky-200: rgb(var(--color-sky-200));
+  --color-sky-300: rgb(var(--color-sky-300));
+  --color-sky-400: rgb(var(--color-sky-400));
+  --color-sky-500: rgb(var(--color-sky-500));
+  --color-sky-600: rgb(var(--color-sky-600));
+  --color-sky-950: rgb(var(--color-sky-950));
+
+  --color-emerald-300: rgb(var(--color-emerald-300));
+  --color-emerald-400: rgb(var(--color-emerald-400));
+  --color-emerald-500: rgb(var(--color-emerald-500));
+
+  --color-amber-400: rgb(var(--color-amber-400));
+  --color-amber-500: rgb(var(--color-amber-500));
+
+  --color-red-200: rgb(var(--color-red-200));
+  --color-red-300: rgb(var(--color-red-300));
+  --color-red-400: rgb(var(--color-red-400));
+  --color-red-500: rgb(var(--color-red-500));
+  --color-red-600: rgb(var(--color-red-600));
+  --color-red-950: rgb(var(--color-red-950));
+
+  --color-overlay: rgb(var(--color-overlay));
+  --color-on-accent: rgb(var(--color-on-accent));
+  --color-control-knob: rgb(var(--color-control-knob));
+  --color-symlink: rgb(var(--color-symlink));
+
+  --color-surface-pane: rgb(var(--color-surface-pane));
+  --color-surface-card: rgb(var(--color-surface-card));
+  --color-surface-popover: rgb(var(--color-surface-popover));
+  --color-surface-dialog: rgb(var(--color-surface-dialog));
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --text-2xs: var(--text-2xs);
+  --text-xs: var(--text-xs);
+  --text-xs--line-height: var(--leading-xs);
+  --text-sm: var(--text-sm);
+  --text-sm--line-height: var(--leading-sm);
+  --text-base: var(--text-base);
+  --text-base--line-height: var(--leading-base);
+  --text-lg: var(--text-lg);
+  --text-lg--line-height: var(--leading-lg);
+  --text-xl: var(--text-xl);
+  --text-xl--line-height: var(--leading-xl);
+  --text-2xl: var(--text-2xl);
+  --text-2xl--line-height: var(--leading-2xl);
+  --text-3xl: var(--text-3xl);
+  --text-3xl--line-height: var(--leading-3xl);
+
+  --radius-none: 0px;
+  --radius-sm: var(--radius-sm);
+  --radius: var(--radius);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-full: var(--radius-full);
+
+  --shadow-control: var(--shadow-control);
+  --shadow-popover: var(--shadow-popover);
+  --shadow-dialog: var(--shadow-dialog);
+
+  --transition-duration-instant: var(--duration-instant);
+  --transition-duration-fast: var(--duration-fast);
+  --transition-duration-normal: var(--duration-normal);
+  --transition-duration-slow: var(--duration-slow);
+
+  --ease-standard: var(--ease-standard);
+  --ease-spatial: var(--ease-spatial);
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
 
 /*
  * ============================================================================

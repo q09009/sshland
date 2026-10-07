@@ -521,7 +521,7 @@ export function PromptDialog({
           onChange={(e) => setValue(e.target.value)}
           placeholder={placeholder}
           spellCheck={false}
-          className="mt-4 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+          className="mt-4 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40"
         />
         <div className="mt-6 flex justify-end gap-2">
           <button

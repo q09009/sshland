@@ -752,7 +752,7 @@ export default function EditorPane({
           <span title={t("editor.status.lineEnding")}>{lineEnding}</span>
           <span title={t("editor.status.encoding")}>{encoding}</span>
           <span title={t("editor.status.fontSize")}>{fontSize}px</span>
-          <span ref={positionRef} className="min-w-[5.5rem] text-right" />
+          <span ref={positionRef} className="min-w-22 text-right" />
         </div>
       )}
     </div>

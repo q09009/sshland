@@ -151,7 +151,7 @@ function KeyValueCardWidget({ data }: { data: KeyValueData }) {
           <div className="truncate text-2xs uppercase tracking-wide text-slate-500" title={p.key}>
             {p.key}
           </div>
-          <div className="mt-0.5 break-words font-mono text-xs text-slate-200">
+          <div className="mt-0.5 wrap-break-word font-mono text-xs text-slate-200">
             {p.value}
           </div>
         </div>

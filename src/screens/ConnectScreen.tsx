@@ -275,7 +275,7 @@ export default function ConnectScreen() {
                     onClick={pickKeyFile}
                     title={keyPath || undefined}
                     tabIndex={isPassword ? -1 : 0}
-                    className="flex w-full items-center gap-2 truncate rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-left text-sm text-slate-200 hover:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/50"
+                    className="flex w-full items-center gap-2 truncate rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-left text-sm text-slate-200 hover:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/50"
                   >
                     <FolderIcon />
                     <span className="truncate">
@@ -353,7 +353,7 @@ export default function ConnectScreen() {
 }
 
 const inputClass =
-  "w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40";
+  "w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -380,7 +380,7 @@ function SegButton({
       aria-checked={active}
       onClick={onClick}
       className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast ease-standard ${
-        active ? "bg-ink-700 text-sky-400 shadow" : "text-slate-400 hover:text-slate-200"
+        active ? "bg-ink-700 text-sky-400 shadow-sm" : "text-slate-400 hover:text-slate-200"
       }`}
     >
       {children}

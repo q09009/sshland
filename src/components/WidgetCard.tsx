@@ -324,7 +324,7 @@ function IntervalInput({
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
         }}
         title={t("dashboard.card.interval", { seconds: MIN_REFRESH_SECONDS })}
-        className="w-9 rounded bg-ink-900 px-1 py-0.5 text-right text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-600/50"
+        className="w-9 rounded bg-ink-900 px-1 py-0.5 text-right text-slate-300 focus:outline-hidden focus:ring-1 focus:ring-sky-600/50"
       />
       <span className="pl-0.5">{t("common.seconds")}</span>
     </span>

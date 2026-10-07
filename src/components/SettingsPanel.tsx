@@ -101,7 +101,7 @@ export default function SettingsPanel() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-xs"
       onMouseDown={close}
     >
       <div
@@ -353,7 +353,7 @@ function DashboardSection() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
               }}
-              className="w-16 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-right text-slate-100 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+              className="w-16 rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-right text-slate-100 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40"
             />
             <span className="text-slate-500">{t("common.seconds")}</span>
           </span>
@@ -884,7 +884,7 @@ function ThemeSection() {
             const preset = presets.find((item) => item.id === id);
             if (preset) void applyPreset(preset);
           }}
-          className="mt-3 w-full rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40 disabled:opacity-50"
+          className="mt-3 w-full rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40 disabled:opacity-50"
         >
           <option value="">{t("settings.theme.presets.custom")}</option>
           {presets.map((preset) => (
@@ -1046,7 +1046,7 @@ function ThemeSection() {
             onChange={(event) =>
               update({ motion: event.target.value as MotionPreference })
             }
-            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40"
           >
             <option value="normal">{t("settings.theme.motion.normal")}</option>
             <option value="reduced">{t("settings.theme.motion.reduced")}</option>
@@ -1060,7 +1060,7 @@ function ThemeSection() {
             onChange={(event) =>
               update({ uiFont: event.target.value as UiFontPreference })
             }
-            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40"
           >
             <option value="default">{t("settings.theme.font.default")}</option>
             <option value="system">{t("settings.theme.font.system")}</option>
@@ -1074,7 +1074,7 @@ function ThemeSection() {
             onChange={(event) =>
               update({ terminalFont: event.target.value as TerminalFontPreference })
             }
-            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 font-mono text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 font-mono text-sm text-slate-200 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40"
           >
             <option value="default">{t("settings.theme.font.default")}</option>
             <option value="cascadia">Cascadia Code</option>
@@ -1140,7 +1140,7 @@ function GeneralSection() {
             onChange={(event) =>
               set("language", event.target.value as AppLanguage)
             }
-            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40"
           >
             <option value="system">{t("language.system")}</option>
             <option value="ko">{t("language.ko")}</option>

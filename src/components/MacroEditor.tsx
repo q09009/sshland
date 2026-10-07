@@ -93,7 +93,7 @@ export default function MacroEditor({
             onChange={(e) => setName(e.target.value)}
             placeholder={t("macro.editor.namePlaceholder")}
             spellCheck={false}
-            className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/40"
+            className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-600 focus:outline-hidden focus:ring-2 focus:ring-sky-600/40"
           />
 
           <div className="mt-4 mb-1 flex items-center justify-between">
@@ -138,14 +138,14 @@ export default function MacroEditor({
                         onChange={(e) => setStep(st.id, { label: e.target.value })}
                         placeholder={t("macro.editor.stepLabelPlaceholder")}
                         spellCheck={false}
-                        className="w-full rounded border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-slate-200 placeholder-slate-600 focus:border-sky-600 focus:outline-none"
+                        className="w-full rounded border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-slate-200 placeholder-slate-600 focus:border-sky-600 focus:outline-hidden"
                       />
                       <input
                         value={st.command}
                         onChange={(e) => setStep(st.id, { command: e.target.value })}
                         placeholder={t("macro.editor.commandPlaceholder")}
                         spellCheck={false}
-                        className="w-full rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-sky-600 focus:outline-none"
+                        className="w-full rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-sky-600 focus:outline-hidden"
                       />
                     </div>
                     <button
@@ -184,7 +184,7 @@ export default function MacroEditor({
       </div>
 
       {stepsDragging && (
-        <div className="fixed inset-0 z-[60]" style={{ cursor: "grabbing" }} />
+        <div className="fixed inset-0 z-60" style={{ cursor: "grabbing" }} />
       )}
     </div>
   );

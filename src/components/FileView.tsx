@@ -55,7 +55,7 @@ function DetailsView(props: Props) {
   const { t } = useI18n();
   return (
     <table className="w-full text-sm">
-      <thead className="sticky top-0 bg-ink-800/95 text-xs text-slate-400 backdrop-blur">
+      <thead className="sticky top-0 bg-ink-800/95 text-xs text-slate-400 backdrop-blur-sm">
         <tr className="border-b border-ink-700/60">
           <th className="px-4 py-2 text-left font-medium">{t("files.column.name")}</th>
           <th className="w-28 px-4 py-2 text-right font-medium">{t("files.column.size")}</th>
@@ -150,7 +150,7 @@ function GridView(props: Props) {
           } ${entry.isDir ? "cursor-pointer" : ""}`}
         >
           <FileIcon entry={entry} className="h-12 w-12" />
-          <span className="line-clamp-2 w-full break-words text-xs leading-tight text-slate-200">
+          <span className="line-clamp-2 w-full wrap-break-word text-xs leading-tight text-slate-200">
             {entry.name}
           </span>
           <EntryLocation

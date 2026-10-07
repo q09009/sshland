@@ -141,7 +141,7 @@ export default function CommandPalette() {
           placeholder={t("palette.placeholder")}
           aria-label={t("palette.search")}
           spellCheck={false}
-          className="w-full border-b border-ink-700 bg-ink-900 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-sky-500"
+          className="w-full border-b border-ink-700 bg-ink-900 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 outline-hidden focus:border-sky-500"
         />
 
         <div className="max-h-80 overflow-y-auto p-1" role="listbox">

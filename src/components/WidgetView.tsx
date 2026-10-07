@@ -214,7 +214,7 @@ function KeyValueCardWidget({ data }: { data: KeyValueData }) {
           >
             {p.key}
           </div>
-          <div className="mt-0.5 break-words font-mono text-2xs text-slate-200">
+          <div className="mt-0.5 wrap-break-word font-mono text-2xs text-slate-200">
             {p.value}
           </div>
         </div>
